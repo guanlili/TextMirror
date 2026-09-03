@@ -23,6 +23,7 @@ export function asyncDocumentProofreadApi(data: {
   file_id: string
   check_types?: string[]
   domain?: string
+  config_id?: number
 }): Promise<{ task_id: string; message: string }> {
   return request.post('/document/proofread/async', data)
 }

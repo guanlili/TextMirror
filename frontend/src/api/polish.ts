@@ -113,14 +113,15 @@ export function polishCompareStreamApi(
   return { promise, abort: () => controller.abort() }
 }
 
-/** 可用模型配置（多模型对比用，不含密钥） */
+/** 可用模型配置（多模型对比/校对选模型用，不含密钥） */
 export interface AvailableModel {
   id: number
   name: string
   model: string
+  is_active?: boolean
 }
 
-/** 获取可用于对比的已启用模型列表 */
+/** 获取可用于对比/校对选择的已启用模型列表 */
 export function getAvailableModelsApi(): Promise<{ models: AvailableModel[] }> {
   return request.get('/polish/models')
 }

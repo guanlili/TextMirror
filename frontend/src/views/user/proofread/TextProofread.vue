@@ -47,6 +47,43 @@
               <el-radio value="meter">电能表</el-radio>
             </el-radio-group>
           </div>
+          <div v-if="modelOptions.length > 1" class="setting-row">
+            <span class="setting-label">校对模型：</span>
+            <el-checkbox v-model="compareMode" size="small" style="margin-right: 10px;">多模型对比</el-checkbox>
+            <template v-if="compareMode">
+              <el-select
+                v-model="compareModelIds"
+                multiple
+                collapse-tags
+                size="default"
+                class="setting-value"
+                style="max-width: 420px;"
+                placeholder="选择 2-4 个模型并发校对"
+              >
+                <el-option
+                  v-for="m in modelOptions"
+                  :key="m.id"
+                  :label="`${m.name}（${m.model}）`"
+                  :value="m.id"
+                />
+              </el-select>
+            </template>
+            <el-select
+              v-else
+              v-model="selectedModelId"
+              size="default"
+              class="setting-value"
+              style="max-width: 320px;"
+              placeholder="默认当前模型"
+            >
+              <el-option
+                v-for="m in modelOptions"
+                :key="m.id"
+                :label="m.is_active ? `${m.name}（${m.model}）· 当前` : `${m.name}（${m.model}）`"
+                :value="m.id"
+              />
+            </el-select>
+          </div>
         </div>
 
         <!-- 操作按钮 -->
@@ -55,11 +92,11 @@
             type="primary"
             size="large"
             :loading="loading"
-            :disabled="!inputText.trim()"
+            :disabled="!inputText.trim() || (compareMode && !canCompare)"
             @click="handleProofread"
           >
             <el-icon><Edit /></el-icon>
-            {{ loading ? '校对中...' : '开始校对' }}
+            {{ loading ? '校对中...' : (compareMode ? '开始对比校对' : '开始校对') }}
           </el-button>
           <el-button size="large" @click="inputText = ''">清空</el-button>
           <span class="text-count">{{ inputText.length }} 字</span>
@@ -69,6 +106,200 @@
 
     <!-- 结果区域 -->
     <div v-else class="result-section">
+      <!-- ===== 多模型对比视图 ===== -->
+      <template v-if="compareResult">
+        <div class="result-toolbar">
+          <el-button @click="goBack">
+            <el-icon><Back /></el-icon>返回编辑
+          </el-button>
+          <div class="toolbar-info">
+            <el-tag type="success">共识问题 {{ compareResult.consensus_originals.length }} 个</el-tag>
+            <el-tag type="info">领域：{{ domainLabel }}</el-tag>
+            <el-tag type="warning">已接受 {{ compareAcceptedCount }} 条</el-tag>
+          </div>
+          <div class="toolbar-actions">
+            <el-button type="warning" @click="handleCompareAcceptAll" :disabled="comparePendingCount === 0">
+              一键接受全部
+            </el-button>
+            <el-button @click="handleCopy">复制结果</el-button>
+            <el-dropdown @command="handleExport">
+              <el-button type="primary">
+                导出<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="text">修改后全文（TXT）</el-dropdown-item>
+                  <el-dropdown-item command="report">问题报告（TXT，含原文对照）</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
+        </div>
+
+        <!-- 修改结果预览 -->
+        <el-card class="compare-card" style="margin-bottom: 14px;">
+          <template #header>
+            <div class="column-header">
+              <span class="column-title"><el-icon><Tickets /></el-icon>修改后全文（实时预览）</span>
+              <span class="text-count">{{ currentText.length }} 字</span>
+            </div>
+          </template>
+          <div class="compare-text-preview">{{ currentText }}</div>
+        </el-card>
+
+        <!-- 各模型结果标签页 -->
+        <el-card class="compare-card">
+          <el-tabs v-model="activeCompareTab">
+            <!-- ===== 汇总建议（综合多模型意见） ===== -->
+            <el-tab-pane name="__summary__">
+              <template #label>
+                <span style="font-weight: 600;">综合建议</span>
+                <el-tag type="danger" size="small" style="margin-left: 6px;">{{ summaryStats.total }}</el-tag>
+              </template>
+
+              <!-- 统计卡 -->
+              <div class="summary-stats">
+                <div class="stat-item">
+                  <div class="stat-num is-consensus">{{ summaryStats.consensus }}</div>
+                  <div class="stat-label">多模型一致</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-num is-unique">{{ summaryStats.unique }}</div>
+                  <div class="stat-label">单模型发现（待把关）</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-num is-accepted">{{ compareAcceptedCount }}</div>
+                  <div class="stat-label">已接受</div>
+                </div>
+                <div class="stat-item" v-for="r in summaryStats.models" :key="r.id">
+                  <div class="stat-num">{{ r.count }}</div>
+                  <div class="stat-label">{{ r.name }}</div>
+                </div>
+              </div>
+
+              <!-- 分级接受策略 -->
+              <div class="summary-strategy">
+                <span class="strategy-label">一键应用：</span>
+                <el-button size="small" type="success" plain @click="handleAcceptByStrategy('consensus')" :disabled="summaryStats.consensusPending === 0">
+                  只接受多模型一致（{{ summaryStats.consensusPending }} 条）
+                </el-button>
+                <el-button size="small" type="warning" plain @click="handleAcceptByStrategy('high')" :disabled="summaryStats.highPending === 0">
+                  一致 + 高严重度独有（{{ summaryStats.highPending }} 条）
+                </el-button>
+                <el-button size="small" type="danger" plain @click="handleAcceptByStrategy('all')" :disabled="comparePendingCount === 0">
+                  全部（{{ comparePendingCount }} 条）
+                </el-button>
+              </div>
+
+              <!-- 汇总问题列表：共识在前，独有按模型数×严重度排序 -->
+              <div class="compare-issues">
+                <div
+                  v-for="(item, i) in summaryIssues"
+                  :key="i"
+                  class="compare-issue-item"
+                  :class="{ 'is-consensus': item.isConsensus, 'is-accepted': item.issue._accepted, 'is-ignored': item.issue._ignored }"
+                >
+                  <div class="issue-head">
+                    <el-tag :type="severityColor(item.issue.severity)" size="small">{{ typeLabel(item.issue.type) }}</el-tag>
+                    <el-tag :type="item.isConsensus ? 'success' : 'warning'" size="small" effect="plain">
+                      {{ item.isConsensus ? `${item.modelCount} 个模型一致` : '仅 1 个模型发现' }}
+                    </el-tag>
+                    <span class="issue-source">{{ item.sources }}</span>
+                  </div>
+                  <div class="issue-body">
+                    <div><span class="label">原文：</span><span class="text-del">{{ item.issue.original }}</span></div>
+                    <div><span class="label">建议：</span><span class="text-add">{{ item.issue.suggestion }}</span></div>
+                    <div v-if="item.issue.explanation"><span class="label">说明：</span><span class="text-muted">{{ item.issue.explanation }}</span></div>
+                  </div>
+                  <div class="issue-actions" v-if="!item.issue._accepted && !item.issue._ignored">
+                    <el-button type="primary" size="small" @click="acceptCompareIssue(item.issue)">
+                      <el-icon><Check /></el-icon>接受修改
+                    </el-button>
+                    <el-button size="small" @click="item.issue._ignored = true; syncCompareIssueState(item.issue)">
+                      <el-icon><Close /></el-icon>忽略
+                    </el-button>
+                  </div>
+                  <div class="issue-status" v-else>
+                    <el-tag v-if="item.issue._accepted" type="success" size="small">已接受</el-tag>
+                    <el-tag v-if="item.issue._ignored" type="info" size="small">已忽略</el-tag>
+                    <el-button text size="small" @click="undoCompareIssue(item.issue)">撤销</el-button>
+                  </div>
+                </div>
+                <el-empty v-if="summaryIssues.length === 0" description="没有发现任何问题" :image-size="60" />
+              </div>
+            </el-tab-pane>
+
+            <!-- ===== 各模型明细 ===== -->
+            <el-tab-pane
+              v-for="r in compareResult.results"
+              :key="r.config_id"
+              :name="String(r.config_id)"
+            >
+              <template #label>
+                <span>{{ r.config_name }}</span>
+                <el-tag
+                  :type="r.success ? (comparePendingCountOf(r) > 0 ? 'danger' : 'success') : 'info'"
+                  size="small"
+                  style="margin-left: 6px;"
+                >{{ r.success ? comparePendingCountOf(r) : '失败' }}</el-tag>
+              </template>
+
+              <div v-if="!r.success" class="compare-error">
+                <el-alert type="error" :closable="false" show-icon :title="`校对失败：${r.error || '未知错误'}`" />
+              </div>
+              <template v-else>
+                <div class="compare-meta">
+                  <el-tag type="info" effect="plain" size="small">模型：{{ r.model }}</el-tag>
+                  <el-tag type="info" effect="plain" size="small">耗时 {{ (r.elapsed_ms / 1000).toFixed(1) }}s</el-tag>
+                  <el-tag type="success" effect="plain" size="small">
+                    独有 {{ (compareResult.only_in[String(r.config_id)] || []).length }} 个
+                  </el-tag>
+                </div>
+                <div class="compare-issues">
+                  <div
+                    v-for="(issue, i) in r.issues"
+                    :key="i"
+                    class="compare-issue-item"
+                    :class="{ 'is-consensus': compareResult.consensus_originals.includes(issue.original), 'is-accepted': issue._accepted, 'is-ignored': issue._ignored }"
+                  >
+                    <div class="issue-head">
+                      <el-tag :type="severityColor(issue.severity)" size="small">{{ typeLabel(issue.type) }}</el-tag>
+                      <el-tag
+                        :type="compareResult.consensus_originals.includes(issue.original) ? 'success' : 'warning'"
+                        size="small" effect="plain"
+                      >
+                        {{ compareResult.consensus_originals.includes(issue.original) ? '共识' : '独有' }}
+                      </el-tag>
+                    </div>
+                    <div class="issue-body">
+                      <div><span class="label">原文：</span><span class="text-del">{{ issue.original }}</span></div>
+                      <div><span class="label">建议：</span><span class="text-add">{{ issue.suggestion }}</span></div>
+                      <div v-if="issue.explanation"><span class="label">说明：</span><span class="text-muted">{{ issue.explanation }}</span></div>
+                    </div>
+                    <div class="issue-actions" v-if="!issue._accepted && !issue._ignored">
+                      <el-button type="primary" size="small" @click="acceptCompareIssue(issue)">
+                        <el-icon><Check /></el-icon>接受修改
+                      </el-button>
+                      <el-button size="small" @click="issue._ignored = true">
+                        <el-icon><Close /></el-icon>忽略
+                      </el-button>
+                    </div>
+                    <div class="issue-status" v-else>
+                      <el-tag v-if="issue._accepted" type="success" size="small">已接受</el-tag>
+                      <el-tag v-if="issue._ignored" type="info" size="small">已忽略</el-tag>
+                      <el-button text size="small" @click="undoCompareIssue(issue)">撤销</el-button>
+                    </div>
+                  </div>
+                  <el-empty v-if="r.issues.length === 0" description="该模型未发现问题" :image-size="60" />
+                </div>
+              </template>
+            </el-tab-pane>
+          </el-tabs>
+        </el-card>
+      </template>
+
+      <!-- ===== 普通单模型视图 ===== -->
+      <template v-else>
       <!-- 顶部操作栏 -->
       <div class="result-toolbar">
         <el-button @click="goBack">
@@ -207,6 +438,7 @@
           </div>
         </el-card>
       </div>
+      </template>
     </div>
   </div>
 </template>
@@ -214,7 +446,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { textProofreadApi, type ProofreadIssue } from '@/api/proofread'
+import { textProofreadApi, proofreadCompareApi, type ProofreadIssue, type ProofreadCompareResponse } from '@/api/proofread'
+import { getAvailableModelsApi, type AvailableModel } from '@/api/polish'
 
 interface IssueWithStatus extends ProofreadIssue {
   _accepted?: boolean
@@ -242,6 +475,182 @@ onMounted(() => {
 // 设置
 const checkTypes = ref<string[]>(['typo', 'grammar', 'punctuation', 'style'])
 const domain = ref('general')
+
+// 校对模型选择（默认当前活跃模型）
+const modelOptions = ref<AvailableModel[]>([])
+const selectedModelId = ref<number | null>(null)
+
+// 多模型对比
+const compareMode = ref(false)
+const compareModelIds = ref<number[]>([])
+const compareResult = ref<ProofreadCompareResponse | null>(null)
+const activeCompareTab = ref('')
+const canCompare = computed(() => compareModelIds.value.length >= 2)
+
+/** 对比视图：所有模型问题的扁平列表（用于统计与批量操作；共识问题只计一次） */
+const compareAllIssues = computed(() => {
+  if (!compareResult.value) return []
+  const seen = new Set<string>()
+  const list: any[] = []
+  for (const r of compareResult.value.results) {
+    if (!r.success) continue
+    for (const issue of r.issues) {
+      const key = (issue.original || '').trim()
+      // 同一原文多个模型都报：操作绑定第一个出现的对象，其余跟随其状态
+      if (seen.has(key)) continue
+      seen.add(key)
+      list.push(issue)
+    }
+  }
+  return list
+})
+
+/** 汇总建议：每个问题聚合各模型意见（发现该问题的模型名列表 + 排序） */
+const summaryIssues = computed(() => {
+  if (!compareResult.value) return []
+  const okModels = compareResult.value.results.filter(r => r.success)
+  const map = new Map<string, { issue: any; models: string[]; isConsensus: boolean }>()
+  for (const r of okModels) {
+    for (const issue of r.issues) {
+      const key = (issue.original || '').trim()
+      if (!key) continue
+      if (!map.has(key)) {
+        map.set(key, { issue, models: [], isConsensus: false })
+      }
+      const entry = map.get(key)!
+      if (!entry.models.includes(r.config_name)) entry.models.push(r.config_name)
+    }
+  }
+  const total = okModels.length
+  const severityOrder: Record<string, number> = { error: 3, warning: 2, info: 1 }
+  const items = [...map.values()].map(e => ({
+    issue: e.issue,
+    modelCount: e.models.length,
+    isConsensus: total >= 2 && e.models.length >= 2,
+    sources: e.models.join(' / '),
+  }))
+  // 排序：共识在前；同组内按 模型数 desc → 严重度 desc
+  items.sort((a, b) => {
+    if (a.isConsensus !== b.isConsensus) return a.isConsensus ? -1 : 1
+    if (a.modelCount !== b.modelCount) return b.modelCount - a.modelCount
+    return (severityOrder[b.issue.severity] || 0) - (severityOrder[a.issue.severity] || 0)
+  })
+  return items
+})
+
+const summaryStats = computed(() => {
+  const items = summaryIssues.value
+  const consensus = items.filter(i => i.isConsensus)
+  const unique = items.filter(i => !i.isConsensus)
+  const highUnique = unique.filter(i => i.issue.severity === 'error')
+  const models: { id: number; name: string; count: number }[] = []
+  if (compareResult.value) {
+    for (const r of compareResult.value.results) {
+      if (r.success) models.push({ id: r.config_id, name: r.config_name, count: r.total_issues })
+    }
+  }
+  return {
+    total: items.length,
+    consensus: consensus.length,
+    unique: unique.length,
+    consensusPending: consensus.filter(i => !i.issue._accepted && !i.issue._ignored).length,
+    highPending: [...consensus, ...highUnique].filter(i => !i.issue._accepted && !i.issue._ignored).length,
+    models,
+  }
+})
+
+/** 分级一键接受：consensus=仅共识；high=共识+高严重度独有；all=全部 */
+async function handleAcceptByStrategy(level: 'consensus' | 'high' | 'all') {
+  let targets = summaryIssues.value.filter(i => !i.issue._accepted && !i.issue._ignored && i.issue.original && i.issue.suggestion)
+  if (level === 'consensus') targets = targets.filter(i => i.isConsensus)
+  else if (level === 'high') targets = targets.filter(i => i.isConsensus || i.issue.severity === 'error')
+  if (targets.length === 0) return
+
+  const labels = { consensus: '多模型一致', high: '一致 + 高严重度独有', all: '全部' }
+  try {
+    await ElMessageBox.confirm(
+      `确认接受 ${labels[level]}的 ${targets.length} 条修改建议？`,
+      '一键应用',
+      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
+    )
+    for (const item of targets) {
+      currentText.value = currentText.value.replace(item.issue.original, item.issue.suggestion)
+      item.issue._accepted = true
+      syncCompareIssueState(item.issue)
+    }
+    ElMessage.success(`已接受 ${targets.length} 条修改`)
+  } catch {
+    // 取消
+  }
+}
+const compareAcceptedCount = computed(() => compareAllIssues.value.filter(i => i._accepted).length)
+const comparePendingCount = computed(() => compareAllIssues.value.filter(i => !i._accepted && !i._ignored).length)
+function comparePendingCountOf(r: { issues: any[] }): number {
+  return r.issues.filter(i => !i._accepted && !i._ignored).length
+}
+
+/** 对比视图：接受单条修改（同步应用到全文预览；共识问题在其他模型页同步状态） */
+function acceptCompareIssue(issue: any) {
+  if (issue.original && issue.suggestion) {
+    currentText.value = currentText.value.replace(issue.original, issue.suggestion)
+  }
+  issue._accepted = true
+  syncCompareIssueState(issue)
+}
+
+/** 同一原文在多个模型结果里出现时，保持状态一致 */
+function syncCompareIssueState(source: any) {
+  if (!compareResult.value) return
+  const key = (source.original || '').trim()
+  for (const r of compareResult.value.results) {
+    for (const issue of r.issues) {
+      if ((issue.original || '').trim() === key) {
+        issue._accepted = source._accepted
+        issue._ignored = source._ignored
+      }
+    }
+  }
+}
+
+/** 对比视图：撤销单条 */
+function undoCompareIssue(issue: any) {
+  if (issue._accepted && issue.original && issue.suggestion) {
+    currentText.value = currentText.value.replace(issue.suggestion, issue.original)
+  }
+  issue._accepted = false
+  issue._ignored = false
+  syncCompareIssueState(issue)
+}
+
+/** 对比视图：一键接受全部待处理问题 */
+async function handleCompareAcceptAll() {
+  const pending = compareAllIssues.value.filter(i => !i._accepted && !i._ignored && i.original && i.suggestion)
+  if (pending.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `确认接受全部 ${pending.length} 条修改建议？`,
+      '一键修改',
+      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
+    )
+    for (const issue of pending) {
+      currentText.value = currentText.value.replace(issue.original, issue.suggestion)
+      issue._accepted = true
+      syncCompareIssueState(issue)
+    }
+    ElMessage.success('已接受所有修改')
+  } catch {
+    // 取消
+  }
+}
+
+onMounted(async () => {
+  try {
+    const res = await getAvailableModelsApi()
+    modelOptions.value = res.models
+    const active = res.models.find(m => m.is_active)
+    selectedModelId.value = active ? active.id : (res.models[0]?.id ?? null)
+  } catch { /* 模型列表加载失败时用默认活跃模型 */ }
+})
 
 // 领域标签
 const domainLabel = computed(() => {
@@ -330,12 +739,37 @@ function typeLabel(type: string): string {
 // 开始校对
 async function handleProofread() {
   if (!inputText.value.trim()) return
+  // 多模型对比模式
+  if (compareMode.value) {
+    if (!canCompare.value) return ElMessage.warning('请至少选择 2 个模型')
+    loading.value = true
+    compareResult.value = null
+    try {
+      compareResult.value = await proofreadCompareApi({
+        text: inputText.value,
+        check_types: checkTypes.value.length > 0 ? checkTypes.value : undefined,
+        domain: domain.value,
+        config_ids: compareModelIds.value,
+      })
+      activeCompareTab.value = '__summary__'   // 默认展示综合建议
+      currentText.value = inputText.value   // 供接受修改/复制/导出使用
+      showResult.value = true
+      const okCount = compareResult.value.results.filter(r => r.success).length
+      ElMessage.success(`${okCount}/${compareResult.value.results.length} 个模型校对完成`)
+    } catch {
+      // 错误已在拦截器中处理
+    } finally {
+      loading.value = false
+    }
+    return
+  }
   loading.value = true
   try {
     const res = await textProofreadApi({
       text: inputText.value,
       check_types: checkTypes.value.length > 0 ? checkTypes.value : undefined,
       domain: domain.value,
+      config_id: selectedModelId.value ?? undefined,
     })
     issues.value = res.issues.map(i => ({ ...i, _accepted: false, _ignored: false }))
     currentText.value = inputText.value
@@ -449,6 +883,7 @@ function handleExport(kind: string) {
 // 返回编辑
 function goBack() {
   showResult.value = false
+  compareResult.value = null
 }
 </script>
 
@@ -785,5 +1220,141 @@ function goBack() {
       width: 100%;
     }
   }
+}
+
+/* ===== 多模型对比视图 ===== */
+.compare-card {
+  margin-top: 14px;
+}
+
+.summary-stats {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+
+  .stat-item {
+    min-width: 96px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: var(--surface-soft, #f7f9fc);
+    border: 1px solid var(--surface-border, #e5ebf3);
+    text-align: center;
+
+    .stat-num {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--color-text, #374151);
+
+      &.is-consensus { color: #3a8a3a; }
+      &.is-unique { color: #c04040; }
+      &.is-accepted { color: #286dd7; }
+    }
+
+    .stat-label {
+      margin-top: 2px;
+      font-size: 11px;
+      color: #8d99a9;
+    }
+  }
+}
+
+.summary-strategy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px dashed var(--surface-border, #e5ebf3);
+  border-radius: 10px;
+  background: var(--surface-soft, #f7f9fc);
+
+  .strategy-label {
+    font-size: 13px;
+    color: var(--color-text-secondary, #738197);
+    font-weight: 600;
+  }
+}
+
+.issue-source {
+  font-size: 11px;
+  color: #8d99a9;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.compare-meta {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.compare-issues {
+  max-height: 520px;
+  overflow-y: auto;
+}
+
+.compare-issue-item {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--surface-border, #e5ebf3);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+
+  &.is-consensus {
+    border-color: rgba(103, 194, 58, .45);
+    background: rgba(103, 194, 58, .05);
+  }
+
+  &.is-accepted {
+    border-color: rgba(103, 194, 58, .45);
+    opacity: .75;
+  }
+
+  &.is-ignored {
+    opacity: .5;
+  }
+
+  .issue-head {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 6px;
+    align-items: center;
+  }
+
+  .issue-actions, .issue-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .issue-body {
+    font-size: 13px;
+    line-height: 1.7;
+
+    .label { color: #8d99a9; }
+    .text-del { color: #c04040; text-decoration: line-through; }
+    .text-add { color: #3a8a3a; font-weight: 600; }
+    .text-muted { color: #8d99a9; }
+  }
+}
+
+.compare-text-preview {
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--color-text, #374151);
+  white-space: pre-wrap;
+  padding: 4px 2px;
+}
+
+.compare-error {
+  padding: 8px 0;
 }
 </style>

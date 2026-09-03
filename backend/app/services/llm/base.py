@@ -32,6 +32,8 @@ class BaseLLMProvider(ABC):
         self.model = model
         self.timeout = timeout
         self.max_retries = max_retries
+        # 默认采样温度；调用方可按场景覆盖（如校对场景设低值保证确定性）
+        self.default_temperature: float = 0.3
 
     @abstractmethod
     async def chat(

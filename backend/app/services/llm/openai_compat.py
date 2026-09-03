@@ -10,6 +10,7 @@ TextMirror 通用 OpenAI 兼容 Provider
   - 其他自建/转发网关
 """
 import json
+import re
 from typing import AsyncIterator, Optional, List, Dict
 
 import httpx
@@ -47,9 +48,9 @@ class OpenAICompatProvider(BaseLLMProvider):
             )
 
         # 智能确定 endpoint 顺序：避免重复 /v1 路径
-        # 若用户填写的 api_base 已包含 /v1（如 LiteLLM 的 http://x:4000/v1），
+        # 若 api_base 已含版本段（/v1 或 /v3，如 LiteLLM、火山方舟），
         # 则优先使用 /chat/completions，避免每次都先 404 再 fallback 浪费时间
-        if self.api_base.endswith("/v1"):
+        if re.search(r"/v\d+$", self.api_base):
             self._endpoints = ["/chat/completions", "/v1/chat/completions"]
         else:
             self._endpoints = ["/v1/chat/completions", "/chat/completions"]

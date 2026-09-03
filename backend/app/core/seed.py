@@ -364,30 +364,25 @@ async def seed_global_words(session):
 
 
 async def seed_llm_configs(session):
-    """初始化默认大模型配置"""
+    """初始化默认大模型配置（占位，密钥由管理员在后台填写）"""
     result = await session.execute(select(LLMConfig).limit(1))
     if result.scalar_one_or_none():
         logger.info("大模型配置已存在，跳过初始化")
         return
 
-    # 从 .env 读取 DeepSeek 配置作为默认
-    deepseek_key = settings.DEEPSEEK_API_KEY
-    if not deepseek_key or deepseek_key == "your-deepseek-api-key-here" or deepseek_key == "":
-        deepseek_key = "请在管理后台配置你的API密钥"
-
     configs = [
         LLMConfig(
             name="DeepSeek",
             provider="deepseek",
-            api_base=settings.DEEPSEEK_API_BASE or "https://api.deepseek.com",
-            api_key=deepseek_key,
-            model=settings.DEEPSEEK_MODEL or "deepseek-chat",
+            api_base="https://api.deepseek.com",
+            api_key="",
+            model="deepseek-chat",
             temperature=0.3,
             timeout=60,
             max_retries=3,
             is_active=True,
-            is_enabled=True,
-            remark="默认配置，从 .env 导入",
+            is_enabled=False,   # 密钥未填，停用状态；管理员填好 Key 启用即可
+            remark="默认占位配置，请在管理后台填写 API Key 后启用",
         ),
     ]
     session.add_all(configs)

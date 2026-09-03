@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import async_session_factory
+from app.core.secret_crypto import decrypt_secret
 from app.models.global_word import GlobalWord
 from app.models.llm_config import LLMConfig
 from app.services.llm.openai_compat import OpenAICompatProvider
@@ -134,47 +135,53 @@ PROOFREAD_USER_PROMPT = """请对以下文本进行全面审校，找出所有�
 {text}"""
 
 
-async def get_llm_provider() -> BaseLLMProvider:
+async def get_llm_provider(config_id: Optional[int] = None) -> BaseLLMProvider:
     """
     获取大模型 Provider 实例
-    优先从数据库读取活跃配置, 回退到 .env 中的 DeepSeek 配置
+    指定 config_id 时使用该配置（用户在校对页手动选模型），
+    否则使用数据库活跃配置。无可用配置时直接报错，引导管理员去后台配置。
     """
     try:
         async with async_session_factory() as session:
-            result = await session.execute(
-                select(LLMConfig).where(
-                    LLMConfig.is_active == True,
-                    LLMConfig.is_enabled == True,
+            if config_id is not None:
+                # 用户指定的模型配置（须启用）
+                result = await session.execute(
+                    select(LLMConfig).where(
+                        LLMConfig.id == config_id,
+                        LLMConfig.is_enabled == True,
+                    )
                 )
-            )
-            config = result.scalar_one_or_none()
-            if config:
-                logger.info(f"使用大模型: {config.name} ({config.provider}/{config.model})")
-                return OpenAICompatProvider(
-                    api_key=config.api_key,
-                    api_base=config.api_base,
-                    model=config.model,
-                    timeout=config.timeout,
-                    max_retries=config.max_retries,
-                    provider_name=config.name,
+                config = result.scalar_one_or_none()
+                if not config:
+                    raise RuntimeError(f"指定的模型配置不存在或已停用 (id={config_id})")
+            else:
+                result = await session.execute(
+                    select(LLMConfig).where(
+                        LLMConfig.is_active == True,
+                        LLMConfig.is_enabled == True,
+                    )
                 )
+                config = result.scalar_one_or_none()
+                if not config:
+                    raise RuntimeError("尚未配置可用的大模型，请联系管理员在后台「大模型配置」中添加并设为当前使用")
     except RuntimeError:
-        # db 配置的密钥无效（缺失/含中文占位符）：明确报错，
-        # 不再回退到 .env 的空 key 产生难以理解的编码错误
         raise
     except Exception as e:
-        logger.warning(f"从数据库加载 LLM 配置失败,回退到 .env 配置: {e}")
+        logger.error(f"从数据库加载 LLM 配置失败: {e}")
+        raise RuntimeError("大模型配置加载失败，请稍后重试或联系管理员")
 
-    # 回退到 .env 中的默认配置
-    logger.info("使用 .env 默认 DeepSeek 配置")
-    return OpenAICompatProvider(
-        api_key=settings.DEEPSEEK_API_KEY,
-        api_base=settings.DEEPSEEK_API_BASE,
-        model=settings.DEEPSEEK_MODEL,
-        timeout=60,
-        max_retries=3,
-        provider_name="DeepSeek (.env)",
+    logger.info(f"使用大模型: {config.name} ({config.provider}/{config.model})")
+    provider = OpenAICompatProvider(
+        api_key=decrypt_secret(config.api_key),
+        api_base=config.api_base,
+        model=config.model,
+        timeout=config.timeout,
+        max_retries=config.max_retries,
+        provider_name=config.name,
     )
+    # 尊重后台配置的温度值（校对场景默认 0.2，取两者较低保证确定性）
+    provider.default_temperature = min(config.temperature, 0.2)
+    return provider
 
 
 def split_text_into_chunks(text: str, max_chunk_size: int = 800) -> List[str]:
@@ -368,6 +375,7 @@ async def proofread_text(
     text: str,
     check_types: Optional[List[str]] = None,
     domain: str = "general",
+    config_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     执行文本校对
@@ -375,6 +383,7 @@ async def proofread_text(
     :param text: 待校对文本
     :param check_types: 校对类型列表,为空则全部检查
     :param domain: 领域
+    :param config_id: 指定模型配置ID（None 用当前活跃模型）
     :return: 校对结果
     """
     import time
@@ -391,7 +400,7 @@ async def proofread_text(
     t1 = time.perf_counter()
     global_words, provider = await asyncio.gather(
         load_global_words(),
-        get_llm_provider(),
+        get_llm_provider(config_id),
     )
     t2 = time.perf_counter()
     logger.info(f"[校对] 准备阶段耗时={t2-t1:.2f}s "
@@ -414,7 +423,7 @@ async def proofread_text(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": PROOFREAD_USER_PROMPT.format(text=chunk)},
             ]
-            response = await provider.chat(messages, temperature=0.2)
+            response = await provider.chat(messages, temperature=provider.default_temperature)
             issues = parse_proofread_result(response.content)
             for issue in issues:
                 issue["chunk_index"] = idx
