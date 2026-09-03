@@ -52,6 +52,7 @@ export function documentProofreadApi(data: {
   file_id: string
   check_types?: string[]
   domain?: string
+  config_id?: number
 }): Promise<DocumentProofreadResponse> {
   return request.post('/document/proofread', data)
 }

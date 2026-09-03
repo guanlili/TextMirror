@@ -164,6 +164,8 @@ export interface LLMProviderOption {
   name: string
   default_base: string
   default_model: string
+  models: string[]   // 主流推荐模型（其他型号手输即可）
+  model_docs?: string  // 官方模型列表地址（查找模型名用）
 }
 
 export interface LLMTestResult {
@@ -175,6 +177,29 @@ export interface LLMTestResult {
 
 export function listLLMProvidersApi(): Promise<LLMProviderOption[]> {
   return request.get('/admin/llm-config/providers')
+}
+
+/** 弹窗内测试未保存的配置（编辑时 api_key 留空 + config_id 用已存密钥） */
+export function testLLMDraftApi(data: {
+  provider: string; api_base: string; api_key?: string; model: string; config_id?: number
+}): Promise<LLMTestResult> {
+  return request.post('/admin/llm-config/test-draft', data, { timeout: 45000 })
+}
+
+/** 导入配置结果 */
+export interface LLMImportResult {
+  created: number
+  updated: number
+  skipped: number
+  kept_key: number
+}
+
+/** 导入大模型配置（conflict: skip=跳过同名 / overwrite=覆盖同名） */
+export function importLLMConfigsApi(data: {
+  configs: Record<string, any>[]
+  conflict: 'skip' | 'overwrite'
+}): Promise<LLMImportResult> {
+  return request.post('/admin/llm-config/import', data)
 }
 
 export function listLLMConfigsApi(): Promise<LLMConfigItem[]> {
@@ -202,10 +227,6 @@ export function activateLLMConfigApi(id: number): Promise<LLMConfigItem> {
 
 export function testLLMConfigApi(id: number): Promise<LLMTestResult> {
   return request.post(`/admin/llm-config/${id}/test`)
-}
-
-export function getActiveLLMConfigApi(): Promise<LLMConfigItem> {
-  return request.get('/admin/llm-config/active')
 }
 
 // ========== 文档管理 ==========

@@ -253,6 +253,7 @@ async def document_proofread(
             text=text,
             check_types=request.check_types,
             domain=request.domain,
+            config_id=request.config_id,
         )
     except RuntimeError as e:
         import traceback
@@ -403,6 +404,7 @@ async def document_proofread_async(
         file_path=file_info["file_path"],
         file_ext=file_info["file_ext"],
         user_id=current_user.id if current_user else None,
+        config_id=request.config_id,
     )
 
     logger.info(f"异步校对任务已提交: task_id={task.id}, file={file_info['filename']}")

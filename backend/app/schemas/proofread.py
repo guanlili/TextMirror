@@ -16,6 +16,10 @@ class TextProofreadRequest(BaseModel):
         default="general",
         description="领域: general/official/legal/power/new_energy/meter"
     )
+    config_id: Optional[int] = Field(
+        None,
+        description="指定模型配置ID（不填用管理后台设的当前模型）"
+    )
 
 
 class ProofreadIssue(BaseModel):

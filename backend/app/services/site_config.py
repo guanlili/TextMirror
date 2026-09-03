@@ -3,7 +3,7 @@ TextMirror 站点配置服务
 使用 Redis 存储站点级配置（平台名称、副标题、图标等）
 """
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from loguru import logger
 
 from app.core.config import settings
@@ -41,17 +41,6 @@ async def get_site_config() -> Dict[str, str]:
         logger.warning(f"[站点配置] Redis 读取失败，使用默认值: {e}")
 
     return config
-
-
-async def get_site_config_value(key: str) -> Optional[str]:
-    """获取单个配置项"""
-    redis = get_redis()
-    try:
-        val = await redis.get(f"{SITE_CONFIG_PREFIX}{key}")
-        return val if val is not None else DEFAULT_SITE_CONFIG.get(key)
-    except Exception as e:
-        logger.warning(f"[站点配置] Redis 读取 {key} 失败: {e}")
-        return DEFAULT_SITE_CONFIG.get(key)
 
 
 async def update_site_config(updates: Dict[str, str]) -> Dict[str, str]:

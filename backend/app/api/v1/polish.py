@@ -41,10 +41,10 @@ async def get_polish_styles():
     return {"styles": styles}
 
 
-@router.get("/models", summary='获取可用于多模型对比的已启用模型配置（仅 id/名称/模型名，不含密钥）')
+@router.get("/models", summary='获取可用于多模型对比/校对选择的已启用模型配置')
 async def get_available_models():
     """
-    获取可用于多模型对比的已启用模型配置（仅 id/名称/模型名，不含密钥）
+    获取可用于多模型对比/校对选择的已启用模型配置（仅 id/名称/模型名，不含密钥）
     """
     from sqlalchemy import select as _select
     from app.core.database import async_session_factory
@@ -52,12 +52,12 @@ async def get_available_models():
 
     async with async_session_factory() as db:
         result = await db.execute(
-            _select(LLMConfig.id, LLMConfig.name, LLMConfig.model)
+            _select(LLMConfig.id, LLMConfig.name, LLMConfig.model, LLMConfig.is_active)
             .where(LLMConfig.is_enabled == True)
             .order_by(LLMConfig.is_active.desc(), LLMConfig.id)
         )
         rows = result.all()
-    return {"models": [{"id": r.id, "name": r.name, "model": r.model} for r in rows]}
+    return {"models": [{"id": r.id, "name": r.name, "model": r.model, "is_active": r.is_active} for r in rows]}
 
 
 @router.post("/text", response_model=PolishResponse, summary='AI文本润色')

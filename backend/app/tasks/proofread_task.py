@@ -36,10 +36,11 @@ def async_proofread_document(
     file_path: str = None,
     file_ext: str = None,
     user_id: int = None,
+    config_id: int = None,
 ):
     """
     异步执行文档校对任务
-    
+
     :param text: 提取的文本内容
     :param check_types: 校对类型
     :param domain: 领域
@@ -48,6 +49,7 @@ def async_proofread_document(
     :param file_path: 文件路径
     :param file_ext: 文件扩展名
     :param user_id: 用户ID
+    :param config_id: 指定模型配置ID（None 用当前活跃模型）
     """
     task_id = self.request.id
     logger.info(f"[Task {task_id}] 开始异步校对: file={filename}, text_len={len(text)}")
@@ -58,7 +60,7 @@ def async_proofread_document(
     try:
         # 调用校对服务（异步转同步）
         from app.services.proofread import proofread_text
-        result = _run_async(proofread_text(text=text, check_types=check_types, domain=domain))
+        result = _run_async(proofread_text(text=text, check_types=check_types, domain=domain, config_id=config_id))
     except Exception as e:
         logger.error(f"[Task {task_id}] 校对失败: {e}")
         # 不能手动写 FAILURE state（Celery 仅允许 raise 触发），

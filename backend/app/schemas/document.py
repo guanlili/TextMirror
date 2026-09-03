@@ -25,6 +25,10 @@ class DocumentProofreadRequest(BaseModel):
         description="校对类型"
     )
     domain: str = Field(default="general", description="领域")
+    config_id: Optional[int] = Field(
+        None,
+        description="指定模型配置ID（不填用管理后台设的当前模型）"
+    )
 
 
 class DocumentProofreadResponse(BaseModel):

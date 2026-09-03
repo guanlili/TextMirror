@@ -134,20 +134,33 @@ PROOFREAD_USER_PROMPT = """请对以下文本进行全面审校，找出所有�
 {text}"""
 
 
-async def get_llm_provider() -> BaseLLMProvider:
+async def get_llm_provider(config_id: Optional[int] = None) -> BaseLLMProvider:
     """
     获取大模型 Provider 实例
-    优先从数据库读取活跃配置, 回退到 .env 中的 DeepSeek 配置
+    指定 config_id 时使用该配置（用户在校对页手动选模型），
+    否则优先数据库活跃配置, 回退到 .env 中的 DeepSeek 配置
     """
     try:
         async with async_session_factory() as session:
-            result = await session.execute(
-                select(LLMConfig).where(
-                    LLMConfig.is_active == True,
-                    LLMConfig.is_enabled == True,
+            if config_id is not None:
+                # 用户指定的模型配置（须启用）
+                result = await session.execute(
+                    select(LLMConfig).where(
+                        LLMConfig.id == config_id,
+                        LLMConfig.is_enabled == True,
+                    )
                 )
-            )
-            config = result.scalar_one_or_none()
+                config = result.scalar_one_or_none()
+                if not config:
+                    raise RuntimeError(f"指定的模型配置不存在或已停用 (id={config_id})")
+            else:
+                result = await session.execute(
+                    select(LLMConfig).where(
+                        LLMConfig.is_active == True,
+                        LLMConfig.is_enabled == True,
+                    )
+                )
+                config = result.scalar_one_or_none()
             if config:
                 logger.info(f"使用大模型: {config.name} ({config.provider}/{config.model})")
                 return OpenAICompatProvider(
@@ -159,8 +172,7 @@ async def get_llm_provider() -> BaseLLMProvider:
                     provider_name=config.name,
                 )
     except RuntimeError:
-        # db 配置的密钥无效（缺失/含中文占位符）：明确报错，
-        # 不再回退到 .env 的空 key 产生难以理解的编码错误
+        # 指定配置无效：明确报错，不回退（用户明确选择了这个模型）
         raise
     except Exception as e:
         logger.warning(f"从数据库加载 LLM 配置失败,回退到 .env 配置: {e}")
@@ -368,6 +380,7 @@ async def proofread_text(
     text: str,
     check_types: Optional[List[str]] = None,
     domain: str = "general",
+    config_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     执行文本校对
@@ -375,6 +388,7 @@ async def proofread_text(
     :param text: 待校对文本
     :param check_types: 校对类型列表,为空则全部检查
     :param domain: 领域
+    :param config_id: 指定模型配置ID（None 用当前活跃模型）
     :return: 校对结果
     """
     import time
@@ -391,7 +405,7 @@ async def proofread_text(
     t1 = time.perf_counter()
     global_words, provider = await asyncio.gather(
         load_global_words(),
-        get_llm_provider(),
+        get_llm_provider(config_id),
     )
     t2 = time.perf_counter()
     logger.info(f"[校对] 准备阶段耗时={t2-t1:.2f}s "

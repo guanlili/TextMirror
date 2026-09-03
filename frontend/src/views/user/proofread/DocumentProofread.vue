@@ -56,6 +56,22 @@
               <el-radio value="meter">电能表</el-radio>
             </el-radio-group>
           </div>
+          <div v-if="modelOptions.length > 1" class="setting-row">
+            <span class="setting-label">校对模型：</span>
+            <el-select
+              v-model="selectedModelId"
+              size="default"
+              style="max-width: 320px;"
+              placeholder="默认当前模型"
+            >
+              <el-option
+                v-for="m in modelOptions"
+                :key="m.id"
+                :label="m.is_active ? `${m.name}（${m.model}）· 当前` : `${m.name}（${m.model}）`"
+                :value="m.id"
+              />
+            </el-select>
+          </div>
           <el-button type="primary" size="large" :loading="uploading || proofreading" @click="handleStartProofread">
             <el-icon><Edit /></el-icon>
             {{ statusText }}
@@ -224,7 +240,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   uploadDocumentApi,
@@ -233,6 +249,7 @@ import {
   type DocumentProofreadResponse,
 } from '@/api/document'
 import { asyncDocumentProofreadApi, streamTaskStatus, type TaskStatus } from '@/api/tasks'
+import { getAvailableModelsApi, type AvailableModel } from '@/api/polish'
 
 interface IssueWithStatus {
   original: string
@@ -258,6 +275,19 @@ const uploading = ref(false)
 const proofreading = ref(false)
 const progress = ref(0)
 const processingInfo = ref('')
+
+// 校对模型选择（默认当前活跃模型）
+const modelOptions = ref<AvailableModel[]>([])
+const selectedModelId = ref<number | null>(null)
+
+onMounted(async () => {
+  try {
+    const res = await getAvailableModelsApi()
+    modelOptions.value = res.models
+    const active = res.models.find(m => m.is_active)
+    selectedModelId.value = active ? active.id : (res.models[0]?.id ?? null)
+  } catch { /* 模型列表加载失败时用默认活跃模型 */ }
+})
 
 // 设置
 const checkTypes = ref<string[]>(['typo', 'grammar', 'punctuation', 'style'])
@@ -409,6 +439,7 @@ async function handleStartProofread() {
         file_id: uploadRes.file_id,
         check_types: checkTypes.value.length > 0 ? checkTypes.value : undefined,
         domain: domain.value,
+        config_id: selectedModelId.value ?? undefined,
       })
       const taskResult: TaskStatus = await streamTaskStatus(submitRes.task_id, (status) => {
         if (status.step) stepKey.value = status.step
@@ -431,6 +462,7 @@ async function handleStartProofread() {
         file_id: uploadRes.file_id,
         check_types: checkTypes.value.length > 0 ? checkTypes.value : undefined,
         domain: domain.value,
+        config_id: selectedModelId.value ?? undefined,
       })
     }
 
