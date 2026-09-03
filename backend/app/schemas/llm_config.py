@@ -3,7 +3,7 @@ TextMirror 大模型配置 Schema
 """
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # 支持的供应商列表（models 为主流推荐，其他型号直接手输模型名即可；
@@ -103,6 +103,16 @@ SUPPORTED_PROVIDERS = [
 ]
 
 
+def _validate_provider(provider: Optional[str]) -> Optional[str]:
+    """provider 必须是 SUPPORTED_PROVIDERS 中的合法 code，防止脏数据"""
+    if provider is None:
+        return provider
+    valid_codes = {p["code"] for p in SUPPORTED_PROVIDERS}
+    if provider not in valid_codes:
+        raise ValueError(f"不支持的供应商: {provider}，可选: {', '.join(sorted(valid_codes))}")
+    return provider
+
+
 class LLMConfigCreate(BaseModel):
     """创建大模型配置"""
     name: str = Field(..., max_length=100, description="配置名称")
@@ -115,6 +125,8 @@ class LLMConfigCreate(BaseModel):
     timeout: int = Field(default=180, ge=10, le=600, description="超时（秒）")
     max_retries: int = Field(default=2, ge=0, le=10, description="重试次数")
     remark: Optional[str] = Field(None, max_length=500, description="备注")
+
+    _validate_provider = field_validator("provider")(_validate_provider)
 
 
 class LLMConfigUpdate(BaseModel):
@@ -130,6 +142,8 @@ class LLMConfigUpdate(BaseModel):
     max_retries: Optional[int] = Field(None, ge=0, le=10)
     is_enabled: Optional[bool] = None
     remark: Optional[str] = Field(None, max_length=500)
+
+    _validate_provider = field_validator("provider")(_validate_provider)
 
 
 class LLMConfigResponse(BaseModel):

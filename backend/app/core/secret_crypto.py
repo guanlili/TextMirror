@@ -6,6 +6,7 @@ import base64
 import hashlib
 
 from cryptography.fernet import Fernet, InvalidToken
+from loguru import logger
 
 from app.core.config import settings
 
@@ -42,5 +43,6 @@ def decrypt_secret(stored: str) -> str:
     try:
         return _get_fernet().decrypt(stored[4:].encode()).decode()
     except InvalidToken:
-        # 密钥变更等原因解不开：返回原文交给上游的密钥校验报错
-        return stored
+        # 密钥变更等原因解不开：返回空串，让上游走到"密钥未配置"的清晰报错
+        logger.warning("密文解密失败（SECRET_KEY 可能已变更），请重新填写密钥")
+        return ""
