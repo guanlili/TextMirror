@@ -292,8 +292,9 @@ class PolishCompareResponse(BaseModel):
 
 def _build_compare_provider(config) -> "OpenAICompatProvider":
     from app.services.llm.openai_compat import OpenAICompatProvider
+    from app.core.secret_crypto import decrypt_secret
     return OpenAICompatProvider(
-        api_key=config.api_key,
+        api_key=decrypt_secret(config.api_key),
         api_base=config.api_base,
         model=config.model,
         timeout=config.timeout,
@@ -316,7 +317,9 @@ async def text_polish_compare(
     if current_user is None:
         await check_guest_rate_limit(http_request)
     else:
-        await check_user_quota(current_user, db)
+        # 对比模式并发调用 N 个模型，消耗 N 倍额度：按模型数预检配额
+        from app.core.rate_limit import check_user_quota_n_times
+        await check_user_quota_n_times(current_user, db, len(request.config_ids))
 
     if request.style not in POLISH_STYLES:
         raise HTTPException(
@@ -326,13 +329,18 @@ async def text_polish_compare(
 
     import time as _time
 
-    # 加载选中的模型配置
+    # 加载选中的模型配置（仅启用的可参与对比）
     from sqlalchemy import select as _select
     from app.models.llm_config import LLMConfig
-    result = await db.execute(_select(LLMConfig).where(LLMConfig.id.in_(request.config_ids)))
+    result = await db.execute(
+        _select(LLMConfig).where(
+            LLMConfig.id.in_(request.config_ids),
+            LLMConfig.is_enabled == True,
+        )
+    )
     configs = {c.id: c for c in result.scalars().all()}
     if len(configs) < 2:
-        raise HTTPException(status_code=400, detail="所选模型配置不足 2 个有效项")
+        raise HTTPException(status_code=400, detail="所选模型配置不足 2 个有效项（已停用的配置不可用）")
 
     style_config = POLISH_STYLES[request.style]
     system_prompt = build_polish_prompt(request.style, "standard")
@@ -358,13 +366,14 @@ async def text_polish_compare(
                 elapsed_ms=int((_time.perf_counter() - t0) * 1000),
             )
         except Exception as e:
+            # 异常原文可能含密钥片段/内部路径：详情记日志，前端只给友好提示
             logger.error(f"[对比] 模型 {config.name} 失败: {e}")
             return ModelCompareItem(
                 config_id=config.id,
                 config_name=config.name,
                 model=config.model,
                 success=False,
-                error=str(e)[:300],
+                error=f"模型 {config.name} 调用失败，请检查该配置的密钥与模型名（详情见服务端日志）",
                 elapsed_ms=int((_time.perf_counter() - t0) * 1000),
             )
         finally:
@@ -441,8 +450,10 @@ async def text_polish_compare_stream(
     if current_user is None:
         await check_guest_rate_limit(http_request)
     else:
+        # 对比模式并发调用 N 个模型，消耗 N 倍额度：按模型数预检配额
+        from app.core.rate_limit import check_user_quota_n_times
         async with async_session_factory() as db:
-            await check_user_quota(current_user, db)
+            await check_user_quota_n_times(current_user, db, len(request.config_ids))
 
     if request.style not in POLISH_STYLES:
         raise HTTPException(
@@ -456,10 +467,15 @@ async def text_polish_compare_stream(
     from app.models.llm_config import LLMConfig
 
     async with async_session_factory() as db:
-        result = await db.execute(_select(LLMConfig).where(LLMConfig.id.in_(request.config_ids)))
+        result = await db.execute(
+            _select(LLMConfig).where(
+                LLMConfig.id.in_(request.config_ids),
+                LLMConfig.is_enabled == True,
+            )
+        )
         configs = {c.id: c for c in result.scalars().all()}
     if len(configs) < 2:
-        raise HTTPException(status_code=400, detail="所选模型配置不足 2 个有效项")
+        raise HTTPException(status_code=400, detail="所选模型配置不足 2 个有效项（已停用的配置不可用）")
 
     style_config = POLISH_STYLES[request.style]
     system_prompt = build_polish_prompt(request.style, "standard")
@@ -489,8 +505,9 @@ async def text_polish_compare_stream(
                     await queues[config.id].put(("delta", delta))
                 await queues[config.id].put(("done", int((__time.perf_counter() - t0) * 1000)))
             except Exception as e:
+                # 异常原文可能含密钥片段：详情记日志，推送友好提示
                 logger.error(f"[对比-流式] 模型 {config.name} 失败: {e}")
-                await queues[config.id].put(("error", str(e)[:300]))
+                await queues[config.id].put(("error", f"模型 {config.name} 调用失败，请检查该配置的密钥与模型名"))
             finally:
                 if provider:
                     await provider.close()

@@ -252,7 +252,7 @@ import {
   listLLMConfigsApi, listLLMProvidersApi,
   createLLMConfigApi, updateLLMConfigApi,
   deleteLLMConfigApi, activateLLMConfigApi, testLLMConfigApi,
-  testLLMDraftApi, importLLMConfigsApi,
+  testLLMDraftApi, importLLMConfigsApi, exportLLMConfigsApi,
 } from '@/api/admin'
 
 const loading = ref(false)
@@ -286,22 +286,19 @@ async function handleExport(withKeys: boolean) {
       )
     } catch { return }
   }
-  const token = localStorage.getItem('access_token') || ''
-  // 触发浏览器下载（带鉴权头的请求不能直接用 <a href>）
-  const resp = await fetch(`/api/v1/admin/llm-config/export?include_keys=${withKeys}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
-  if (!resp.ok) { ElMessage.error('导出失败'); return }
-  const blob = await resp.blob()
-  const dispo = resp.headers.get('Content-Disposition') || ''
-  const match = dispo.match(/filename="?([^";]+)"?/)
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = match?.[1] || 'textmirror-llm-configs.json'
-  a.click()
-  URL.revokeObjectURL(url)
-  ElMessage.success(withKeys ? '已导出（含密钥，注意保管）' : '已导出（密钥已脱敏）')
+  try {
+    // 走统一 axios 封装（自动带 Token / 401 统一处理），响应类型 blob
+    const blob = await exportLLMConfigsApi(withKeys)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `textmirror-llm-configs${withKeys ? '-with-keys' : ''}-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success(withKeys ? '已导出（含密钥，注意保管）' : '已导出（密钥已脱敏）')
+  } catch {
+    ElMessage.error('导出失败')
+  }
 }
 
 /** 选择导入文件后解析预览 */

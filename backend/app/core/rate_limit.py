@@ -104,3 +104,29 @@ async def check_user_quota(user, db: AsyncSession) -> None:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"已达今日使用配额（{user.daily_quota} 次/天），请联系管理员调整",
         )
+
+
+async def check_user_quota_n_times(user, db: AsyncSession, n: int) -> None:
+    """
+    多模型对比场景的配额预检：一次请求消耗 n 倍额度（n 个模型并发调用）。
+    剩余额度不足以覆盖 n 次时拒绝，避免对比请求半途超额。
+    """
+    if user is None or user.daily_quota is None or n <= 1:
+        return check_user_quota(user, db) if n > 0 else None
+
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
+    local_date = func.to_char(ProofreadRecord.created_at.op("AT TIME ZONE")("Asia/Shanghai"), "YYYY-MM-DD")
+    result = await db.execute(
+        select(func.count()).select_from(ProofreadRecord).where(
+            ProofreadRecord.user_id == user.id,
+            local_date == today,
+        )
+    )
+    used = result.scalar() or 0
+    remaining = user.daily_quota - used
+    if remaining < n:
+        logger.warning(f"用户配额不足（对比模式）: user_id={user.id}, used={used}, quota={user.daily_quota}, need={n}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"今日剩余额度 {max(remaining, 0)} 次，多模型对比需 {n} 次（每个模型计一次），请减少模型数量或明天再试",
+        )

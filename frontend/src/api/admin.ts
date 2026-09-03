@@ -179,6 +179,14 @@ export function listLLMProvidersApi(): Promise<LLMProviderOption[]> {
   return request.get('/admin/llm-config/providers')
 }
 
+/** 导出全部大模型配置（blob 文件下载；includeKeys=true 含明文密钥） */
+export function exportLLMConfigsApi(includeKeys: boolean): Promise<Blob> {
+  return request.get('/admin/llm-config/export', {
+    params: { include_keys: includeKeys },
+    responseType: 'blob',
+  })
+}
+
 /** 弹窗内测试未保存的配置（编辑时 api_key 留空 + config_id 用已存密钥） */
 export function testLLMDraftApi(data: {
   provider: string; api_base: string; api_key?: string; model: string; config_id?: number

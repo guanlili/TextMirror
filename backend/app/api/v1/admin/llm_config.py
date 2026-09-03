@@ -13,6 +13,7 @@ from loguru import logger
 
 from app.core.database import get_db
 from app.core.dependencies import require_permission
+from app.core.secret_crypto import encrypt_secret, decrypt_secret
 from app.models.llm_config import LLMConfig
 from app.schemas.llm_config import (
     LLMConfigCreate, LLMConfigUpdate, LLMConfigResponse,
@@ -33,7 +34,7 @@ def _mask_api_key(api_key: str) -> str:
 def _to_response(config: LLMConfig) -> LLMConfigResponse:
     """模型实例转响应（含密钥脱敏）"""
     resp = LLMConfigResponse.model_validate(config)
-    resp.api_key_masked = _mask_api_key(config.api_key)
+    resp.api_key_masked = _mask_api_key(decrypt_secret(config.api_key))
     return resp
 
 
@@ -80,7 +81,7 @@ async def create_llm_config(
         name=name,
         provider=data.provider,
         api_base=data.api_base,
-        api_key=data.api_key,
+        api_key=encrypt_secret(data.api_key),
         model=data.model,
         temperature=data.temperature,
         max_tokens=data.max_tokens,
@@ -115,6 +116,8 @@ async def update_llm_config(
         # api_key 传空串表示保持原密钥不变（前端编辑时留空）
         if val is None or (field == "api_key" and not val):
             continue
+        if field == "api_key":
+            val = encrypt_secret(val)
         setattr(config, field, val)
 
     await db.flush()
@@ -178,7 +181,7 @@ async def test_llm_config(
         raise HTTPException(status_code=404, detail="配置不存在")
 
     provider = OpenAICompatProvider(
-        api_key=config.api_key,
+        api_key=decrypt_secret(config.api_key),
         api_base=config.api_base,
         model=config.model,
         timeout=min(config.timeout, 30),  # 测试用短超时
@@ -214,7 +217,7 @@ async def test_llm_draft(
         result = await db.execute(select(LLMConfig).where(LLMConfig.id == body.config_id))
         saved = result.scalar_one_or_none()
         if saved:
-            api_key = saved.api_key
+            api_key = decrypt_secret(saved.api_key)
 
     try:
         provider = OpenAICompatProvider(
@@ -288,11 +291,12 @@ async def export_llm_configs(
 
     items = []
     for c in configs:
+        plain_key = decrypt_secret(c.api_key)
         items.append(LLMConfigExportItem(
             name=c.name,
             provider=c.provider,
             api_base=c.api_base,
-            api_key=c.api_key if include_keys else _mask_api_key(c.api_key),
+            api_key=plain_key if include_keys else _mask_api_key(plain_key),
             model=c.model,
             temperature=c.temperature,
             max_tokens=c.max_tokens,
@@ -344,11 +348,13 @@ async def import_llm_configs(
             if body.conflict == "skip":
                 skipped += 1
                 continue
-            # overwrite：掩码/空密钥不覆盖已存明文
+            # overwrite：掩码/空密钥不覆盖已存密钥（已存值本就是密文，直接沿用）
             new_key = item.api_key
             if _is_masked_key(new_key):
                 new_key = existing.api_key
                 kept_key += 1
+            else:
+                new_key = encrypt_secret(new_key)
             existing.provider = item.provider
             existing.api_base = item.api_base
             existing.api_key = new_key
@@ -364,20 +370,20 @@ async def import_llm_configs(
             updated += 1
         else:
             key = item.api_key
-            if _is_masked_key(key):
-                key = ""   # 新建但密钥是掩码：置空占位，提示用户补填
+            key_is_masked = _is_masked_key(key)
             db.add(LLMConfig(
                 name=item.name,
                 provider=item.provider,
                 api_base=item.api_base,
-                api_key=key or "请在管理后台填写API密钥",
+                api_key=encrypt_secret(key) if not key_is_masked else "",
                 model=item.model,
                 temperature=item.temperature,
                 max_tokens=item.max_tokens,
                 timeout=item.timeout,
                 max_retries=item.max_retries,
                 is_active=False,      # 导入不直接设活跃，避免误切换
-                is_enabled=item.is_enabled,
+                # 密钥缺失的导入配置直接停用，避免"看起来正常但一调用就报错"
+                is_enabled=False if key_is_masked else item.is_enabled,
                 remark=item.remark,
             ))
             created += 1

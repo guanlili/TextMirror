@@ -188,15 +188,22 @@ async def text_proofread_compare(
     if current_user is None:
         await check_guest_rate_limit(http_request)
     else:
-        await check_user_quota(current_user, db)
+        # 对比模式并发调用 N 个模型，消耗 N 倍额度：按模型数预检配额
+        from app.core.rate_limit import check_user_quota_n_times
+        await check_user_quota_n_times(current_user, db, len(request.config_ids))
 
-    # 加载模型配置
+    # 加载模型配置（仅启用的可参与对比）
     from sqlalchemy import select as _select
     from app.models.llm_config import LLMConfig
-    cfg_result = await db.execute(_select(LLMConfig).where(LLMConfig.id.in_(request.config_ids)))
+    cfg_result = await db.execute(
+        _select(LLMConfig).where(
+            LLMConfig.id.in_(request.config_ids),
+            LLMConfig.is_enabled == True,
+        )
+    )
     configs = {c.id: c for c in cfg_result.scalars().all()}
     if len(configs) < 2:
-        raise HTTPException(status_code=400, detail="所选模型配置不足 2 个有效项")
+        raise HTTPException(status_code=400, detail="所选模型配置不足 2 个有效项（已停用的配置不可用）")
 
     timer = AuditTimer()
     timer.start()
@@ -220,13 +227,14 @@ async def text_proofread_compare(
                 elapsed_ms=int((_time.perf_counter() - t0) * 1000),
             )
         except Exception as e:
+            # 异常原文可能含密钥片段/内部路径：详情记日志，前端只给友好提示
             logger.error(f"[对比校对] 模型 {config.name} 失败: {e}")
             return ModelProofreadResult(
                 config_id=config.id,
                 config_name=config.name,
                 model=config.model,
                 success=False,
-                error=str(e)[:300],
+                error=f"模型 {config.name} 调用失败，请检查该配置的密钥与模型名（详情见服务端日志）",
                 elapsed_ms=int((_time.perf_counter() - t0) * 1000),
             )
 
