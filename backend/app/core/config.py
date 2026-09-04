@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     GUEST_DAILY_LIMIT: int = 2000
     GUEST_TEXT_MAX_LENGTH: int = 100000
 
+    # ---- 开放 API 配置 ----
+    API_KEY_PREFIX: str = "tm_"  # 密钥明文前缀，用于与 JWT 区分
+    API_KEY_RPM_LIMIT: int = 12  # 单密钥每分钟最大请求数
+    API_KEY_MAX_PER_USER: int = 5  # 单用户最多可创建的密钥数
+
     # ---- 登录失败锁定配置 ----
     LOGIN_MAX_FAILURES: int = 5
     LOGIN_LOCK_SECONDS: int = 900

@@ -1,9 +1,11 @@
 """
 TextMirror 安全模块
-JWT Token 签发与校验、密码加密
+JWT Token 签发与校验、密码加密、API Key 生成与哈希
 """
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Any
+from typing import Optional, Any, Tuple
 
 from jose import jwt, JWTError
 from passlib.context import CryptContext
@@ -12,6 +14,20 @@ from app.core.config import settings
 
 # 密码加密上下文
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def generate_api_key() -> Tuple[str, str, str, str]:
+    """
+    生成 API Key
+    :return: (明文key, 前缀, 后4位, SHA-256哈希)
+    """
+    plaintext = f"{settings.API_KEY_PREFIX}{secrets.token_urlsafe(32)}"
+    return plaintext, plaintext[:13], plaintext[-4:], hash_api_key(plaintext)
+
+
+def hash_api_key(plaintext: str) -> str:
+    """计算 API Key 的 SHA-256 哈希（十六进制）"""
+    return hashlib.sha256(plaintext.encode()).hexdigest()
 
 
 def hash_password(password: str) -> str:

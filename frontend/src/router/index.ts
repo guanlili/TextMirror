@@ -70,6 +70,12 @@ const userRoutes: RouteRecordRaw[] = [
         meta: { title: '校对历史', icon: 'Clock', requireAuth: true },
       },
       {
+        path: 'apikeys',
+        name: 'ApiKeys',
+        component: () => import('@/views/user/apikeys/index.vue'),
+        meta: { title: 'API 密钥', icon: 'Key', requireAuth: true },
+      },
+      {
         path: 'profile',
         name: 'Profile',
         component: () => import('@/views/user/profile/index.vue'),

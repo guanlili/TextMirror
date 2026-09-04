@@ -22,6 +22,7 @@
           <el-menu-item index="/dictionary"><el-icon><Collection /></el-icon><span>个性化词库</span></el-menu-item>
           <el-menu-item index="/whitelist"><el-icon><CircleCheck /></el-icon><span>放行词管理</span></el-menu-item>
           <el-menu-item index="/history"><el-icon><Clock /></el-icon><span>校对历史</span></el-menu-item>
+          <el-menu-item index="/apikeys"><el-icon><Key /></el-icon><span>API 密钥</span></el-menu-item>
         </el-menu>
       </template>
 
@@ -94,6 +95,7 @@
         <el-menu-item v-if="userStore.isLoggedIn" index="/dictionary"><el-icon><Collection /></el-icon><span>个性化词库</span></el-menu-item>
         <el-menu-item v-if="userStore.isLoggedIn" index="/whitelist"><el-icon><CircleCheck /></el-icon><span>放行词管理</span></el-menu-item>
         <el-menu-item v-if="userStore.isLoggedIn" index="/history"><el-icon><Clock /></el-icon><span>校对历史</span></el-menu-item>
+        <el-menu-item v-if="userStore.isLoggedIn" index="/apikeys"><el-icon><Key /></el-icon><span>API 密钥</span></el-menu-item>
       </el-menu>
     </el-drawer>
   </el-container>
@@ -123,6 +125,7 @@ const pageMap: Record<string, { title: string; subtitle: string }> = {
   '/dictionary': { title: '个性化词库', subtitle: '沉淀团队专有表达与规范术语' },
   '/whitelist': { title: '放行词管理', subtitle: '管理无需提示的特殊词语' },
   '/history': { title: '校对历史', subtitle: '回顾并继续之前的审校任务' },
+  '/apikeys': { title: 'API 密钥', subtitle: '将审校能力集成到你的工作流' },
   '/profile': { title: '个人中心', subtitle: '管理账号与个人偏好' },
 }
 const currentPage = computed(() => pageMap[route.path] || { title: 'TextMirror', subtitle: siteStore.platformSubtitle })

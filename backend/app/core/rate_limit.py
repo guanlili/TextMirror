@@ -130,3 +130,100 @@ async def check_user_quota_n_times(user, db: AsyncSession, n: int) -> None:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"今日剩余额度 {max(remaining, 0)} 次，多模型对比需 {n} 次（每个模型计一次），请减少模型数量或明天再试",
         )
+
+
+def _api_key_daily_redis_key(api_key) -> str:
+    """密钥日计数 Redis key（业务时区 Asia/Shanghai 自然日，与用户配额口径一致）"""
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
+    return f"textmirror:apikey_daily:{api_key.id}:{today}"
+
+
+async def check_api_key_rpm(api_key) -> None:
+    """
+    API Key 维度 RPM 限流（固定分钟窗口，settings.API_KEY_RPM_LIMIT）
+    Redis 异常不阻塞请求（与游客限流降级策略一致）
+    """
+    try:
+        redis = get_redis()
+        minute = datetime.now().strftime("%Y%m%d%H%M")
+        rpm_key = f"textmirror:apikey_rpm:{api_key.id}:{minute}"
+        rpm_count = await redis.incr(rpm_key)
+        if rpm_count == 1:
+            await redis.expire(rpm_key, 120)
+        if rpm_count > settings.API_KEY_RPM_LIMIT:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "code": "RATE_LIMITED",
+                    "message": f"请求频率超限：每分钟最多 {settings.API_KEY_RPM_LIMIT} 次，请稍后重试",
+                },
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"API Key RPM 限流 Redis 异常: {e}")
+
+
+async def charge_api_key_daily(api_key, weight: int = 1) -> None:
+    """
+    密钥日配额计数与检查（自然日，无论是否配置配额都计数以供展示）。
+    weight：本次请求消耗的额度数（多模型对比 = 模型数）。
+    """
+    try:
+        redis = get_redis()
+        daily_key = _api_key_daily_redis_key(api_key)
+        daily_count = await redis.incrby(daily_key, weight)
+        if await redis.ttl(daily_key) < 0:
+            await redis.expire(daily_key, 172800)
+        if api_key.daily_quota is not None and daily_count > api_key.daily_quota:
+            logger.warning(
+                f"密钥日配额触发: key_id={api_key.id}, used={daily_count}, quota={api_key.daily_quota}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "code": "KEY_QUOTA_EXCEEDED",
+                    "message": f"该密钥已达每日调用上限（{api_key.daily_quota} 次/天），明天恢复或联系管理员调整",
+                },
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"API Key 限流 Redis 异常: {e}")
+
+
+async def check_api_key_rate_limit(api_key) -> None:
+    """文本单模型场景：RPM + 日配额（1 请求 = 1 次额度）"""
+    await check_api_key_rpm(api_key)
+    await charge_api_key_daily(api_key)
+
+
+async def get_api_key_daily_usage(api_key) -> int | None:
+    """读取密钥今日调用次数（Redis 不可用时返回 None）"""
+    try:
+        redis = get_redis()
+        count = await redis.get(_api_key_daily_redis_key(api_key))
+        return int(count) if count is not None else 0
+    except Exception as e:
+        logger.error(f"读取密钥日用量 Redis 异常: {e}")
+        return None
+
+
+# 仅当计数 >0 时 DECR，避免键过期后 DECR 制造 -1 负值
+_REFUND_DAILY_LUA = (
+    "local c = redis.call('GET', KEYS[1]) "
+    "if c and tonumber(c) > 0 then return redis.call('DECR', KEYS[1]) end "
+    "return 0"
+)
+
+
+async def refund_api_key_daily_usage(api_key) -> None:
+    """
+    服务端失败（503/500）时退还密钥日配额计数：
+    用户没拿到结果就不消耗当日额度（用户配额 ProofreadRecord 本就只记成功，无需处理）。
+    """
+    try:
+        redis = get_redis()
+        await redis.eval(_REFUND_DAILY_LUA, 1, _api_key_daily_redis_key(api_key))
+    except Exception as e:
+        logger.error(f"退还密钥日配额 Redis 异常: {e}")

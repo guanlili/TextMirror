@@ -12,6 +12,7 @@ from app.api.v1.document import router as document_router
 from app.api.v1.dictionary import router as dictionary_router
 from app.api.v1.whitelist import router as whitelist_router
 from app.api.v1.history import router as history_router
+from app.api.v1.api_keys import router as api_keys_router
 from app.api.v1.tasks import router as tasks_router
 from app.api.v1.polish import router as polish_router
 from app.api.v1.site_info import router as site_info_router
@@ -51,6 +52,9 @@ api_router.include_router(whitelist_router)
 
 # ---- 校对历史模块 ----
 api_router.include_router(history_router)
+
+# ---- API 密钥管理（开放 API 凭证自助管理） ----
+api_router.include_router(api_keys_router)
 
 # ---- 异步任务模块 ----
 api_router.include_router(tasks_router)

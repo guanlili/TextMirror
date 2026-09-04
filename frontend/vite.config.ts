@@ -26,7 +26,8 @@ export default defineConfig({
   server: {
     port: 3022,
     proxy: {
-      '/api': {
+      // 带斜杠前缀，避免劫持 /apikeys 这类 SPA 路由（与 nginx 的 location /api/ 行为一致）
+      '/api/': {
         target: 'http://127.0.0.1:3020',
         changeOrigin: true,
       },
