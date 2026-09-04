@@ -19,6 +19,11 @@
             <el-option label="查看历史" value="view_history" />
             <el-option label="登录成功" value="login_success" />
             <el-option label="登录失败" value="login_failed" />
+            <el-option label="API文本审校" value="api_proofread" />
+            <el-option label="API多模型对比" value="api_proofread_compare" />
+            <el-option label="API文档审校" value="api_proofread_doc" />
+            <el-option label="API密钥创建" value="apikey_create" />
+            <el-option label="API密钥吊销" value="apikey_revoke" />
           </el-select>
         </el-form-item>
         <el-form-item label="用户类型">
@@ -333,6 +338,11 @@ const ACTION_LABELS: Record<string, string> = {
   login_success: '登录成功',
   login_failed: '登录失败',
   logout: '退出登录',
+  api_proofread: 'API文本审校',
+  api_proofread_compare: 'API多模型对比',
+  api_proofread_doc: 'API文档审校',
+  apikey_create: 'API密钥创建',
+  apikey_revoke: 'API密钥吊销',
 }
 
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
@@ -345,6 +355,11 @@ const ACTION_TAG_TYPES: Record<string, TagType> = {
   login_success: 'success',
   login_failed: 'danger',
   logout: 'info',
+  api_proofread: 'success',
+  api_proofread_compare: 'primary',
+  api_proofread_doc: 'warning',
+  apikey_create: 'info',
+  apikey_revoke: 'danger',
 }
 
 function actionLabel(type: string): string {

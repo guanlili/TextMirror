@@ -3,7 +3,7 @@ TextMirror 校对记录模型
 """
 from typing import Optional
 
-from sqlalchemy import String, Integer, Text, JSON, ForeignKey
+from sqlalchemy import String, Integer, Text, JSON, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
@@ -12,6 +12,10 @@ from app.models.base import BaseModel
 class ProofreadRecord(BaseModel):
     """校对记录表"""
     __tablename__ = "proofread_records"
+    __table_args__ = (
+        # 配额检查按 (user_id, created_at) 范围统计当日记录，每次校对请求都会走
+        Index("ix_proofread_records_user_created", "user_id", "created_at"),
+    )
 
     user_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=True, comment="用户ID(游客为null)"

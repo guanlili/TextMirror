@@ -4,7 +4,7 @@ TextMirror 限流与配额
 登录用户：基于 ProofreadRecord 当日记录数的每日配额
 """
 import ipaddress
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import Request, HTTPException, status
@@ -79,6 +79,27 @@ async def check_guest_rate_limit(request: Request):
         logger.error(f"游客限流 Redis 异常: {e}")
 
 
+def _shanghai_today_range() -> tuple:
+    """当日（Asia/Shanghai）对应的 UTC 时间范围，用于与 timestamptz 列做范围比较（可走索引）"""
+    tz = ZoneInfo("Asia/Shanghai")
+    now_local = datetime.now(tz)
+    local_midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return local_midnight.astimezone(timezone.utc), (local_midnight + timedelta(days=1)).astimezone(timezone.utc)
+
+
+async def _count_today_records(user_id: int, db: AsyncSession) -> int:
+    """统计用户当日（Asia/Shanghai）校对记录数"""
+    day_start, day_end = _shanghai_today_range()
+    result = await db.execute(
+        select(func.count()).select_from(ProofreadRecord).where(
+            ProofreadRecord.user_id == user_id,
+            ProofreadRecord.created_at >= day_start,
+            ProofreadRecord.created_at < day_end,
+        )
+    )
+    return result.scalar() or 0
+
+
 async def check_user_quota(user, db: AsyncSession) -> None:
     """
     登录用户每日使用配额检查
@@ -89,15 +110,7 @@ async def check_user_quota(user, db: AsyncSession) -> None:
     if user is None or user.daily_quota is None:
         return
 
-    today = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
-    local_date = func.to_char(ProofreadRecord.created_at.op("AT TIME ZONE")("Asia/Shanghai"), "YYYY-MM-DD")
-    result = await db.execute(
-        select(func.count()).select_from(ProofreadRecord).where(
-            ProofreadRecord.user_id == user.id,
-            local_date == today,
-        )
-    )
-    used = result.scalar() or 0
+    used = await _count_today_records(user.id, db)
     if used >= user.daily_quota:
         logger.warning(f"用户配额触发: user_id={user.id}, used={used}, quota={user.daily_quota}")
         raise HTTPException(
@@ -114,15 +127,7 @@ async def check_user_quota_n_times(user, db: AsyncSession, n: int) -> None:
     if user is None or user.daily_quota is None or n <= 1:
         return check_user_quota(user, db) if n > 0 else None
 
-    today = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
-    local_date = func.to_char(ProofreadRecord.created_at.op("AT TIME ZONE")("Asia/Shanghai"), "YYYY-MM-DD")
-    result = await db.execute(
-        select(func.count()).select_from(ProofreadRecord).where(
-            ProofreadRecord.user_id == user.id,
-            local_date == today,
-        )
-    )
-    used = result.scalar() or 0
+    used = await _count_today_records(user.id, db)
     remaining = user.daily_quota - used
     if remaining < n:
         logger.warning(f"用户配额不足（对比模式）: user_id={user.id}, used={used}, quota={user.daily_quota}, need={n}")
