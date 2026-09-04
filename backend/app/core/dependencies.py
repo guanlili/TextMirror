@@ -2,7 +2,8 @@
 TextMirror 全局依赖注入
 提供数据库Session、Redis客户端、当前用户等通用依赖
 """
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Optional, Tuple
 
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -11,10 +12,22 @@ from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.redis import get_redis
-from app.core.security import decode_token
+from app.core.security import decode_token, hash_api_key
+from app.core.config import settings
 
 # HTTP Bearer Token 提取器
 security_scheme = HTTPBearer(auto_error=False)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """兼容 naive datetime（如 SQLite/部分驱动）：视为 UTC"""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 async def get_current_user(
@@ -131,3 +144,71 @@ def require_permission(permission_code: str):
         return current_user
 
     return _check_permission
+
+
+async def get_current_user_or_apikey(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> Tuple:
+    """
+    开放 API 认证依赖：Bearer tm_* 走 API Key，其余走 JWT
+    :return: (user, api_key)，api_key 为 None 表示 JWT 登录态调用
+    """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "UNAUTHORIZED", "message": "未提供认证凭证，请携带 API 密钥或登录 Token"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token = credentials.credentials
+
+    if token.startswith(settings.API_KEY_PREFIX):
+        # ---- API Key 认证 ----
+        from app.models.api_key import ApiKey
+        from app.models.user import User
+
+        result = await db.execute(
+            select(ApiKey).where(ApiKey.key_hash == hash_api_key(token))
+        )
+        api_key = result.scalar_one_or_none()
+        if api_key is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "INVALID_API_KEY", "message": "API 密钥无效"},
+            )
+        if not api_key.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "API_KEY_REVOKED", "message": "API 密钥已被吊销"},
+            )
+        if api_key.expires_at and _as_utc(api_key.expires_at) < _utcnow():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "API_KEY_EXPIRED", "message": "API 密钥已过期"},
+            )
+
+        result = await db.execute(select(User).where(User.id == api_key.user_id))
+        user = result.scalar_one_or_none()
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "API_KEY_REVOKED", "message": "密钥归属账号已删除"},
+            )
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "ACCOUNT_DISABLED", "message": "密钥归属账号已被禁用"},
+            )
+
+        # last_used_at 节流更新（距上次记录超过 60s 才写库）
+        now = _utcnow()
+        if api_key.last_used_at is None or (now - _as_utc(api_key.last_used_at)).total_seconds() >= 60:
+            api_key.last_used_at = now
+            await db.flush()
+
+        return user, api_key
+
+    # ---- JWT 认证 ----
+    user = await get_current_user(credentials, db)
+    return user, None

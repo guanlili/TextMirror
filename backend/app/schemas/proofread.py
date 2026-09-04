@@ -1,24 +1,67 @@
 """
 TextMirror 校对相关 Schema
 """
+from enum import Enum
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class CheckType(str, Enum):
+    """校对类型枚举（对外 API 契约，非法值直接 422）"""
+    typo = "typo"                # 错别字
+    grammar = "grammar"          # 语法错误
+    punctuation = "punctuation"  # 标点符号
+    style = "style"              # 表达优化
+    sensitive = "sensitive"      # 敏感词
+    logic = "logic"              # 逻辑问题
+
+
+class Domain(str, Enum):
+    """领域枚举"""
+    general = "general"        # 通用
+    official = "official"      # 公文
+    legal = "legal"            # 法律
+    power = "power"            # 电力
+    new_energy = "new_energy"  # 新能源
+    meter = "meter"            # 电能表
 
 
 class TextProofreadRequest(BaseModel):
     """文本校对请求"""
-    text: str = Field(..., min_length=1, max_length=100000, description="待校对文本")
-    check_types: Optional[List[str]] = Field(
-        None,
-        description="校对类型: typo/grammar/punctuation/style/sensitive/logic"
+    # use_enum_values：校验后枚举转回纯字符串，下游（提示词拼接/JSON 落库/审计）拿到的与从前一致
+    # example：Swagger Try it out 的预填请求体（不填 check_types/config_id，引导最简用法）
+    model_config = ConfigDict(
+        use_enum_values=True,
+        json_schema_extra={
+            "example": {
+                "text": "随着人工智能技术的突飞猛进，各行各业都迎来了翻天复地的变革。",
+                "check_types": ["typo", "punctuation"],
+                "domain": "general",
+            }
+        },
     )
-    domain: str = Field(
-        default="general",
-        description="领域: general/official/legal/power/new_energy/meter"
+
+    text: str = Field(
+        ...,
+        min_length=1,
+        max_length=100000,
+        description="待校对文本",
+        examples=["随着人工智能技术的突飞猛进，各行各业都迎来了翻天复地的变革。"],
+    )
+    check_types: Optional[List[CheckType]] = Field(
+        None,
+        description="校对类型（可选，不填=全部检查）",
+        examples=[["typo", "punctuation"]],
+    )
+    domain: Domain = Field(
+        default=Domain.general,
+        description="文本领域（影响校对规则侧重）",
+        examples=["general"],
     )
     config_id: Optional[int] = Field(
         None,
-        description="指定模型配置ID（不填用管理后台设的当前模型）"
+        description="指定模型配置ID（可选，不填=系统当前默认模型；普通集成方无需关心）",
+        examples=[None],
     )
 
 

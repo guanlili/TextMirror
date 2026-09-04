@@ -21,6 +21,7 @@ import app.models.dictionary  # noqa
 import app.models.global_word  # noqa
 import app.models.llm_config  # noqa
 import app.models.audit_log  # noqa
+import app.models.api_key  # noqa
 
 
 @asynccontextmanager
@@ -52,6 +53,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"👋 {settings.APP_NAME} 已安全关闭")
 
 
+def _open_http_exception_handler(request, exc):
+    """开放 API 子应用的 HTTP 异常兜底：非契约格式（如路由 404/405）转为 code+message"""
+    from fastapi.responses import JSONResponse
+    detail = exc.detail
+    if not (isinstance(detail, dict) and "code" in detail):
+        code = {404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED"}.get(exc.status_code, "HTTP_ERROR")
+        detail = {"code": code, "message": str(detail) if detail else "请求错误"}
+    return JSONResponse(status_code=exc.status_code, content={"detail": detail}, headers=getattr(exc, "headers", None))
+
+
 def create_app() -> FastAPI:
     """创建 FastAPI 应用实例"""
     app = FastAPI(
@@ -75,6 +86,41 @@ def create_app() -> FastAPI:
 
     # ---- 路由注册 ----
     app.include_router(api_router, prefix=settings.API_PREFIX)
+
+    # ---- 开放 API 子应用 ----
+    # 独立命名空间 /api/v1/open/*，只含对外稳定契约端点；
+    # 文档页常开（主应用 /docs 仅 DEBUG 开启，内部端点不对外暴露）
+    from app.api.v1.open import router as open_router
+    from app.api.v1.open import validation_exception_handler, internal_exception_handler
+    from fastapi.exceptions import RequestValidationError
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    open_api_app = FastAPI(
+        title=f"{settings.APP_NAME} Open API",
+        version=settings.APP_VERSION,
+        description=(
+            "TextMirror 对外审校 API，提供三种能力：\n\n"
+            "- **文本审校**（同步）：`POST /proofread`\n"
+            "- **多模型对比**（同步）：`POST /proofread/compare`\n"
+            "- **文档审校**（异步）：`POST /documents` + `GET /jobs/{job_id}`\n\n"
+            "**快速开始**：\n"
+            "1. 网页端登录 → 「API 密钥」页创建密钥（`tm_` 开头，仅展示一次）\n"
+            "2. 请求头携带 `Authorization: Bearer tm_你的密钥`\n"
+            "3. 调用下方接口，最简请求只需 `{\"text\": \"...\"}`\n\n"
+            "**错误契约**：非 2xx 响应 `detail` 为 `{'code': ..., 'message': ...}`，"
+            "各端点的错误码示例见接口文档。\n\n"
+            "**限流**：单密钥每分钟 12 次请求（429 RATE_LIMITED）；"
+            "每日配额随归属账号（429 QUOTA_EXCEEDED），多模型对比按模型数计额度"
+        ),
+        docs_url="/docs",
+        redoc_url="/redoc",
+    )
+    open_api_app.include_router(open_router)
+    # 422 参数错误与 500 兜底统一为 code+message 契约（其余错误已由端点自行保证）
+    open_api_app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    open_api_app.add_exception_handler(StarletteHTTPException, _open_http_exception_handler)
+    open_api_app.add_exception_handler(Exception, internal_exception_handler)
+    app.mount(f"{settings.API_PREFIX}/open", open_api_app)
 
     # 上传文件不再通过 StaticFiles 直接暴露（无鉴权），
     # 统一走 /api/v1/document/download/{file_id}/{filename} 签名下载

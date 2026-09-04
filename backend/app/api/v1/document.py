@@ -5,6 +5,7 @@ TextMirror 文档校对 API
 import os
 import json
 import uuid
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,8 +39,30 @@ router = APIRouter(prefix="/document", tags=["文档校对"])
 # 允许的文件扩展名
 ALLOWED_EXTENSIONS = {".doc", ".docx", ".pdf", ".txt"}
 
-# 临时存储上传文件的文本内容（生产环境应使用 Redis 或数据库）
-_uploaded_files_cache: dict = {}
+# 上传文件文本缓存：LRU 限容（entry 含全文提取文本，无淘汰会随上传量无限增长；
+# 未命中时从 uploaded_documents 表回填，容量仅影响回填频率）
+from collections import OrderedDict
+from threading import Lock
+
+_UPLOAD_CACHE_MAX = 200
+_uploaded_files_cache: OrderedDict = OrderedDict()
+_upload_cache_lock = Lock()
+
+
+def _cache_put(file_id: str, file_info: dict) -> None:
+    with _upload_cache_lock:
+        _uploaded_files_cache[file_id] = file_info
+        _uploaded_files_cache.move_to_end(file_id)
+        while len(_uploaded_files_cache) > _UPLOAD_CACHE_MAX:
+            _uploaded_files_cache.popitem(last=False)
+
+
+def _cache_get(file_id: str) -> Optional[dict]:
+    with _upload_cache_lock:
+        info = _uploaded_files_cache.get(file_id)
+        if info is not None:
+            _uploaded_files_cache.move_to_end(file_id)
+        return info
 
 
 async def _check_document_ownership(file_info: dict, current_user, db: AsyncSession) -> None:
@@ -121,14 +144,14 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="文件中未提取到有效文本内容")
 
     # 缓存提取的文本和文件信息
-    _uploaded_files_cache[file_id] = {
+    _cache_put(file_id, {
         "filename": filename,
         "file_path": file_path,
         "file_ext": file_ext,
         "file_size": file_size,
         "text": extracted_text,
         "user_id": current_user.id if current_user else None,
-    }
+    })
 
     text_preview = extracted_text[:200] + ("..." if len(extracted_text) > 200 else "")
 
@@ -196,7 +219,7 @@ async def document_proofread(
     需要先调用 /upload 获取 file_id
     """
     # 优先从内存缓存获取，缓存未命中则从数据库查找
-    file_info = _uploaded_files_cache.get(request.file_id)
+    file_info = _cache_get(request.file_id)
     if file_info is None:
         # 从数据库查找上传记录
         from sqlalchemy import select
@@ -232,7 +255,7 @@ async def document_proofread(
             "user_id": doc_record.user_id,
         }
         # 回填内存缓存，加速后续请求
-        _uploaded_files_cache[request.file_id] = file_info
+        _cache_put(request.file_id, file_info)
         logger.info(f"从数据库恢复文件信息: {doc_record.filename} (file_id={request.file_id})")
 
     # 游客限流
@@ -346,7 +369,7 @@ async def document_proofread_async(
     异步文档校对 - 提交 Celery 任务
     返回 task_id，前端轮询 /tasks/{task_id} 获取进度和结果
     """
-    file_info = _uploaded_files_cache.get(request.file_id)
+    file_info = _cache_get(request.file_id)
     if file_info is None:
         # 从数据库查找上传记录
         from sqlalchemy import select
@@ -380,7 +403,7 @@ async def document_proofread_async(
                 "text": extracted_text,
                 "user_id": doc_record.user_id,
             }
-            _uploaded_files_cache[request.file_id] = file_info
+            _cache_put(request.file_id, file_info)
 
     # 归属校验（缓存命中与查库路径统一在此校验）
     if file_info.get("user_id") is not None:
