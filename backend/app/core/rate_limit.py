@@ -214,21 +214,27 @@ async def get_api_key_daily_usage(api_key) -> int | None:
         return None
 
 
-# 仅当计数 >0 时 DECR，避免键过期后 DECR 制造 -1 负值
+# 仅当计数 >0 时 DECR（下限为 0），避免键过期/多次退还制造负值
 _REFUND_DAILY_LUA = (
     "local c = redis.call('GET', KEYS[1]) "
-    "if c and tonumber(c) > 0 then return redis.call('DECR', KEYS[1]) end "
+    "if c and tonumber(c) > 0 then "
+    "  local refund = tonumber(ARGV[1]) "
+    "  if tonumber(c) < refund then refund = tonumber(c) end "
+    "  return redis.call('DECRBY', KEYS[1], refund) "
+    "end "
     "return 0"
 )
 
 
-async def refund_api_key_daily_usage(api_key) -> None:
+async def refund_api_key_daily_usage(api_key, weight: int = 1) -> None:
     """
-    服务端失败（503/500）时退还密钥日配额计数：
-    用户没拿到结果就不消耗当日额度（用户配额 ProofreadRecord 本就只记成功，无需处理）。
+    退还密钥日配额计数（服务端失败 / 对比场景部分模型失败）：
+    用户没拿到结果的部分不消耗当日额度（用户配额 ProofreadRecord 只记成功，无需处理）。
     """
+    if weight <= 0:
+        return
     try:
         redis = get_redis()
-        await redis.eval(_REFUND_DAILY_LUA, 1, _api_key_daily_redis_key(api_key))
+        await redis.eval(_REFUND_DAILY_LUA, 1, _api_key_daily_redis_key(api_key), weight)
     except Exception as e:
         logger.error(f"退还密钥日配额 Redis 异常: {e}")

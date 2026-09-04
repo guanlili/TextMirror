@@ -53,6 +53,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"👋 {settings.APP_NAME} 已安全关闭")
 
 
+def _open_http_exception_handler(request, exc):
+    """开放 API 子应用的 HTTP 异常兜底：非契约格式（如路由 404/405）转为 code+message"""
+    from fastapi.responses import JSONResponse
+    detail = exc.detail
+    if not (isinstance(detail, dict) and "code" in detail):
+        code = {404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED"}.get(exc.status_code, "HTTP_ERROR")
+        detail = {"code": code, "message": str(detail) if detail else "请求错误"}
+    return JSONResponse(status_code=exc.status_code, content={"detail": detail}, headers=getattr(exc, "headers", None))
+
+
 def create_app() -> FastAPI:
     """创建 FastAPI 应用实例"""
     app = FastAPI(
@@ -81,8 +91,9 @@ def create_app() -> FastAPI:
     # 独立命名空间 /api/v1/open/*，只含对外稳定契约端点；
     # 文档页常开（主应用 /docs 仅 DEBUG 开启，内部端点不对外暴露）
     from app.api.v1.open import router as open_router
-    from app.api.v1.open import validation_exception_handler
+    from app.api.v1.open import validation_exception_handler, internal_exception_handler
     from fastapi.exceptions import RequestValidationError
+    from starlette.exceptions import HTTPException as StarletteHTTPException
 
     open_api_app = FastAPI(
         title=f"{settings.APP_NAME} Open API",
@@ -105,8 +116,10 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
     )
     open_api_app.include_router(open_router)
-    # 422 参数错误统一为 code+message 契约（其余错误已由端点自行保证）
+    # 422 参数错误与 500 兜底统一为 code+message 契约（其余错误已由端点自行保证）
     open_api_app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    open_api_app.add_exception_handler(StarletteHTTPException, _open_http_exception_handler)
+    open_api_app.add_exception_handler(Exception, internal_exception_handler)
     app.mount(f"{settings.API_PREFIX}/open", open_api_app)
 
     # 上传文件不再通过 StaticFiles 直接暴露（无鉴权），

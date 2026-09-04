@@ -101,6 +101,18 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+async def internal_exception_handler(request: Request, exc: Exception):
+    """
+    子应用兜底 500：未捕获异常也保持 code+message 契约
+    （默认的 "Internal Server Error" 纯文本不符合对外 API 格式）
+    """
+    logger.error(f"[OpenAPI] 未捕获异常 {request.method} {request.url.path}: {type(exc).__name__}: {exc}")
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": {"code": "INTERNAL_ERROR", "message": "服务器内部错误，请稍后重试"}},
+    )
+
+
 async def _check_user_quota_contract(user, db: AsyncSession, n: int = 1) -> None:
     """用户每日配额检查，429 转换为 code+message 契约（n>1 为多模型对比预检）"""
     try:
@@ -174,10 +186,13 @@ async def open_proofread(
     """
     user, api_key = auth
 
-    # 密钥维度：RPM + 密钥日配额；用户维度：每日配额
+    # 顺序：RPM → 用户配额（免费检查）→ 密钥日配额计费。
+    # 用户配额不足时直接拒绝，不扣密钥额度
     if api_key is not None:
-        await check_api_key_rate_limit(api_key)
+        await check_api_key_rpm(api_key)
     await _check_user_quota_contract(user, db)
+    if api_key is not None:
+        await charge_api_key_daily(api_key)
 
     timer = AuditTimer()
     timer.start()
@@ -320,8 +335,8 @@ async def open_list_models(
     description=(
         "同一文本用多个模型并发审校，返回各模型结果及交叉统计（共识/独有）。\n\n"
         "**第一步**：先调用 `GET /models` 获取可用模型的 `id`。\n\n"
-        "**额度**：一次对比请求按模型数消耗额度（如 2 个模型 = 2 次），"
-        "请确保当日剩余额度足够。\n\n"
+        "**额度**：按**成功**的模型数计（如 2 个模型全部成功 = 消耗 2 次额度；"
+        "1 个失败则只消耗 1 次，失败模型自动退还）。\n\n"
         "**config_ids**：2-4 个模型ID（来自 `GET /models`）。\n\n"
         "单模型调用失败不影响其他模型：对应 result 项 `success=false` 并带 `error` 说明。"
     ),
@@ -356,6 +371,7 @@ async def open_proofread_compare(
         )
 
     n = len(request.config_ids)
+    # 顺序与文本端点一致：RPM → 用户配额预检（免费）→ 密钥计费（按模型数）
     if api_key is not None:
         await check_api_key_rpm(api_key)
     await _check_user_quota_contract(user, db, n)
@@ -402,6 +418,12 @@ async def open_proofread_compare(
     items = await asyncio.gather(*[_run_one(c) for c in configs.values()])
     items = sorted(items, key=lambda i: request.config_ids.index(i.config_id))
 
+    # 部分模型失败：失败模型退还密钥日配额（按成功数结算，失败的不计费）
+    if api_key is not None:
+        failed = sum(1 for i in items if not i.success)
+        if failed > 0:
+            await refund_api_key_daily_usage(api_key, failed)
+
     # 交叉统计：按 original 文本对齐（成功模型 ≥2 才有意义）
     ok_results = [i for i in items if i.success and i.issues]
     consensus: List[str] = []
@@ -435,6 +457,20 @@ async def open_proofread_compare(
 # ======================================================================
 
 ALLOWED_DOC_EXTENSIONS = {".doc", ".docx", ".pdf", ".txt"}
+
+
+def _remove_file_silently(file_path: str) -> None:
+    """失败路径清理已落盘的文件及其所属 file_id 目录（不存在/删除失败都不抛出）"""
+    try:
+        import shutil
+        dir_path = os.path.dirname(file_path)
+        if os.path.isfile(file_path):
+            os.remove(file_path)
+        # 目录内已无其他文件时一并移除（上传目录按 file_id 隔离，属本请求独有）
+        if os.path.isdir(dir_path) and not os.listdir(dir_path):
+            os.rmdir(dir_path)
+    except OSError as e:
+        logger.warning(f"[OpenAPI] 清理失败路径文件异常: {file_path}: {e}")
 
 
 @router.post(
@@ -509,20 +545,31 @@ async def open_submit_document(
     with open(file_path, "wb") as f:
         f.write(content)
 
+    # 此后任何失败路径都不该在磁盘留下孤儿文件
     try:
-        extracted_text = extract_text_from_file(file_path, file_ext)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail={"code": "INVALID_FILE", "message": str(e)})
-    except Exception as e:
-        logger.error(f"[OpenAPI] 文档文本提取失败: {e}")
-        raise HTTPException(status_code=500, detail={"code": "INTERNAL_ERROR", "message": "文档文本提取失败，请检查文件是否损坏"})
-    if not extracted_text.strip():
-        raise HTTPException(status_code=400, detail={"code": "INVALID_FILE", "message": "文件中未提取到有效文本内容"})
+        try:
+            extracted_text = extract_text_from_file(file_path, file_ext)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail={"code": "INVALID_FILE", "message": str(e)})
+        except Exception as e:
+            logger.error(f"[OpenAPI] 文档文本提取失败: {e}")
+            raise HTTPException(status_code=500, detail={"code": "INTERNAL_ERROR", "message": "文档文本提取失败，请检查文件是否损坏"})
+        if not extracted_text.strip():
+            raise HTTPException(status_code=400, detail={"code": "INVALID_FILE", "message": "文件中未提取到有效文本内容"})
 
-    # ---- 配额（用户输入校验完成后才计费）----
-    await _check_user_quota_contract(user, db)
-    if api_key is not None:
-        await charge_api_key_daily(api_key, 1)
+        # ---- 配额（用户输入校验完成后才计费）----
+        try:
+            await _check_user_quota_contract(user, db)
+        except HTTPException:
+            raise
+        if api_key is not None:
+            await charge_api_key_daily(api_key, 1)
+    except HTTPException:
+        _remove_file_silently(file_path)
+        raise
+    except Exception:
+        _remove_file_silently(file_path)
+        raise
 
     # ---- 上传记录（管理后台可见）----
     doc_record = UploadedDocument(
@@ -556,9 +603,15 @@ async def open_submit_document(
         )
     except Exception as e:
         logger.error(f"[OpenAPI] 任务队列不可用: {e}")
-        # 队列故障：退还密钥日配额
+        # 队列故障：退还密钥日配额 + 清理已落盘文件与上传记录
         if api_key is not None:
             await refund_api_key_daily_usage(api_key)
+        _remove_file_silently(file_path)
+        try:
+            await db.delete(doc_record)
+            await db.flush()
+        except Exception:
+            pass
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "TASK_QUEUE_UNAVAILABLE", "message": "任务队列暂时不可用，请稍后重试"},
