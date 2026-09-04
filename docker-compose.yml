@@ -87,15 +87,11 @@ services:
         condition: service_healthy
 
   # ---- PostgreSQL（数据持久化到 ./data/postgres）----
-  # 注意：宿主机为 CentOS7 + elrepo 5.4.6 内核，Docker 默认 seccomp 配置档
-  # 会导致 initdb 写 postmaster.pid/pg_wal 报 EPERM，需对 PG 容器解除 seccomp
   postgres:
     image: postgres:16-alpine
     container_name: textmirror-postgres
     restart: unless-stopped
     network_mode: host
-    security_opt:
-      - seccomp:unconfined
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-textmirror}
       POSTGRES_USER: ${POSTGRES_USER:-textmirror}
