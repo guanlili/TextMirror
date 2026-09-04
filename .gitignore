@@ -32,6 +32,9 @@ frontend/dist/
 # ---- Docker 构建产物 ----
 docker-images/*.tar
 
+# ---- 生产数据（compose 挂载的 PG/Redis 数据目录）----
+/data/
+
 # ---- 新仓库初始化时保留的本地 Git 历史备份 ----
 .git-backups/
 
