@@ -626,6 +626,8 @@ def _filter_whitelist_issues(issues: List[Dict[str, Any]],
                               user_words: Optional[Dict[str, List[Dict]]] = None) -> List[Dict[str, Any]]:
     """
     过滤命中放行词的问题项（全局放行词 + 用户放行词）。
+    匹配语义：original 包含放行词即过滤（模型报"API 接口"而放行词是"API"时同样生效，
+    精确相等会漏掉这类含上下文的片段）。
     例外：original 命中用户纠错映射（用户显式要求改）时不放行——用户意图优先于放行词。
     """
     whitelist = {w["word"] for w in global_words.get("whitelist", [])}
@@ -637,8 +639,9 @@ def _filter_whitelist_issues(issues: List[Dict[str, Any]],
     kept = []
     for issue in issues:
         original = (issue.get("original") or "").strip()
-        if original and original in whitelist and original not in user_corrections:
-            logger.info(f"[校对] 放行词过滤: '{original}'")
-            continue
+        if original and original not in user_corrections:
+            if any(w in original for w in whitelist):
+                logger.info(f"[校对] 放行词过滤: '{original}'")
+                continue
         kept.append(issue)
     return kept
