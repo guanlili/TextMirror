@@ -40,9 +40,6 @@
               <el-radio value="general">通用</el-radio>
               <el-radio value="official">公文</el-radio>
               <el-radio value="legal">法律</el-radio>
-              <el-radio value="power">电力</el-radio>
-              <el-radio value="new_energy">新能源</el-radio>
-              <el-radio value="meter">电能表</el-radio>
             </el-radio-group>
           </div>
           <div v-if="modelOptions.length > 1" class="setting-row">

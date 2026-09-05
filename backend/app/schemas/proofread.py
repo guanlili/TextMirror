@@ -17,13 +17,10 @@ class CheckType(str, Enum):
 
 
 class Domain(str, Enum):
-    """领域枚举"""
-    general = "general"        # 通用
-    official = "official"      # 公文
-    legal = "legal"            # 法律
-    power = "power"            # 电力
-    new_energy = "new_energy"  # 新能源
-    meter = "meter"            # 电能表
+    """领域枚举（开源默认只保留通用场景；行业特化由管理员在「审校规则」后台自定义规则实现）"""
+    general = "general"    # 通用
+    official = "official"  # 公文
+    legal = "legal"        # 法律
 
 
 class TextProofreadRequest(BaseModel):

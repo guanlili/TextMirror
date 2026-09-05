@@ -31,9 +31,6 @@
               <el-radio value="general">通用</el-radio>
               <el-radio value="official">公文</el-radio>
               <el-radio value="legal">法律</el-radio>
-              <el-radio value="power">电力</el-radio>
-              <el-radio value="new_energy">新能源</el-radio>
-              <el-radio value="meter">电能表</el-radio>
             </el-radio-group>
           </div>
           <div v-if="modelOptions.length > 1" class="setting-row">
@@ -655,7 +652,6 @@ onMounted(async () => {
 const domainLabel = computed(() => {
   const map: Record<string, string> = {
     general: '通用', official: '公文', legal: '法律',
-    power: '电力', new_energy: '新能源', meter: '电能表',
   }
   return map[domain.value] || '通用'
 })

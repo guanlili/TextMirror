@@ -16,7 +16,6 @@
               <el-option label="通用" value="general" />
               <el-option label="公文" value="official" />
               <el-option label="法律" value="legal" />
-              <el-option label="电力" value="power" />
             </el-select>
           </div>
         </div>
@@ -222,6 +221,7 @@ function formatTime(t?: string): string {
 }
 
 function domainLabel(d: string): string {
+  // 保留旧领域映射：历史记录可能存在收敛前（power 等）的数据
   const m: Record<string, string> = { general: '通用', official: '公文', legal: '法律', power: '电力', new_energy: '新能源', meter: '电能表' }
   return m[d] || d
 }

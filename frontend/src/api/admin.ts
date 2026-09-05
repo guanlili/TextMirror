@@ -346,9 +346,6 @@ export interface DomainPromptsConfig {
   general: string
   official: string
   legal: string
-  power: string
-  new_energy: string
-  meter: string
 }
 
 export function getDomainPromptsApi(): Promise<DomainPromptsConfig> {

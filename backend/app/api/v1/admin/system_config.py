@@ -24,7 +24,7 @@ SECURITY_SETTINGS_KEY = "system:config:security"
 DOMAIN_PROMPTS_KEY = "system:config:domain_prompts"
 
 # 可配置的审校领域（与 proofread.py 的 DOMAIN_PROMPTS 对应）
-DOMAIN_CODES = ["general", "official", "legal", "power", "new_energy", "meter"]
+DOMAIN_CODES = ["general", "official", "legal"]
 
 
 # ========== 基本设置 ==========
@@ -276,9 +276,6 @@ class DomainPromptsConfig(BaseModel):
     general: str = ""
     official: str = ""
     legal: str = ""
-    power: str = ""
-    new_energy: str = ""
-    meter: str = ""
 
 
 @router.get("/domain-prompts", response_model=DomainPromptsConfig, summary='获取审校领域规则配置')

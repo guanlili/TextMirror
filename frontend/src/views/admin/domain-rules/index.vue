@@ -15,8 +15,8 @@
 
       <el-alert type="info" :closable="false" class="intro-alert">
         <template #title>
-          规则即行业审校标准（如电力：变电站非变电所、110kV 的 k 小写；公文：成文日期用汉字、发文字号用〔〕）。
-          建议参考内置默认的写法：分条列出、每条一个具体规则，避免笼统描述。
+          规则即审校标准（如公文：成文日期用汉字、发文字号用〔〕；法律：大小写金额须一致）。
+          特定行业（电力、医疗等）可在对应领域维护自定义规则。建议分条列出、每条一个具体规则，避免笼统描述。
         </template>
       </el-alert>
 
@@ -69,18 +69,15 @@ const DOMAIN_TABS = [
   { code: 'general', label: '通用' },
   { code: 'official', label: '公文' },
   { code: 'legal', label: '法律' },
-  { code: 'power', label: '电力' },
-  { code: 'new_energy', label: '新能源' },
-  { code: 'meter', label: '电能表' },
 ] as const
 
 const activeTab = ref('general')
 const saving = ref(false)
 const prompts = reactive<DomainPromptsConfig>({
-  general: '', official: '', legal: '', power: '', new_energy: '', meter: '',
+  general: '', official: '', legal: '',
 })
 const defaults = reactive<DomainPromptsConfig>({
-  general: '', official: '', legal: '', power: '', new_energy: '', meter: '',
+  general: '', official: '', legal: '',
 })
 
 onMounted(async () => {
