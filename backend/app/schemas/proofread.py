@@ -3,7 +3,7 @@ TextMirror 校对相关 Schema
 """
 from enum import Enum
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CheckType(str, Enum):
@@ -17,13 +17,10 @@ class CheckType(str, Enum):
 
 
 class Domain(str, Enum):
-    """领域枚举"""
-    general = "general"        # 通用
-    official = "official"      # 公文
-    legal = "legal"            # 法律
-    power = "power"            # 电力
-    new_energy = "new_energy"  # 新能源
-    meter = "meter"            # 电能表
+    """领域枚举（开源默认只保留通用场景；行业特化由管理员在「审校规则」后台自定义规则实现）"""
+    general = "general"    # 通用
+    official = "official"  # 公文
+    legal = "legal"        # 法律
 
 
 class TextProofreadRequest(BaseModel):
@@ -35,7 +32,6 @@ class TextProofreadRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "text": "随着人工智能技术的突飞猛进，各行各业都迎来了翻天复地的变革。",
-                "check_types": ["typo", "punctuation"],
                 "domain": "general",
             }
         },
@@ -48,11 +44,18 @@ class TextProofreadRequest(BaseModel):
         description="待校对文本",
         examples=["随着人工智能技术的突飞猛进，各行各业都迎来了翻天复地的变革。"],
     )
-    check_types: Optional[List[CheckType]] = Field(
+    check_types: Optional[List[str]] = Field(
         None,
-        description="校对类型（可选，不填=全部检查）",
+        deprecated=True,
+        description="（已废弃，传入无效果）历史参数：限定校对类型。总是全量审校，任何值（含非法值）都被静默忽略",
         examples=[["typo", "punctuation"]],
     )
+
+    @field_validator("check_types", mode="before")
+    @classmethod
+    def _ignore_check_types(cls, v):
+        """真·废弃：任何输入（含非法值）静默吞掉，不再 422——与「传入无效果」的文档承诺自洽"""
+        return None
     domain: Domain = Field(
         default=Domain.general,
         description="文本领域（影响校对规则侧重）",

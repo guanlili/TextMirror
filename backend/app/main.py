@@ -22,6 +22,7 @@ import app.models.global_word  # noqa
 import app.models.llm_config  # noqa
 import app.models.audit_log  # noqa
 import app.models.api_key  # noqa
+import app.models.issue_feedback  # noqa
 
 
 @asynccontextmanager

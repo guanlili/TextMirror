@@ -130,6 +130,12 @@ const adminRoutes: RouteRecordRaw[] = [
         meta: { title: '全局词库', icon: 'Notebook' },
       },
       {
+        path: 'domain-rules',
+        name: 'AdminDomainRules',
+        component: () => import('@/views/admin/domain-rules/index.vue'),
+        meta: { title: '审校规则', icon: 'Reading' },
+      },
+      {
         path: 'documents',
         name: 'AdminDocuments',
         component: () => import('@/views/admin/documents/index.vue'),

@@ -341,6 +341,49 @@ export function updateSecuritySettingsApi(data: SecuritySettingsConfig): Promise
   return request.put('/admin/system-config/security', data)
 }
 
+/** 审校领域规则配置（空字符串 = 使用内置默认） */
+export interface DomainPromptsConfig {
+  general: string
+  official: string
+  legal: string
+}
+
+export function getDomainPromptsApi(): Promise<DomainPromptsConfig> {
+  return request.get('/admin/system-config/domain-prompts')
+}
+
+export function updateDomainPromptsApi(data: DomainPromptsConfig): Promise<DomainPromptsConfig> {
+  return request.put('/admin/system-config/domain-prompts', data)
+}
+
+export function getDomainPromptsDefaultsApi(): Promise<DomainPromptsConfig> {
+  return request.get('/admin/system-config/domain-prompts/defaults')
+}
+
+/** 词库优化建议（基于用户反馈聚合） */
+export interface WhitelistSuggestion {
+  word: string
+  ignore_count: number
+  user_count: number
+  last_ignored_at?: string | null
+}
+
+export interface CorrectionSuggestion {
+  word: string
+  suggestion: string
+  accept_count: number
+  user_count: number
+}
+
+export interface DictSuggestions {
+  whitelist: WhitelistSuggestion[]
+  correction: CorrectionSuggestion[]
+}
+
+export function getDictSuggestionsApi(minCount?: number): Promise<DictSuggestions> {
+  return request.get('/admin/global-dict/suggestions', { params: minCount ? { min_count: minCount } : {} })
+}
+
 export function cleanLogsApi(days?: number): Promise<MaintenanceResult> {
   return request.post('/admin/system-config/maintenance/clean-logs', null, { params: { days } })
 }

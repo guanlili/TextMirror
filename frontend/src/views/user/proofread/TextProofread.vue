@@ -26,25 +26,11 @@
         <!-- 校对设置 -->
         <div class="proofread-settings">
           <div class="setting-row">
-            <span class="setting-label">校对类型：</span>
-            <el-checkbox-group v-model="checkTypes" class="setting-value">
-              <el-checkbox value="typo">错别字</el-checkbox>
-              <el-checkbox value="grammar">语法错误</el-checkbox>
-              <el-checkbox value="punctuation">标点符号</el-checkbox>
-              <el-checkbox value="style">表达优化</el-checkbox>
-              <el-checkbox value="sensitive">敏感词</el-checkbox>
-              <el-checkbox value="logic">逻辑问题</el-checkbox>
-            </el-checkbox-group>
-          </div>
-          <div class="setting-row">
             <span class="setting-label">领域选择：</span>
             <el-radio-group v-model="domain" class="setting-value">
               <el-radio value="general">通用</el-radio>
               <el-radio value="official">公文</el-radio>
               <el-radio value="legal">法律</el-radio>
-              <el-radio value="power">电力</el-radio>
-              <el-radio value="new_energy">新能源</el-radio>
-              <el-radio value="meter">电能表</el-radio>
             </el-radio-group>
           </div>
           <div v-if="modelOptions.length > 1" class="setting-row">
@@ -215,7 +201,7 @@
                     <el-button type="primary" size="small" @click="acceptCompareIssue(item.issue)">
                       <el-icon><Check /></el-icon>接受修改
                     </el-button>
-                    <el-button size="small" @click="item.issue._ignored = true; syncCompareIssueState(item.issue)">
+                    <el-button size="small" @click="ignoreCompareIssue(item.issue)">
                       <el-icon><Close /></el-icon>忽略
                     </el-button>
                   </div>
@@ -280,7 +266,7 @@
                       <el-button type="primary" size="small" @click="acceptCompareIssue(issue)">
                         <el-icon><Check /></el-icon>接受修改
                       </el-button>
-                      <el-button size="small" @click="issue._ignored = true">
+                      <el-button size="small" @click="ignoreCompareIssue(issue)">
                         <el-icon><Close /></el-icon>忽略
                       </el-button>
                     </div>
@@ -446,7 +432,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { textProofreadApi, proofreadCompareApi, type ProofreadIssue, type ProofreadCompareResponse } from '@/api/proofread'
+import { textProofreadApi, proofreadCompareApi, submitIssueFeedbackApi, type ProofreadIssue, type ProofreadCompareResponse } from '@/api/proofread'
 import { getAvailableModelsApi, type AvailableModel } from '@/api/polish'
 
 interface IssueWithStatus extends ProofreadIssue {
@@ -460,6 +446,7 @@ const loading = ref(false)
 const showResult = ref(false)
 const issues = ref<IssueWithStatus[]>([])
 const currentText = ref('')
+const recordId = ref<number | null>(null)
 const filterType = ref('')
 const activeIssueIndex = ref(-1)
 
@@ -473,7 +460,6 @@ onMounted(() => {
 })
 
 // 设置
-const checkTypes = ref<string[]>(['typo', 'grammar', 'punctuation', 'style'])
 const domain = ref('general')
 
 // 校对模型选择（默认当前活跃模型）
@@ -578,6 +564,7 @@ async function handleAcceptByStrategy(level: 'consensus' | 'high' | 'all') {
       item.issue._accepted = true
       syncCompareIssueState(item.issue)
     }
+    reportFeedback(targets.map(t => t.issue), 'accept')
     ElMessage.success(`已接受 ${targets.length} 条修改`)
   } catch {
     // 取消
@@ -596,6 +583,14 @@ function acceptCompareIssue(issue: any) {
   }
   issue._accepted = true
   syncCompareIssueState(issue)
+  reportFeedback([issue], 'accept')
+}
+
+/** 对比视图：忽略单条（同步状态到各模型页） */
+function ignoreCompareIssue(issue: any) {
+  issue._ignored = true
+  syncCompareIssueState(issue)
+  reportFeedback([issue], 'ignore')
 }
 
 /** 同一原文在多个模型结果里出现时，保持状态一致 */
@@ -637,6 +632,7 @@ async function handleCompareAcceptAll() {
       issue._accepted = true
       syncCompareIssueState(issue)
     }
+    reportFeedback(pending, 'accept')
     ElMessage.success('已接受所有修改')
   } catch {
     // 取消
@@ -656,7 +652,6 @@ onMounted(async () => {
 const domainLabel = computed(() => {
   const map: Record<string, string> = {
     general: '通用', official: '公文', legal: '法律',
-    power: '电力', new_energy: '新能源', meter: '电能表',
   }
   return map[domain.value] || '通用'
 })
@@ -744,10 +739,10 @@ async function handleProofread() {
     if (!canCompare.value) return ElMessage.warning('请至少选择 2 个模型')
     loading.value = true
     compareResult.value = null
+    recordId.value = null   // 对比模式无 record，清掉旧值防止单模式记录被张冠李戴
     try {
       compareResult.value = await proofreadCompareApi({
         text: inputText.value,
-        check_types: checkTypes.value.length > 0 ? checkTypes.value : undefined,
         domain: domain.value,
         config_ids: compareModelIds.value,
       })
@@ -767,11 +762,11 @@ async function handleProofread() {
   try {
     const res = await textProofreadApi({
       text: inputText.value,
-      check_types: checkTypes.value.length > 0 ? checkTypes.value : undefined,
       domain: domain.value,
       config_id: selectedModelId.value ?? undefined,
     })
     issues.value = res.issues.map(i => ({ ...i, _accepted: false, _ignored: false }))
+    recordId.value = res.record_id ?? null
     currentText.value = inputText.value
     showResult.value = true
     if (res.total_issues === 0) {
@@ -786,6 +781,20 @@ async function handleProofread() {
   }
 }
 
+// 审校建议反馈上报（fire-and-forget：失败不打扰用户）
+function reportFeedback(items: Array<{ original: string; suggestion?: string; type?: string }>, action: 'accept' | 'ignore') {
+  if (!items.length) return
+  submitIssueFeedbackApi({
+    record_id: recordId.value ?? undefined,
+    items: items.map(i => ({
+      original: i.original,
+      suggestion: i.suggestion || undefined,
+      issue_type: i.type || undefined,
+      action,
+    })),
+  }).catch(() => {})
+}
+
 // 接受单条修改
 function acceptIssue(index: number) {
   const issue = filteredIssues.value[index]
@@ -793,11 +802,14 @@ function acceptIssue(index: number) {
     currentText.value = currentText.value.replace(issue.original, issue.suggestion)
   }
   issue._accepted = true
+  reportFeedback([issue], 'accept')
 }
 
 // 忽略
 function ignoreIssue(index: number) {
-  filteredIssues.value[index]._ignored = true
+  const issue = filteredIssues.value[index]
+  issue._ignored = true
+  reportFeedback([issue], 'ignore')
 }
 
 // 撤销
@@ -818,12 +830,15 @@ async function handleAcceptAll() {
       '一键修改',
       { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
     )
+    const accepted: any[] = []
     for (const issue of issues.value) {
       if (!issue._accepted && !issue._ignored && issue.original && issue.suggestion) {
         currentText.value = currentText.value.replace(issue.original, issue.suggestion)
         issue._accepted = true
+        accepted.push(issue)
       }
     }
+    reportFeedback(accepted, 'accept')
     ElMessage.success('已接受所有修改')
   } catch {
     // 取消

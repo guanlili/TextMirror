@@ -35,25 +35,11 @@
             <el-tag size="small">{{ formatSize(selectedFile.size) }}</el-tag>
           </div>
           <div class="setting-row">
-            <span class="setting-label">校对类型：</span>
-            <el-checkbox-group v-model="checkTypes">
-              <el-checkbox value="typo">错别字</el-checkbox>
-              <el-checkbox value="grammar">语法错误</el-checkbox>
-              <el-checkbox value="punctuation">标点符号</el-checkbox>
-              <el-checkbox value="style">表达优化</el-checkbox>
-              <el-checkbox value="sensitive">敏感词</el-checkbox>
-              <el-checkbox value="logic">逻辑问题</el-checkbox>
-            </el-checkbox-group>
-          </div>
-          <div class="setting-row">
             <span class="setting-label">领域选择：</span>
             <el-radio-group v-model="domain">
               <el-radio value="general">通用</el-radio>
               <el-radio value="official">公文</el-radio>
               <el-radio value="legal">法律</el-radio>
-              <el-radio value="power">电力</el-radio>
-              <el-radio value="new_energy">新能源</el-radio>
-              <el-radio value="meter">电能表</el-radio>
             </el-radio-group>
           </div>
           <div v-if="modelOptions.length > 1" class="setting-row">
@@ -249,7 +235,10 @@ import {
   type DocumentProofreadResponse,
 } from '@/api/document'
 import { asyncDocumentProofreadApi, streamTaskStatus, type TaskStatus } from '@/api/tasks'
+import { submitIssueFeedbackApi } from '@/api/proofread'
 import { getAvailableModelsApi, type AvailableModel } from '@/api/polish'
+
+const recordId = ref<number | null>(null)
 
 interface IssueWithStatus {
   original: string
@@ -290,7 +279,6 @@ onMounted(async () => {
 })
 
 // 设置
-const checkTypes = ref<string[]>(['typo', 'grammar', 'punctuation', 'style'])
 const domain = ref('general')
 
 // 结果数据
@@ -437,7 +425,6 @@ async function handleStartProofread() {
     try {
       const submitRes = await asyncDocumentProofreadApi({
         file_id: uploadRes.file_id,
-        check_types: checkTypes.value.length > 0 ? checkTypes.value : undefined,
         domain: domain.value,
         config_id: selectedModelId.value ?? undefined,
       })
@@ -455,18 +442,19 @@ async function handleStartProofread() {
         issues: r.issues,
         total_issues: r.total_issues ?? r.issues.length,
         corrected_download_url: r.corrected_download_url || '',
+        record_id: r.record_id ?? undefined,
       } as DocumentProofreadResponse
     } catch {
       // 异步/SSE 通道不可用时回退同步校对
       proofreadRes = await documentProofreadApi({
         file_id: uploadRes.file_id,
-        check_types: checkTypes.value.length > 0 ? checkTypes.value : undefined,
         domain: domain.value,
         config_id: selectedModelId.value ?? undefined,
       })
     }
 
     // 保存结果
+    recordId.value = proofreadRes.record_id ?? null
     resultFilename.value = proofreadRes.filename
     correctedDownloadUrl.value = proofreadRes.corrected_download_url || ''
     issues.value = proofreadRes.issues.map((i: any) => ({
@@ -493,6 +481,20 @@ async function handleStartProofread() {
   }
 }
 
+// 审校建议反馈上报（fire-and-forget：失败不打扰用户）
+function reportFeedback(items: IssueWithStatus[], action: 'accept' | 'ignore') {
+  if (!items.length) return
+  submitIssueFeedbackApi({
+    record_id: recordId.value ?? undefined,
+    items: items.map(i => ({
+      original: i.original,
+      suggestion: i.suggestion || undefined,
+      issue_type: i.type || undefined,
+      action,
+    })),
+  }).catch(() => {})
+}
+
 // 接受单条修改
 function acceptIssue(issue: IssueWithStatus) {
   if (issue.original && issue.suggestion) {
@@ -502,11 +504,13 @@ function acceptIssue(issue: IssueWithStatus) {
     }
   }
   issue._accepted = true
+  reportFeedback([issue], 'accept')
 }
 
 // 忽略
 function ignoreIssue(issue: IssueWithStatus) {
   issue._ignored = true
+  reportFeedback([issue], 'ignore')
 }
 
 // 撤销
@@ -529,6 +533,7 @@ async function handleAcceptAll() {
       '一键修改',
       { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
     )
+    const accepted: IssueWithStatus[] = []
     for (const issue of issues.value) {
       if (!issue._accepted && !issue._ignored && issue.original && issue.suggestion) {
         currentText.value = currentText.value.replace(issue.original, issue.suggestion)
@@ -536,8 +541,10 @@ async function handleAcceptAll() {
           currentHtml.value = replaceTextInHtml(currentHtml.value, issue.original, escapeHtml(issue.suggestion))
         }
         issue._accepted = true
+        accepted.push(issue)
       }
     }
+    reportFeedback(accepted, 'accept')
     ElMessage.success('已接受所有修改')
   } catch {
     // 取消

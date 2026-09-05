@@ -3,9 +3,9 @@ TextMirror 开放 API Schema（对外稳定契约，独立于 Web 端 schema 演
 """
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.proofread import CheckType, Domain, ProofreadIssue
+from app.schemas.proofread import Domain, ProofreadIssue
 
 
 # ======================================================================
@@ -19,7 +19,6 @@ class OpenCompareRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "text": "随着人工智能技术的突飞猛进，各行各业都迎来了翻天复地的变革。",
-                "check_types": ["typo", "punctuation"],
                 "domain": "general",
                 "config_ids": [8, 10],
             }
@@ -27,9 +26,19 @@ class OpenCompareRequest(BaseModel):
     )
 
     text: str = Field(..., min_length=1, max_length=100000, description="待审校文本")
-    check_types: Optional[List[CheckType]] = Field(
-        None, description="校对类型（可选，不填=全部检查）", examples=[["typo", "punctuation"]]
+    check_types: Optional[List[str]] = Field(
+        None,
+        deprecated=True,
+        description="（已废弃，传入无效果）历史参数：限定校对类型。任何值（含非法值）都被静默忽略",
+        examples=[["typo", "punctuation"]],
     )
+
+    @field_validator("check_types", mode="before")
+    @classmethod
+    def _ignore_check_types(cls, v):
+        """真·废弃：静默吞掉任何输入，与「传入无效果」承诺自洽"""
+        return None
+
     domain: Domain = Field(default=Domain.general, description="文本领域")
     config_ids: List[int] = Field(
         ...,

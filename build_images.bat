@@ -17,6 +17,13 @@ if %errorlevel% neq 0 (
 )
 echo [OK] Docker Desktop ready
 
+REM ---- Build for server architecture (x86_64) ----
+REM 生产服务器为 x86_64。本地若是 Apple Silicon (arm64)，必须指定 --platform，
+REM 否则构建出 arm64 镜像，服务器上 docker load 后无法运行。
+set "BUILD_PLATFORM=--platform linux/amd64"
+echo [OK] Target platform: linux/amd64 (server x86_64)
+echo.
+
 REM ---- Check required files ----
 if not exist "backend\Dockerfile" (
     echo [ERROR] backend\Dockerfile not found. Run this script from project root.
@@ -44,7 +51,7 @@ echo ============================================================
 echo [1/4] Building backend image: textmirror-backend:latest
 echo       (First build downloads python:3.11-slim, ~3-5 min)
 echo ============================================================
-docker build -t textmirror-backend:latest -f backend\Dockerfile backend\
+docker build %BUILD_PLATFORM% -t textmirror-backend:latest -f backend\Dockerfile backend\
 if %errorlevel% neq 0 (
     echo.
     echo [ERROR] Backend image build FAILED!
@@ -59,7 +66,7 @@ echo ============================================================
 echo [2/4] Building frontend image: textmirror-frontend:latest
 echo       (First build downloads node:18-alpine, ~3-5 min)
 echo ============================================================
-docker build -t textmirror-frontend:latest -f frontend\Dockerfile frontend\
+docker build %BUILD_PLATFORM% -t textmirror-frontend:latest -f frontend\Dockerfile frontend\
 if %errorlevel% neq 0 (
     echo.
     echo [ERROR] Frontend image build FAILED!

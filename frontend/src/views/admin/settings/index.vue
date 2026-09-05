@@ -120,6 +120,8 @@
       </el-form>
     </el-card>
 
+    <!-- 审校领域规则已独立为「审校规则」页面（/admin/domain-rules） -->
+
     <!-- 数据维护 -->
     <el-card style="margin-top: 16px;">
       <template #header><span style="font-weight: 600;">数据维护</span></template>
@@ -249,6 +251,7 @@ onMounted(async () => {
     const security = await getSecuritySettingsApi()
     Object.assign(securitySettings, security)
   } catch {}
+
 })
 
 /** 保存品牌设置 */

@@ -44,7 +44,6 @@ from app.schemas.open import (
     OpenModelsResponse,
 )
 from app.schemas.proofread import (
-    CheckType,
     Domain,
     TextProofreadRequest,
     TextProofreadResponse,
@@ -68,7 +67,7 @@ ERROR_RESPONSES = {
     400: _error_example("INVALID_CONFIG", "指定的模型配置不存在或已停用"),
     401: _error_example("UNAUTHORIZED", "未提供认证凭证 / API 密钥无效"),
     403: _error_example("API_KEY_REVOKED", "密钥已吊销 / 已过期 / 账号被禁用"),
-    422: _error_example("VALIDATION_ERROR", "参数错误：check_types 非法值"),
+    422: _error_example("VALIDATION_ERROR", "参数错误：domain 非法值"),
     429: _error_example("RATE_LIMITED", "频率超限（每分钟12次）或配额用尽"),
     503: _error_example("MODEL_UNAVAILABLE", "审校服务暂时不可用，请稍后重试"),
 }
@@ -130,18 +129,8 @@ async def _check_user_quota_contract(user, db: AsyncSession, n: int = 1) -> None
 
 
 def _parse_form_check_types(raw: Optional[str]) -> Optional[List[str]]:
-    """解析 multipart 表单里的 check_types（逗号分隔，如 typo,punctuation）"""
-    if raw is None or not raw.strip():
-        return None
-    valid = {t.value for t in CheckType}
-    parts = [p.strip() for p in raw.split(",") if p.strip()]
-    invalid = [p for p in parts if p not in valid]
-    if invalid:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"code": "VALIDATION_ERROR", "message": f"check_types 含非法值: {', '.join(invalid)}（可选: {', '.join(sorted(valid))}）"},
-        )
-    return parts
+    """已废弃参数：任何输入静默忽略（与「传入无效果」承诺自洽），仅保留签名兼容"""
+    return None
 
 
 def _validate_form_domain(raw: str) -> str:
@@ -166,9 +155,9 @@ def _validate_form_domain(raw: str) -> str:
         '{"text": "这是一段需要审校的文本。"}\n'
         "```\n\n"
         "**参数说明**：\n"
-        "- `check_types`：校对类型，不填=全部（错别字/语法/标点/表达/敏感词/逻辑）\n"
         "- `domain`：文本领域（general/official/legal/...），影响校对规则侧重，默认 general\n"
-        "- `config_id`：指定模型配置，普通集成方无需关心\n\n"
+        "- `config_id`：指定模型配置，普通集成方无需关心\n"
+        "- `check_types`：已废弃，传入无效果（总是全量审校）\n\n"
         "**限制**：单密钥每分钟 12 次（`429 RATE_LIMITED`）；"
         "每日配额随归属账号（`429 KEY_QUOTA_EXCEEDED / QUOTA_EXCEEDED`）。\n\n"
         "**错误格式**：非 2xx 时 `detail` 统一为 `{'code': ..., 'message': ...}`，见下方各状态码示例。"
@@ -204,9 +193,9 @@ async def open_proofread(
     try:
         result = await proofread_text(
             text=request.text,
-            check_types=request.check_types,
             domain=request.domain,
             config_id=request.config_id,
+            user_id=user.id,
         )
     except RuntimeError as e:
         import traceback
@@ -390,9 +379,9 @@ async def open_proofread_compare(
         try:
             r = await proofread_text(
                 text=request.text,
-                check_types=request.check_types,
-                domain=request.domain,
+                    domain=request.domain,
                 config_id=config.id,
+                user_id=user.id,
             )
             return OpenCompareModelResult(
                 config_id=config.id,
@@ -486,8 +475,8 @@ def _remove_file_silently(file_path: str) -> None:
         'curl -X POST .../api/v1/open/documents -H "Authorization: Bearer tm_..." \\\n'
         '  -F "file=@报告.docx"\n'
         "```\n\n"
-        "**表单参数**（均可选）：`check_types`（逗号分隔，如 `typo,punctuation`，不填=全部）、"
-        "`domain`（默认 general）、`config_id`。\n\n"
+        "**表单参数**（均可选）：`domain`（默认 general）、`config_id`"
+        "（`check_types` 已废弃，传入无效果）。\n\n"
         "之后轮询 `status_url`（即 `GET /open/jobs/{job_id}`），"
         "`status=SUCCESS` 时 `result` 字段含审校结果与修订文档下载地址。"
     ),
@@ -496,7 +485,7 @@ def _remove_file_silently(file_path: str) -> None:
 async def open_submit_document(
     http_request: Request,
     file: UploadFile = File(..., description="待审校文档：.doc/.docx/.pdf/.txt"),
-    check_types: Optional[str] = Form(None, description="校对类型，逗号分隔（如 typo,punctuation），不填=全部"),
+    check_types: Optional[str] = Form(None, deprecated=True, description="（已废弃，传入无效果）历史参数：校对类型"),
     domain: str = Form("general", description="文本领域"),
     config_id: Optional[int] = Form(None, description="指定模型配置ID（可选）"),
     db: AsyncSession = Depends(get_db),

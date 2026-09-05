@@ -21,6 +21,10 @@ router = APIRouter(prefix="/system-config", tags=["系统配置管理"])
 BASIC_SETTINGS_KEY = "system:config:basic"
 FEISHU_SETTINGS_KEY = "system:config:feishu"
 SECURITY_SETTINGS_KEY = "system:config:security"
+DOMAIN_PROMPTS_KEY = "system:config:domain_prompts"
+
+# 可配置的审校领域（与 proofread.py 的 DOMAIN_PROMPTS 对应）
+DOMAIN_CODES = ["general", "official", "legal"]
 
 
 # ========== 基本设置 ==========
@@ -263,3 +267,57 @@ async def clean_expired_whitelist(
         message=f"已清理 {deleted} 条过期放行词",
         deleted_count=deleted,
     )
+
+
+# ========== 审校领域规则 ==========
+class DomainPromptsConfig(BaseModel):
+    """审校领域规则配置（各领域的专业校对规则，注入审校 prompt）"""
+    # 空字符串 = 使用代码内置默认规则
+    general: str = ""
+    official: str = ""
+    legal: str = ""
+
+
+@router.get("/domain-prompts", response_model=DomainPromptsConfig, summary='获取审校领域规则配置')
+async def get_domain_prompts(
+    _user=Depends(require_permission("admin:settings:edit")),
+):
+    """获取各领域审校规则（空 = 使用内置默认，effective 字段见前端提示）"""
+    redis = await get_redis()
+    data = await redis.hgetall(DOMAIN_PROMPTS_KEY)
+
+    config = DomainPromptsConfig()
+    if data:
+        for code in DOMAIN_CODES:
+            val = data.get(code.encode()) or data.get(code, b"")
+            if isinstance(val, bytes):
+                val = val.decode()
+            if val:
+                setattr(config, code, val)
+    return config
+
+
+@router.put("/domain-prompts", response_model=DomainPromptsConfig, summary='更新审校领域规则配置')
+async def update_domain_prompts(
+    config: DomainPromptsConfig,
+    _user=Depends(require_permission("admin:settings:edit")),
+):
+    """更新各领域审校规则（某领域传空字符串 = 恢复使用内置默认规则）"""
+    redis = await get_redis()
+    mapping = {code: getattr(config, code) for code in DOMAIN_CODES}
+    await redis.hset(DOMAIN_PROMPTS_KEY, mapping=mapping)
+    # 删除空值 field，让读取侧回退到内置默认
+    empty_fields = [code for code, val in mapping.items() if not val]
+    if empty_fields:
+        await redis.hdel(DOMAIN_PROMPTS_KEY, *empty_fields)
+    logger.info(f"审校领域规则已更新（自定义领域: {[c for c in DOMAIN_CODES if getattr(config, c)]}）")
+    return config
+
+
+@router.get("/domain-prompts/defaults", summary='获取各领域内置默认规则')
+async def get_domain_prompts_defaults(
+    _user=Depends(require_permission("admin:settings:edit")),
+):
+    """返回代码内置的各领域默认规则（供后台编辑时参照/恢复）"""
+    from app.services.proofread import DOMAIN_PROMPTS
+    return {code: DOMAIN_PROMPTS.get(code, "") for code in DOMAIN_CODES}
