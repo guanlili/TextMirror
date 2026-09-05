@@ -171,3 +171,29 @@ def async_proofread_document(
         "record_id": record_id,
         "corrected_download_url": corrected_url,
     }
+
+
+@celery_app.task(name="maintenance.clean_old_audit_logs")
+def clean_old_audit_logs(retention_days: int = 90):
+    """
+    定时清理过期审计日志（默认保留 90 天，与后台手动清理同口径）。
+    由 celery beat 每日 03:30 触发；audit_logs 含全文快照，只进不出会持续膨胀。
+    """
+    from sqlalchemy import create_engine, text as sa_text
+    from datetime import datetime, timedelta
+
+    sync_url = settings.DATABASE_URL.replace("postgresql+asyncpg", "postgresql+psycopg2")
+    engine = create_engine(sync_url)
+    try:
+        cutoff = datetime.utcnow() - timedelta(days=retention_days)
+        with engine.connect() as conn:
+            result = conn.execute(
+                sa_text("DELETE FROM audit_logs WHERE created_at < :cutoff"),
+                {"cutoff": cutoff},
+            )
+            conn.commit()
+            deleted = result.rowcount or 0
+        logger.info(f"[定时清理] 审计日志清理完成: 删除 {deleted} 条（{retention_days} 天前）")
+        return {"deleted": deleted}
+    finally:
+        engine.dispose()

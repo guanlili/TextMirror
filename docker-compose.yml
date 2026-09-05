@@ -68,7 +68,7 @@ services:
     restart: unless-stopped
     env_file: ./backend/.env.production
     network_mode: host
-    command: celery -A app.celery_app:celery_app worker --loglevel=info --pool=solo
+    command: celery -A app.celery_app:celery_app worker --loglevel=info --pool=solo -B  # -B=内嵌 beat（定时任务：审计日志清理）
     dns:
       - 114.114.114.114
       - 8.8.8.8

@@ -69,7 +69,7 @@ services:
     env_file: ./backend/.env
     volumes:
       - ./backend:/app
-    command: celery -A app.celery_app:celery_app worker --loglevel=info --pool=solo
+    command: celery -A app.celery_app:celery_app worker --loglevel=info --pool=solo -B  # -B=内嵌 beat（定时任务：审计日志清理）
     # 覆盖镜像内针对 API 服务的 healthcheck（celery 容器不跑 uvicorn）
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.celery_app:celery_app inspect ping -d celery@$$HOSTNAME"]

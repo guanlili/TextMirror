@@ -27,6 +27,14 @@ celery_app.conf.update(
     task_time_limit=360,  # 硬超时6分钟
     worker_prefetch_multiplier=1,
     worker_concurrency=4,
+    # 定时任务：审计日志每日清理（90 天保留，与后台手动清理同口径）
+    beat_schedule={
+        "clean-old-audit-logs-daily": {
+            "task": "maintenance.clean_old_audit_logs",
+            "schedule": 30.0 * 60 * 24,  # 每 24 小时；首次启动后 24h 触发
+            "args": (90,),
+        },
+    },
 )
 
 # 自动发现任务模块
