@@ -44,7 +44,6 @@ from app.schemas.open import (
     OpenModelsResponse,
 )
 from app.schemas.proofread import (
-    CheckType,
     Domain,
     TextProofreadRequest,
     TextProofreadResponse,
@@ -68,7 +67,7 @@ ERROR_RESPONSES = {
     400: _error_example("INVALID_CONFIG", "指定的模型配置不存在或已停用"),
     401: _error_example("UNAUTHORIZED", "未提供认证凭证 / API 密钥无效"),
     403: _error_example("API_KEY_REVOKED", "密钥已吊销 / 已过期 / 账号被禁用"),
-    422: _error_example("VALIDATION_ERROR", "参数错误：check_types 非法值"),
+    422: _error_example("VALIDATION_ERROR", "参数错误：domain 非法值"),
     429: _error_example("RATE_LIMITED", "频率超限（每分钟12次）或配额用尽"),
     503: _error_example("MODEL_UNAVAILABLE", "审校服务暂时不可用，请稍后重试"),
 }
@@ -130,18 +129,8 @@ async def _check_user_quota_contract(user, db: AsyncSession, n: int = 1) -> None
 
 
 def _parse_form_check_types(raw: Optional[str]) -> Optional[List[str]]:
-    """解析 multipart 表单里的 check_types（逗号分隔，如 typo,punctuation）"""
-    if raw is None or not raw.strip():
-        return None
-    valid = {t.value for t in CheckType}
-    parts = [p.strip() for p in raw.split(",") if p.strip()]
-    invalid = [p for p in parts if p not in valid]
-    if invalid:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"code": "VALIDATION_ERROR", "message": f"check_types 含非法值: {', '.join(invalid)}（可选: {', '.join(sorted(valid))}）"},
-        )
-    return parts
+    """已废弃参数：任何输入静默忽略（与「传入无效果」承诺自洽），仅保留签名兼容"""
+    return None
 
 
 def _validate_form_domain(raw: str) -> str:

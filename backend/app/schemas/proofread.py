@@ -3,7 +3,7 @@ TextMirror 校对相关 Schema
 """
 from enum import Enum
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CheckType(str, Enum):
@@ -44,12 +44,18 @@ class TextProofreadRequest(BaseModel):
         description="待校对文本",
         examples=["随着人工智能技术的突飞猛进，各行各业都迎来了翻天复地的变革。"],
     )
-    check_types: Optional[List[CheckType]] = Field(
+    check_types: Optional[List[str]] = Field(
         None,
         deprecated=True,
-        description="（已废弃，传入无效果）历史参数：限定校对类型。模型不遵循且类型间存在交叉，现总是全量审校",
+        description="（已废弃，传入无效果）历史参数：限定校对类型。总是全量审校，任何值（含非法值）都被静默忽略",
         examples=[["typo", "punctuation"]],
     )
+
+    @field_validator("check_types", mode="before")
+    @classmethod
+    def _ignore_check_types(cls, v):
+        """真·废弃：任何输入（含非法值）静默吞掉，不再 422——与「传入无效果」的文档承诺自洽"""
+        return None
     domain: Domain = Field(
         default=Domain.general,
         description="文本领域（影响校对规则侧重）",

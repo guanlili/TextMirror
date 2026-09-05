@@ -3,9 +3,9 @@ TextMirror 开放 API Schema（对外稳定契约，独立于 Web 端 schema 演
 """
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.proofread import CheckType, Domain, ProofreadIssue
+from app.schemas.proofread import Domain, ProofreadIssue
 
 
 # ======================================================================
@@ -26,12 +26,19 @@ class OpenCompareRequest(BaseModel):
     )
 
     text: str = Field(..., min_length=1, max_length=100000, description="待审校文本")
-    check_types: Optional[List[CheckType]] = Field(
+    check_types: Optional[List[str]] = Field(
         None,
         deprecated=True,
-        description="（已废弃，传入无效果）历史参数：限定校对类型。现总是全量审校",
+        description="（已废弃，传入无效果）历史参数：限定校对类型。任何值（含非法值）都被静默忽略",
         examples=[["typo", "punctuation"]],
     )
+
+    @field_validator("check_types", mode="before")
+    @classmethod
+    def _ignore_check_types(cls, v):
+        """真·废弃：静默吞掉任何输入，与「传入无效果」承诺自洽"""
+        return None
+
     domain: Domain = Field(default=Domain.general, description="文本领域")
     config_ids: List[int] = Field(
         ...,
