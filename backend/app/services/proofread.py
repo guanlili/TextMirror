@@ -301,40 +301,21 @@ async def load_user_words(user_id: Optional[int]) -> Dict[str, List[Dict]]:
 
 def _build_global_words_section(global_words: Dict[str, List[Dict]],
                                 user_words: Optional[Dict[str, List[Dict]]] = None) -> str:
-    """构建词库注入到 Prompt 的文本段（全局词库示例 + 用户纠错词全量 + 放行词合并）"""
+    """
+    构建 Prompt 的词库提示段。
+    词库类检查（敏感词/禁词/纠错词）已改为确定性扫描（scan_words_deterministic），
+    不再注入 prompt——LLM 只管它真正擅长的语法/逻辑/表达；放行词由后置过滤保证。
+    仅保留用户纠错词条的提示（引导模型在纠错词上下文里也注意同类表达）。
+    """
     parts = []
 
-    # 敏感词 + 禁词（仅取前10个示例）
-    sensitive_banned = global_words.get("sensitive", []) + global_words.get("banned", [])
-    if sensitive_banned:
-        sample = "、".join([w["word"] for w in sensitive_banned[:10]])
-        remain = max(0, len(sensitive_banned) - 10)
-        suffix = f"等{remain}词" if remain else ""
-        parts.append(f"敏感/禁词:{sample}{suffix}")
-
-    # 全局纠错词条（仅取前6个示例）
-    corrections = global_words.get("correction", [])
-    if corrections:
-        sample = "、".join([f"{w['word']}→{w.get('replacement','')}" for w in corrections[:6]])
-        remain = max(0, len(corrections) - 6)
-        suffix = f"等{remain}条" if remain else ""
-        parts.append(f"纠错:{sample}{suffix}")
-
-    # 用户个性化纠错词条：全量注入（用户显式维护的强规则，截断会让词库形同虚设）
+    # 用户个性化纠错词条：仍注入提示（强化模型对该类错误的敏感度，扫描层已 100% 兜底）
     user_corrections = (user_words or {}).get("correction", [])
     if user_corrections:
         sample = "、".join([f"{w['word']}→{w['replacement']}" for w in user_corrections[:50]])
         remain = max(0, len(user_corrections) - 50)
         suffix = f" 等共{len(user_corrections)}条" if remain else ""
         parts.append(f"用户指定纠错(必须执行):{sample}{suffix}")
-
-    # 放行词：全局 + 用户合并（仅取前20个）
-    whitelist = global_words.get("whitelist", []) + (user_words or {}).get("whitelist", [])
-    if whitelist:
-        sample = "、".join([w["word"] for w in whitelist[:20]])
-        remain = max(0, len(whitelist) - 20)
-        suffix = f"等{remain}词" if remain else ""
-        parts.append(f"放行:{sample}{suffix}")
 
     return "; ".join(parts) if parts else ""
 
@@ -459,6 +440,77 @@ async def _gather_preparation(user_id: Optional[int], domain: str, config_id: Op
     return (global_words, user_words, domain_rules), provider
 
 
+def scan_words_deterministic(text: str,
+                             global_words: Dict[str, List[Dict]],
+                             user_words: Optional[Dict[str, List[Dict]]] = None) -> List[Dict[str, Any]]:
+    """
+    词库确定性扫描：敏感词/禁词/纠错词直接字符串匹配生成 issue。
+    召回率 100%、零 LLM 成本；LLM 不再承担词库类检查（prompt 已移除注入）。
+    同一 (原文, 类型) 只产出一条；纠错词排除「正确词本身出现在文本中」的场景
+    （如词条"电度表→电能表"，文本出现"电能表"不该命中）。
+    """
+    issues: List[Dict[str, Any]] = []
+    seen = set()
+    user_words = user_words or {}
+
+    def _add(word: str, issue_type: str, suggestion: str, explanation: str, severity: str):
+        key = (word, issue_type)
+        if key in seen or not word:
+            return
+        seen.add(key)
+        issues.append({
+            "original": word,
+            "type": issue_type,
+            "suggestion": suggestion,
+            "explanation": explanation,
+            "severity": severity,
+            "chunk_index": 0,
+            "source": "dict_scan",
+        })
+
+    # 敏感词/禁词：命中即报（禁词更严重）
+    sensitive_words = {w["word"] for w in global_words.get("sensitive", [])}
+    banned_words = {w["word"] for w in global_words.get("banned", [])}
+    for word in banned_words:
+        if word and word in text:
+            _add(word, "sensitive", "请删除或替换该违禁词", f"命中违禁词库", "error")
+    for word in sensitive_words:
+        if word and word in text and word not in banned_words:
+            _add(word, "sensitive", "请评估是否需要替换该敏感词", f"命中敏感词库", "warning")
+
+    # 纠错词：全局 + 用户（用户词与全局词冲突时用户优先——显式维护的规则更具体）
+    corrections: Dict[str, str] = {}
+    for w in global_words.get("correction", []):
+        if w.get("word") and w.get("replacement"):
+            corrections[w["word"]] = w["replacement"]
+    for w in user_words.get("correction", []):
+        if w.get("word") and w.get("replacement"):
+            corrections[w["word"]] = w["replacement"]
+
+    for wrong, correct in corrections.items():
+        if wrong and wrong in text:
+            _add(wrong, "typo", correct, f"词库纠错：{wrong}→{correct}", "error")
+
+    return issues
+
+
+def merge_issues(llm_issues: List[Dict[str, Any]],
+                 scanned_issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    合并确定性扫描结果与 LLM 结果：按 (original, type) 去重，扫描结果优先保底
+    （LLM 对同一问题的解释更自然，优先保留 LLM 版本，扫描版补位）
+    """
+    llm_keys = {(i.get("original"), i.get("type")) for i in llm_issues}
+    merged = list(llm_issues)
+    for s in scanned_issues:
+        if (s["original"], s["type"]) not in llm_keys:
+            merged.append(s)
+    # 严重度排序：error → warning → info
+    order = {"error": 0, "warning": 1, "info": 2}
+    merged.sort(key=lambda i: order.get(i.get("severity", "warning"), 1))
+    return merged
+
+
 async def proofread_text(
     text: str,
     check_types: Optional[List[str]] = None,
@@ -495,9 +547,14 @@ async def proofread_text(
                 f"纠错={len(global_words['correction'])} 放行={len(global_words['whitelist'])}; "
                 f"用户: 纠错={len(user_words['correction'])} 放行={len(user_words['whitelist'])})")
 
-    # 构建 Prompt
+    # 构建 Prompt（词库类检查已改为确定性扫描，不再注入 prompt；放行词仍由后置过滤保证）
     system_prompt = build_system_prompt(check_types, domain, global_words, user_words, domain_rules)
     logger.info(f"[校对] system_prompt 长度={len(system_prompt)} 字符")
+
+    # 词库确定性扫描：敏感词/禁词/纠错词字符串匹配，召回 100%、零 LLM 成本
+    scanned_issues = scan_words_deterministic(text, global_words, user_words)
+    if scanned_issues:
+        logger.info(f"[校对] 词库扫描命中 {len(scanned_issues)} 项")
 
     # 调用大模型（并发校对所有分片，加速整体响应）
     all_issues = []
@@ -544,8 +601,13 @@ async def proofread_text(
         await provider.close()
 
     # 放行词确定性后处理：模型报的问题里 original 命中放行词的直接过滤，
-    # 不依赖模型自觉遵守 prompt 中的放行规则
+    # 不依赖模型自觉遵守 prompt 中的放行规则（扫描结果同样过滤；
+    # 用户纠错映射命中的项例外保留——显式"要改"压过"别报"）
     all_issues = _filter_whitelist_issues(all_issues, global_words, user_words)
+    scanned_issues = _filter_whitelist_issues(scanned_issues, global_words, user_words)
+
+    # 合并确定性扫描结果（LLM 版本优先，扫描版补位，按严重度排序）
+    all_issues = merge_issues(all_issues, scanned_issues)
 
     logger.info(f"[校对] 完成 问题={len(all_issues)} 总耗时={time.perf_counter()-t0:.2f}s 用量={total_usage}")
 

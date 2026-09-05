@@ -34,6 +34,21 @@ export function textProofreadApi(data: {
   return request.post('/proofread/text', data, { timeout: 300000 })
 }
 
+/** 审校建议反馈上报 */
+export interface IssueFeedbackPayload {
+  record_id?: number
+  items: Array<{
+    original: string
+    suggestion?: string
+    issue_type?: string
+    action: 'accept' | 'ignore'
+  }>
+}
+
+export function submitIssueFeedbackApi(data: IssueFeedbackPayload): Promise<{ saved: number }> {
+  return request.post('/proofread/feedback', data)
+}
+
 /** 多模型对比：单模型校对结果 */
 export interface ModelProofreadResult {
   config_id: number

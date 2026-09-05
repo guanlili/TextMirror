@@ -278,3 +278,54 @@ async def text_proofread_compare(
         consensus_originals=consensus,
         only_in=only_in,
     )
+
+
+# ======================================================================
+# 审校建议反馈（接受/忽略）——词库优化数据飞轮
+# ======================================================================
+
+class IssueFeedbackItem(BaseModel):
+    """单条反馈"""
+    original: str = Field(..., max_length=500, description="问题原文片段")
+    suggestion: Optional[str] = Field(None, max_length=500, description="修改建议")
+    issue_type: Optional[str] = Field(None, max_length=20, description="问题类型")
+    action: str = Field(..., pattern="^(accept|ignore)$", description="动作: accept/ignore")
+
+
+class IssueFeedbackRequest(BaseModel):
+    """反馈上报请求"""
+    record_id: Optional[int] = Field(None, description="校对记录ID（开放API调用可无）")
+    items: List[IssueFeedbackItem] = Field(..., min_length=1, max_length=50)
+
+
+@router.post("/feedback", summary='上报审校建议反馈（接受/忽略）')
+async def submit_issue_feedback(
+    request: IssueFeedbackRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
+):
+    """
+    上报用户对审校建议的接受/忽略行为（fire-and-forget，前端不阻塞交互）。
+    仅登录用户记录（游客无归属意义）；数据用于后续词库优化（高忽略率→放行词候选）。
+    """
+    from app.models.issue_feedback import IssueFeedback
+
+    if current_user is None:
+        return {"saved": 0}
+
+    saved = 0
+    for item in request.items:
+        db.add(IssueFeedback(
+            record_id=request.record_id,
+            user_id=current_user.id,
+            original=item.original,
+            suggestion=item.suggestion,
+            issue_type=item.issue_type,
+            action=item.action,
+        ))
+        saved += 1
+    await db.flush()
+
+    logger.info(f"[反馈] user={current_user.id} record={request.record_id} 条数={saved}")
+    return {"saved": saved}
