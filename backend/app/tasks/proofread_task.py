@@ -98,7 +98,7 @@ def async_proofread_document(
     try:
         # 调用校对服务（异步转同步）
         from app.services.proofread import proofread_text
-        result = _run_async(proofread_text(text=text, check_types=check_types, domain=domain, config_id=config_id, user_id=user_id))
+        result = _run_async(proofread_text(text=text, domain=domain, config_id=config_id, user_id=user_id))
     except Exception as e:
         logger.error(f"[Task {task_id}] 校对失败: {e}")
         # 开放API提交的任务：退还密钥日配额（服务端失败不该消耗额度）

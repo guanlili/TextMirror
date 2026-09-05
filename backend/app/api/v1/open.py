@@ -204,7 +204,6 @@ async def open_proofread(
     try:
         result = await proofread_text(
             text=request.text,
-            check_types=request.check_types,
             domain=request.domain,
             config_id=request.config_id,
             user_id=user.id,
@@ -391,8 +390,7 @@ async def open_proofread_compare(
         try:
             r = await proofread_text(
                 text=request.text,
-                check_types=request.check_types,
-                domain=request.domain,
+                    domain=request.domain,
                 config_id=config.id,
                 user_id=user.id,
             )

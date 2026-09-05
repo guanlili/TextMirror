@@ -274,7 +274,6 @@ async def document_proofread(
     try:
         result = await proofread_text(
             text=text,
-            check_types=request.check_types,
             domain=request.domain,
             config_id=request.config_id,
             user_id=current_user.id if current_user else None,
@@ -421,7 +420,6 @@ async def document_proofread_async(
     # 提交异步任务
     task = async_proofread_document.delay(
         text=file_info["text"],
-        check_types=request.check_types,
         domain=request.domain,
         file_id=request.file_id,
         filename=file_info["filename"],

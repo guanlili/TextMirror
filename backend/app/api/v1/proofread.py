@@ -56,7 +56,6 @@ async def text_proofread(
         # 调用校对服务
         result = await proofread_text(
             text=request.text,
-            check_types=request.check_types,
             domain=request.domain,
             config_id=request.config_id,
             user_id=current_user.id if current_user else None,
@@ -214,8 +213,7 @@ async def text_proofread_compare(
         try:
             r = await proofread_text(
                 text=request.text,
-                check_types=request.check_types,
-                domain=request.domain,
+                    domain=request.domain,
                 config_id=config.id,
                 user_id=current_user.id if current_user else None,
             )
