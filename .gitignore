@@ -63,3 +63,4 @@ logs/
 待修复问题汇总.md
 服务器IP封禁问题备忘.md
 飞书对接流程及配置及开发文档.md
+backend/celerybeat-schedule*
