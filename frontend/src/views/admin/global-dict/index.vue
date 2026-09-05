@@ -30,6 +30,9 @@
         <div class="card-header">
           <span class="card-title">全局词库管理</span>
           <div style="display: flex; gap: 8px;">
+            <el-badge :value="suggestionCount" :hidden="suggestionCount === 0" type="warning">
+              <el-button size="small" @click="openSuggestions"><el-icon><MagicStick /></el-icon>优化建议</el-button>
+            </el-badge>
             <el-button type="primary" size="small" @click="openAddDialog"><el-icon><Plus /></el-icon>添加词条</el-button>
             <el-button size="small" @click="showBatchDialog = true">批量导入</el-button>
           </div>
@@ -153,17 +156,54 @@
         <el-button type="primary" :loading="submitting" @click="handleBatchImport">导入</el-button>
       </template>
     </el-dialog>
+    <!-- 优化建议抽屉（反馈数据飞轮：聚合用户接受/忽略行为） -->
+    <el-drawer v-model="showSuggestions" title="词库优化建议" size="520px">
+      <div v-loading="suggestionsLoading">
+        <el-empty v-if="!suggestionsLoading && suggestionCount === 0"
+          description="暂无建议" :image-size="80">
+          <p class="sug-empty-tip">
+            系统会聚合用户在校对中的「接受/忽略」行为：被反复忽略的词建议加入放行词，
+            被反复接受的错字纠正建议沉淀为纠错词条。积累一定使用量后这里会出现建议。
+          </p>
+        </el-empty>
+
+        <template v-if="suggestions.whitelist.length">
+          <h4 class="sug-section-title">建议加入放行词（被反复忽略）</h4>
+          <div v-for="s in suggestions.whitelist" :key="'w' + s.word" class="sug-item">
+            <div class="sug-main">
+              <span class="sug-word">{{ s.word }}</span>
+              <span class="sug-meta">被忽略 {{ s.ignore_count }} 次 · {{ s.user_count }} 位用户</span>
+            </div>
+            <el-button type="success" size="small" :loading="adopting === 'w:' + s.word"
+              @click="adoptWhitelist(s.word)">加入放行词</el-button>
+          </div>
+        </template>
+
+        <template v-if="suggestions.correction.length">
+          <h4 class="sug-section-title">建议沉淀纠错词条（被反复接受）</h4>
+          <div v-for="s in suggestions.correction" :key="'c' + s.word" class="sug-item">
+            <div class="sug-main">
+              <span class="sug-word">{{ s.word }} → {{ s.suggestion }}</span>
+              <span class="sug-meta">被接受 {{ s.accept_count }} 次 · {{ s.user_count }} 位用户</span>
+            </div>
+            <el-button type="primary" size="small" :loading="adopting === 'c:' + s.word"
+              @click="adoptCorrection(s.word, s.suggestion)">加入纠错词</el-button>
+          </div>
+        </template>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  type GlobalWordItem, type GlobalWordStats,
+  type GlobalWordItem, type GlobalWordStats, type DictSuggestions,
   getGlobalWordStatsApi, listGlobalWordsApi,
   createGlobalWordApi, updateGlobalWordApi,
   deleteGlobalWordApi, batchCreateGlobalWordsApi,
+  getDictSuggestionsApi,
 } from '@/api/admin'
 
 const typeLabelMap: Record<string, string> = { sensitive: '敏感词', banned: '禁词', correction: '纠错词条', whitelist: '放行词' }
@@ -187,9 +227,54 @@ const batchText = ref('')
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
+// ---- 优化建议（反馈数据飞轮） ----
+const showSuggestions = ref(false)
+const suggestionsLoading = ref(false)
+const suggestions = reactive<DictSuggestions>({ whitelist: [], correction: [] })
+const adopting = ref('')
+const suggestionCount = computed(() => suggestions.whitelist.length + suggestions.correction.length)
+
+async function fetchSuggestions() {
+  suggestionsLoading.value = true
+  try {
+    const res = await getDictSuggestionsApi()
+    suggestions.whitelist = res.whitelist
+    suggestions.correction = res.correction
+  } catch {}
+  suggestionsLoading.value = false
+}
+
+function openSuggestions() {
+  showSuggestions.value = true
+  fetchSuggestions()
+}
+
+async function adoptWhitelist(word: string) {
+  adopting.value = 'w:' + word
+  try {
+    await createGlobalWordApi({ word, type: 'whitelist' })
+    suggestions.whitelist = suggestions.whitelist.filter(s => s.word !== word)
+    ElMessage.success(`已将「${word}」加入放行词`)
+    fetchStats()
+  } catch {}
+  adopting.value = ''
+}
+
+async function adoptCorrection(word: string, suggestion: string) {
+  adopting.value = 'c:' + word
+  try {
+    await createGlobalWordApi({ word, type: 'correction', replacement: suggestion })
+    suggestions.correction = suggestions.correction.filter(s => s.word !== word)
+    ElMessage.success(`已将「${word}→${suggestion}」加入纠错词条`)
+    fetchStats()
+  } catch {}
+  adopting.value = ''
+}
+
 onMounted(() => {
   fetchStats()
   fetchList()
+  fetchSuggestions()
 })
 
 async function fetchStats() {
@@ -309,4 +394,17 @@ async function handleBatchImport() {
   }
   .card-header { display: flex; align-items: center; justify-content: space-between; .card-title { font-size: 16px; font-weight: 600; color: #333; } }
 }
+.sug-section-title {
+  font-size: 14px; font-weight: 600; margin: 14px 0 8px;
+  &:first-child { margin-top: 0; }
+}
+.sug-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 12px; border: 1px solid #ebeef5; border-radius: 8px; margin-bottom: 8px;
+  .sug-main { min-width: 0; display: flex; flex-direction: column; gap: 3px;
+    .sug-word { font-weight: 500; font-size: 14px; word-break: break-all; }
+    .sug-meta { font-size: 12px; color: #999; }
+  }
+}
+.sug-empty-tip { font-size: 12px; color: #999; max-width: 320px; margin: 0 auto; line-height: 1.7; }
 </style>
