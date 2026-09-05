@@ -37,6 +37,10 @@
           <el-icon><Notebook /></el-icon>
           <template #title>全局词库</template>
         </el-menu-item>
+        <el-menu-item index="/admin/domain-rules">
+          <el-icon><Reading /></el-icon>
+          <template #title>审校规则</template>
+        </el-menu-item>
         <el-menu-item index="/admin/documents">
           <el-icon><Folder /></el-icon>
           <template #title>文档管理</template>
