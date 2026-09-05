@@ -1,11 +1,12 @@
 # TextMirror 智能文档审校平台 Docker Compose（生产环境）
 # ============================================================
-# 部署方式：本地构建镜像 → 导出 → 上传服务器 → docker compose up -d
-# 镜像构建：本地执行 build_images.bat
+# 部署方式：服务器 git clone 本仓库 → 配置根目录 .env 与
+#          backend/.env.production → docker compose up -d --build
+# 更新方式：git pull && docker compose up -d --build
 # ============================================================
-# 仅 3 个容器：前端(Nginx) / 后端API / Celery Worker
-# 数据库和Redis需自行部署（推荐使用服务器现有服务）
-# 全部使用 host 网络模式
+# 5 个容器：前端(Nginx) / 后端API / Celery Worker / PostgreSQL / Redis
+# 全部使用 host 网络模式；PG/Redis 仅监听 127.0.0.1，外部访问由防火墙控制
+# 数据库密码等敏感项从项目根目录 .env 读取（勿提交），字段见下方 ${...} 引用
 
 services:
   # ---- 前端（Nginx + 反向代理后端）----
@@ -53,6 +54,11 @@ services:
       options:
         max-size: "20m"
         max-file: "5"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   # ---- Celery Worker（与后端共用同一镜像）----
   celery-worker:
@@ -69,9 +75,60 @@ services:
     dns_search: []
     volumes:
       - /opt/UploadFile/textMirrorUpload:/opt/UploadFile/textMirrorUpload
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
-      backend:
+      postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ---- PostgreSQL（数据持久化到 ./data/postgres）----
+  postgres:
+    image: postgres:16-alpine
+    container_name: textmirror-postgres
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-textmirror}
+      POSTGRES_USER: ${POSTGRES_USER:-textmirror}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在项目根目录 .env 中设置 POSTGRES_PASSWORD}
+      TZ: Asia/Shanghai
+    command: ["postgres", "-c", "listen_addresses=127.0.0.1", "-c", "max_connections=200"]
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-textmirror} -d ${POSTGRES_DB:-textmirror}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---- Redis（AOF 持久化到 ./data/redis）----
+  redis:
+    image: redis:7-alpine
+    container_name: textmirror-redis
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?请在项目根目录 .env 中设置 REDIS_PASSWORD}
+    command: ["redis-server", "--bind", "127.0.0.1", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
     logging:
       driver: "json-file"
       options:
