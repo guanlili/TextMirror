@@ -743,6 +743,7 @@ async function handleProofread() {
     if (!canCompare.value) return ElMessage.warning('请至少选择 2 个模型')
     loading.value = true
     compareResult.value = null
+    recordId.value = null   // 对比模式无 record，清掉旧值防止单模式记录被张冠李戴
     try {
       compareResult.value = await proofreadCompareApi({
         text: inputText.value,
