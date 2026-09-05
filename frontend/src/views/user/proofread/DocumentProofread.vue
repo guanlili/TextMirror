@@ -235,7 +235,10 @@ import {
   type DocumentProofreadResponse,
 } from '@/api/document'
 import { asyncDocumentProofreadApi, streamTaskStatus, type TaskStatus } from '@/api/tasks'
+import { submitIssueFeedbackApi } from '@/api/proofread'
 import { getAvailableModelsApi, type AvailableModel } from '@/api/polish'
+
+const recordId = ref<number | null>(null)
 
 interface IssueWithStatus {
   original: string
@@ -439,6 +442,7 @@ async function handleStartProofread() {
         issues: r.issues,
         total_issues: r.total_issues ?? r.issues.length,
         corrected_download_url: r.corrected_download_url || '',
+        record_id: r.record_id ?? undefined,
       } as DocumentProofreadResponse
     } catch {
       // 异步/SSE 通道不可用时回退同步校对
@@ -450,6 +454,7 @@ async function handleStartProofread() {
     }
 
     // 保存结果
+    recordId.value = proofreadRes.record_id ?? null
     resultFilename.value = proofreadRes.filename
     correctedDownloadUrl.value = proofreadRes.corrected_download_url || ''
     issues.value = proofreadRes.issues.map((i: any) => ({
@@ -476,6 +481,20 @@ async function handleStartProofread() {
   }
 }
 
+// 审校建议反馈上报（fire-and-forget：失败不打扰用户）
+function reportFeedback(items: IssueWithStatus[], action: 'accept' | 'ignore') {
+  if (!items.length) return
+  submitIssueFeedbackApi({
+    record_id: recordId.value ?? undefined,
+    items: items.map(i => ({
+      original: i.original,
+      suggestion: i.suggestion || undefined,
+      issue_type: i.type || undefined,
+      action,
+    })),
+  }).catch(() => {})
+}
+
 // 接受单条修改
 function acceptIssue(issue: IssueWithStatus) {
   if (issue.original && issue.suggestion) {
@@ -485,11 +504,13 @@ function acceptIssue(issue: IssueWithStatus) {
     }
   }
   issue._accepted = true
+  reportFeedback([issue], 'accept')
 }
 
 // 忽略
 function ignoreIssue(issue: IssueWithStatus) {
   issue._ignored = true
+  reportFeedback([issue], 'ignore')
 }
 
 // 撤销
@@ -512,6 +533,7 @@ async function handleAcceptAll() {
       '一键修改',
       { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
     )
+    const accepted: IssueWithStatus[] = []
     for (const issue of issues.value) {
       if (!issue._accepted && !issue._ignored && issue.original && issue.suggestion) {
         currentText.value = currentText.value.replace(issue.original, issue.suggestion)
@@ -519,8 +541,10 @@ async function handleAcceptAll() {
           currentHtml.value = replaceTextInHtml(currentHtml.value, issue.original, escapeHtml(issue.suggestion))
         }
         issue._accepted = true
+        accepted.push(issue)
       }
     }
+    reportFeedback(accepted, 'accept')
     ElMessage.success('已接受所有修改')
   } catch {
     // 取消
