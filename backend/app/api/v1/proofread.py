@@ -59,6 +59,7 @@ async def text_proofread(
             check_types=request.check_types,
             domain=request.domain,
             config_id=request.config_id,
+            user_id=current_user.id if current_user else None,
         )
     except RuntimeError as e:
         import traceback
@@ -216,6 +217,7 @@ async def text_proofread_compare(
                 check_types=request.check_types,
                 domain=request.domain,
                 config_id=config.id,
+                user_id=current_user.id if current_user else None,
             )
             return ModelProofreadResult(
                 config_id=config.id,

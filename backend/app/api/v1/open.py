@@ -207,6 +207,7 @@ async def open_proofread(
             check_types=request.check_types,
             domain=request.domain,
             config_id=request.config_id,
+            user_id=user.id,
         )
     except RuntimeError as e:
         import traceback
@@ -393,6 +394,7 @@ async def open_proofread_compare(
                 check_types=request.check_types,
                 domain=request.domain,
                 config_id=config.id,
+                user_id=user.id,
             )
             return OpenCompareModelResult(
                 config_id=config.id,

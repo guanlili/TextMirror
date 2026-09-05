@@ -5,9 +5,9 @@ TextMirror 校对服务
 import asyncio
 import json
 import re
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.core.config import settings
 from app.core.database import async_session_factory
@@ -113,10 +113,11 @@ PROOFREAD_SYSTEM_PROMPT = """你是一位拥有20年经验的资深中文审校�
 
 【词库规则】
 {global_words_section}
+用户指定纠错(标注"必须执行")词条出现时一律按映射替换报告。
 
 【校对准则】
 1. 精确定位：o(原文片段)必须是原文中逐字匹配的原始文本，不可修改、截断或概括，确保前端能精确高亮
-2. 有效建议：s(修改建议)必须是可以直接替换原文的完整修正文本
+2. 有效建议：s(修改建议)必须是可以直接替换原文的完整修正文本，禁止输出说明性文字（如"规范11位手机号"不是可替换文本）；若无法给出具体替换值，则报 warning 级并在 e 中说明需人工核对
 3. 清晰说明：e(原因说明)用简练中文解释问题所在，不超过25个字
 4. 准确分类：t(问题类型)必须从以下枚举中选择：typo(错别字)、grammar(语法错误)、punctuation(标点符号)、style(表达优化)、sensitive(敏感词)、logic(逻辑问题)
 5. 合理定级：sv(严重度)分三级——error(明确错误,必须修改)、warning(可能有误或不规范,建议修改)、info(可优化项,酌情修改)
@@ -255,8 +256,52 @@ async def load_global_words() -> Dict[str, List[Dict]]:
     return result
 
 
-def _build_global_words_section(global_words: Dict[str, List[Dict]]) -> str:
-    """构建全局词库注入到 Prompt 的文本段（极简版）"""
+async def load_user_words(user_id: Optional[int]) -> Dict[str, List[Dict]]:
+    """
+    加载用户级词料：个性化词库词条（错→对）+ 有效放行词
+    返回: {"correction": [...], "whitelist": [...]}
+    user_id 为空（游客/无归属）返回空集
+    """
+    result = {"correction": [], "whitelist": []}
+    if user_id is None:
+        return result
+    try:
+        from app.models.dictionary import Dictionary, DictionaryEntry, WhitelistWord
+        from datetime import datetime, timezone
+
+        async with async_session_factory() as session:
+            # 启用词库的词条
+            rows = await session.execute(
+                select(DictionaryEntry)
+                .join(Dictionary, Dictionary.id == DictionaryEntry.dictionary_id)
+                .where(Dictionary.user_id == user_id, Dictionary.is_active == True)
+            )
+            for entry in rows.scalars().all():
+                if entry.wrong_word and entry.correct_word:
+                    result["correction"].append(
+                        {"word": entry.wrong_word, "replacement": entry.correct_word}
+                    )
+
+            # 放行词：永久 + 未过期的临时
+            # expire_at 是 naive 列（历史 schema），用 SQL 侧 now() 比较避免 aware/naive 传参冲突
+            wl_rows = await session.execute(
+                select(WhitelistWord.word).where(
+                    WhitelistWord.user_id == user_id,
+                    (WhitelistWord.type == "permanent")
+                    | (WhitelistWord.expire_at > func.now()),
+                )
+            )
+            for (word,) in wl_rows.all():
+                if word:
+                    result["whitelist"].append({"word": word})
+    except Exception as e:
+        logger.warning(f"加载用户词库失败,跳过: {e}")
+    return result
+
+
+def _build_global_words_section(global_words: Dict[str, List[Dict]],
+                                user_words: Optional[Dict[str, List[Dict]]] = None) -> str:
+    """构建词库注入到 Prompt 的文本段（全局词库示例 + 用户纠错词全量 + 放行词合并）"""
     parts = []
 
     # 敏感词 + 禁词（仅取前10个示例）
@@ -267,7 +312,7 @@ def _build_global_words_section(global_words: Dict[str, List[Dict]]) -> str:
         suffix = f"等{remain}词" if remain else ""
         parts.append(f"敏感/禁词:{sample}{suffix}")
 
-    # 纠错词条（仅取前6个示例）
+    # 全局纠错词条（仅取前6个示例）
     corrections = global_words.get("correction", [])
     if corrections:
         sample = "、".join([f"{w['word']}→{w.get('replacement','')}" for w in corrections[:6]])
@@ -275,11 +320,19 @@ def _build_global_words_section(global_words: Dict[str, List[Dict]]) -> str:
         suffix = f"等{remain}条" if remain else ""
         parts.append(f"纠错:{sample}{suffix}")
 
-    # 放行词（仅取前10个示例）
-    whitelist = global_words.get("whitelist", [])
+    # 用户个性化纠错词条：全量注入（用户显式维护的强规则，截断会让词库形同虚设）
+    user_corrections = (user_words or {}).get("correction", [])
+    if user_corrections:
+        sample = "、".join([f"{w['word']}→{w['replacement']}" for w in user_corrections[:50]])
+        remain = max(0, len(user_corrections) - 50)
+        suffix = f" 等共{len(user_corrections)}条" if remain else ""
+        parts.append(f"用户指定纠错(必须执行):{sample}{suffix}")
+
+    # 放行词：全局 + 用户合并（仅取前20个）
+    whitelist = global_words.get("whitelist", []) + (user_words or {}).get("whitelist", [])
     if whitelist:
-        sample = "、".join([w["word"] for w in whitelist[:10]])
-        remain = max(0, len(whitelist) - 10)
+        sample = "、".join([w["word"] for w in whitelist[:20]])
+        remain = max(0, len(whitelist) - 20)
         suffix = f"等{remain}词" if remain else ""
         parts.append(f"放行:{sample}{suffix}")
 
@@ -287,8 +340,9 @@ def _build_global_words_section(global_words: Dict[str, List[Dict]]) -> str:
 
 
 def build_system_prompt(check_types: List[str], domain: str,
-                        global_words: Optional[Dict[str, List[Dict]]] = None) -> str:
-    """构建系统 Prompt,包含领域专业规则和全局词库"""
+                        global_words: Optional[Dict[str, List[Dict]]] = None,
+                        user_words: Optional[Dict[str, List[Dict]]] = None) -> str:
+    """构建系统 Prompt,包含领域专业规则、全局词库和用户个性化词库"""
     type_names = [PROOFREAD_TYPES.get(t, t) for t in check_types]
     check_types_str = "、".join(type_names) if type_names else "所有类型的"
     domain_str = DOMAIN_MAP.get(domain, "通用")
@@ -296,10 +350,10 @@ def build_system_prompt(check_types: List[str], domain: str,
     # 获取领域专业规则
     domain_rules = DOMAIN_PROMPTS.get(domain, DOMAIN_PROMPTS.get("general", ""))
 
-    # 构建全局词库段落
+    # 构建词库段落（全局 + 用户）
     global_words_section = ""
     if global_words:
-        global_words_section = _build_global_words_section(global_words)
+        global_words_section = _build_global_words_section(global_words, user_words)
 
     return PROOFREAD_SYSTEM_PROMPT.format(
         check_types=check_types_str,
@@ -371,11 +425,17 @@ def parse_proofread_result(content: str) -> List[Dict[str, Any]]:
     return []
 
 
+async def _load_all_words(user_id: Optional[int]) -> Tuple[Dict[str, List[Dict]], Dict[str, List[Dict]]]:
+    """并发加载全局词库与用户词库（供 asyncio.gather 使用）"""
+    return await asyncio.gather(load_global_words(), load_user_words(user_id))
+
+
 async def proofread_text(
     text: str,
     check_types: Optional[List[str]] = None,
     domain: str = "general",
     config_id: Optional[int] = None,
+    user_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     执行文本校对
@@ -384,6 +444,7 @@ async def proofread_text(
     :param check_types: 校对类型列表,为空则全部检查
     :param domain: 领域
     :param config_id: 指定模型配置ID（None 用当前活跃模型）
+    :param user_id: 归属用户ID（注入其个性化词库与放行词；游客为 None）
     :return: 校对结果
     """
     import time
@@ -394,21 +455,22 @@ async def proofread_text(
 
     # 文本分片
     chunks = split_text_into_chunks(text)
-    logger.info(f"[校对] 总长度={len(text)} 分片数={len(chunks)} 领域={domain}")
+    logger.info(f"[校对] 总长度={len(text)} 分片数={len(chunks)} 领域={domain} user_id={user_id}")
 
-    # 并行：加载全局词库 + 获取大模型 Provider，避免串行 DB 等待
+    # 并行：加载全局词库+用户词库 + 获取大模型 Provider，避免串行 DB 等待
     t1 = time.perf_counter()
-    global_words, provider = await asyncio.gather(
-        load_global_words(),
+    (global_words, user_words), provider = await asyncio.gather(
+        _load_all_words(user_id),
         get_llm_provider(config_id),
     )
     t2 = time.perf_counter()
     logger.info(f"[校对] 准备阶段耗时={t2-t1:.2f}s "
-                f"(词库: 敏感={len(global_words['sensitive'])} 禁={len(global_words['banned'])} "
-                f"纠错={len(global_words['correction'])} 放行={len(global_words['whitelist'])})")
+                f"(全局: 敏感={len(global_words['sensitive'])} 禁={len(global_words['banned'])} "
+                f"纠错={len(global_words['correction'])} 放行={len(global_words['whitelist'])}; "
+                f"用户: 纠错={len(user_words['correction'])} 放行={len(user_words['whitelist'])})")
 
     # 构建 Prompt
-    system_prompt = build_system_prompt(check_types, domain, global_words)
+    system_prompt = build_system_prompt(check_types, domain, global_words, user_words)
     logger.info(f"[校对] system_prompt 长度={len(system_prompt)} 字符")
 
     # 调用大模型（并发校对所有分片，加速整体响应）
@@ -455,6 +517,10 @@ async def proofread_text(
     finally:
         await provider.close()
 
+    # 放行词确定性后处理：模型报的问题里 original 命中放行词的直接过滤，
+    # 不依赖模型自觉遵守 prompt 中的放行规则
+    all_issues = _filter_whitelist_issues(all_issues, global_words, user_words)
+
     logger.info(f"[校对] 完成 问题={len(all_issues)} 总耗时={time.perf_counter()-t0:.2f}s 用量={total_usage}")
 
     return {
@@ -465,3 +531,26 @@ async def proofread_text(
         "domain": domain,
         "check_types": check_types,
     }
+
+
+def _filter_whitelist_issues(issues: List[Dict[str, Any]],
+                              global_words: Dict[str, List[Dict]],
+                              user_words: Optional[Dict[str, List[Dict]]] = None) -> List[Dict[str, Any]]:
+    """
+    过滤命中放行词的问题项（全局放行词 + 用户放行词）。
+    例外：original 命中用户纠错映射（用户显式要求改）时不放行——用户意图优先于放行词。
+    """
+    whitelist = {w["word"] for w in global_words.get("whitelist", [])}
+    whitelist.update(w["word"] for w in (user_words or {}).get("whitelist", []))
+    user_corrections = {w["word"] for w in (user_words or {}).get("correction", [])}
+    if not whitelist or not issues:
+        return issues
+
+    kept = []
+    for issue in issues:
+        original = (issue.get("original") or "").strip()
+        if original and original in whitelist and original not in user_corrections:
+            logger.info(f"[校对] 放行词过滤: '{original}'")
+            continue
+        kept.append(issue)
+    return kept

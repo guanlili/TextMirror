@@ -277,6 +277,7 @@ async def document_proofread(
             check_types=request.check_types,
             domain=request.domain,
             config_id=request.config_id,
+            user_id=current_user.id if current_user else None,
         )
     except RuntimeError as e:
         import traceback
