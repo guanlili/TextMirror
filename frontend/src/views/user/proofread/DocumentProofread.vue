@@ -35,17 +35,6 @@
             <el-tag size="small">{{ formatSize(selectedFile.size) }}</el-tag>
           </div>
           <div class="setting-row">
-            <span class="setting-label">校对类型：</span>
-            <el-checkbox-group v-model="checkTypes">
-              <el-checkbox value="typo">错别字</el-checkbox>
-              <el-checkbox value="grammar">语法错误</el-checkbox>
-              <el-checkbox value="punctuation">标点符号</el-checkbox>
-              <el-checkbox value="style">表达优化</el-checkbox>
-              <el-checkbox value="sensitive">敏感词</el-checkbox>
-              <el-checkbox value="logic">逻辑问题</el-checkbox>
-            </el-checkbox-group>
-          </div>
-          <div class="setting-row">
             <span class="setting-label">领域选择：</span>
             <el-radio-group v-model="domain">
               <el-radio value="general">通用</el-radio>
@@ -290,7 +279,6 @@ onMounted(async () => {
 })
 
 // 设置
-const checkTypes = ref<string[]>(['typo', 'grammar', 'punctuation', 'style'])
 const domain = ref('general')
 
 // 结果数据
@@ -437,7 +425,6 @@ async function handleStartProofread() {
     try {
       const submitRes = await asyncDocumentProofreadApi({
         file_id: uploadRes.file_id,
-        check_types: checkTypes.value.length > 0 ? checkTypes.value : undefined,
         domain: domain.value,
         config_id: selectedModelId.value ?? undefined,
       })
@@ -460,7 +447,6 @@ async function handleStartProofread() {
       // 异步/SSE 通道不可用时回退同步校对
       proofreadRes = await documentProofreadApi({
         file_id: uploadRes.file_id,
-        check_types: checkTypes.value.length > 0 ? checkTypes.value : undefined,
         domain: domain.value,
         config_id: selectedModelId.value ?? undefined,
       })

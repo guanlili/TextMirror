@@ -19,7 +19,6 @@ class OpenCompareRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "text": "随着人工智能技术的突飞猛进，各行各业都迎来了翻天复地的变革。",
-                "check_types": ["typo", "punctuation"],
                 "domain": "general",
                 "config_ids": [8, 10],
             }
@@ -28,7 +27,10 @@ class OpenCompareRequest(BaseModel):
 
     text: str = Field(..., min_length=1, max_length=100000, description="待审校文本")
     check_types: Optional[List[CheckType]] = Field(
-        None, description="校对类型（可选，不填=全部检查）", examples=[["typo", "punctuation"]]
+        None,
+        deprecated=True,
+        description="（已废弃，传入无效果）历史参数：限定校对类型。现总是全量审校",
+        examples=[["typo", "punctuation"]],
     )
     domain: Domain = Field(default=Domain.general, description="文本领域")
     config_ids: List[int] = Field(

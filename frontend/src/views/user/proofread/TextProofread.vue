@@ -26,17 +26,6 @@
         <!-- 校对设置 -->
         <div class="proofread-settings">
           <div class="setting-row">
-            <span class="setting-label">校对类型：</span>
-            <el-checkbox-group v-model="checkTypes" class="setting-value">
-              <el-checkbox value="typo">错别字</el-checkbox>
-              <el-checkbox value="grammar">语法错误</el-checkbox>
-              <el-checkbox value="punctuation">标点符号</el-checkbox>
-              <el-checkbox value="style">表达优化</el-checkbox>
-              <el-checkbox value="sensitive">敏感词</el-checkbox>
-              <el-checkbox value="logic">逻辑问题</el-checkbox>
-            </el-checkbox-group>
-          </div>
-          <div class="setting-row">
             <span class="setting-label">领域选择：</span>
             <el-radio-group v-model="domain" class="setting-value">
               <el-radio value="general">通用</el-radio>
@@ -473,7 +462,6 @@ onMounted(() => {
 })
 
 // 设置
-const checkTypes = ref<string[]>(['typo', 'grammar', 'punctuation', 'style'])
 const domain = ref('general')
 
 // 校对模型选择（默认当前活跃模型）
@@ -747,7 +735,6 @@ async function handleProofread() {
     try {
       compareResult.value = await proofreadCompareApi({
         text: inputText.value,
-        check_types: checkTypes.value.length > 0 ? checkTypes.value : undefined,
         domain: domain.value,
         config_ids: compareModelIds.value,
       })
@@ -767,7 +754,6 @@ async function handleProofread() {
   try {
     const res = await textProofreadApi({
       text: inputText.value,
-      check_types: checkTypes.value.length > 0 ? checkTypes.value : undefined,
       domain: domain.value,
       config_id: selectedModelId.value ?? undefined,
     })

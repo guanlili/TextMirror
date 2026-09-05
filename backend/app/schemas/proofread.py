@@ -35,7 +35,6 @@ class TextProofreadRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "text": "随着人工智能技术的突飞猛进，各行各业都迎来了翻天复地的变革。",
-                "check_types": ["typo", "punctuation"],
                 "domain": "general",
             }
         },
@@ -50,7 +49,8 @@ class TextProofreadRequest(BaseModel):
     )
     check_types: Optional[List[CheckType]] = Field(
         None,
-        description="校对类型（可选，不填=全部检查）",
+        deprecated=True,
+        description="（已废弃，传入无效果）历史参数：限定校对类型。模型不遵循且类型间存在交叉，现总是全量审校",
         examples=[["typo", "punctuation"]],
     )
     domain: Domain = Field(
