@@ -434,28 +434,33 @@ def scan_words_deterministic(text: str,
             "source": "dict_scan",
         })
 
-    # 敏感词/禁词：命中即报（禁词更严重）
+    # 敏感词/禁词：命中即报（禁词更严重）。说明文案带〔词库〕来源标识，
+    # 用户在结果页能直接看到"这是词库在起作用"
     sensitive_words = {w["word"] for w in global_words.get("sensitive", [])}
     banned_words = {w["word"] for w in global_words.get("banned", [])}
     for word in banned_words:
         if word and word in text:
-            _add(word, "sensitive", "请删除或替换该违禁词", f"命中违禁词库", "error")
+            _add(word, "sensitive", "请删除或替换该违禁词", "〔词库〕命中违禁词", "error")
     for word in sensitive_words:
         if word and word in text and word not in banned_words:
-            _add(word, "sensitive", "请评估是否需要替换该敏感词", f"命中敏感词库", "warning")
+            _add(word, "sensitive", "请评估是否需要替换该敏感词", "〔词库〕命中敏感词", "warning")
 
     # 纠错词：全局 + 用户（用户词与全局词冲突时用户优先——显式维护的规则更具体）
     corrections: Dict[str, str] = {}
+    correction_sources: Dict[str, str] = {}
     for w in global_words.get("correction", []):
         if w.get("word") and w.get("replacement"):
             corrections[w["word"]] = w["replacement"]
+            correction_sources[w["word"]] = "全局词库"
     for w in user_words.get("correction", []):
         if w.get("word") and w.get("replacement"):
             corrections[w["word"]] = w["replacement"]
+            correction_sources[w["word"]] = "我的词库"
 
     for wrong, correct in corrections.items():
         if wrong and wrong in text:
-            _add(wrong, "typo", correct, f"词库纠错：{wrong}→{correct}", "error")
+            src = correction_sources.get(wrong, "词库")
+            _add(wrong, "typo", correct, f"〔{src}〕{wrong}→{correct}", "error")
 
     return issues
 

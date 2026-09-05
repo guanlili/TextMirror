@@ -11,6 +11,12 @@
         </div>
       </template>
 
+      <el-alert type="info" :closable="false" style="margin-bottom: 12px;">
+        <template #title>
+          维护你的<b>专属纠错规则</b>（错误词 → 正确词）。校对时，错误词一出现就必定被标出，并给出你指定的正确写法——适合行业术语、公司规范用语、常写错的词。词条在本页保存后立即生效。
+        </template>
+      </el-alert>
+
       <el-table :data="dictionaries" v-loading="loading" stripe>
         <el-table-column prop="name" label="词库名称" min-width="150" />
         <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
@@ -33,7 +39,14 @@
         </el-table-column>
       </el-table>
 
-      <el-empty v-if="!loading && dictionaries.length === 0" description="暂无自定义词库" />
+      <el-empty v-if="!loading && dictionaries.length === 0" description="暂无自定义词库">
+        <div class="empty-guide">
+          <p>例如添加词条「帐号 → 账号」，之后校对凡出现「帐号」必定标出。</p>
+          <el-button type="primary" size="small" @click="fillExampleDict">
+            <el-icon><Plus /></el-icon>创建示例词库
+          </el-button>
+        </div>
+      </el-empty>
     </el-card>
 
     <!-- 词条管理 -->
@@ -148,6 +161,12 @@ const editingDict = ref<DictionaryItem | null>(null)
 
 const showCreateDialog = ref(false)
 const dictForm = ref({ name: '', description: '' })
+
+/** 空状态引导：预填示例词库信息 */
+function fillExampleDict() {
+  dictForm.value = { name: '常用纠错', description: '日常易错词的纠错规则' }
+  showCreateDialog.value = true
+}
 
 // 词条
 const entries = ref<EntryItem[]>([])

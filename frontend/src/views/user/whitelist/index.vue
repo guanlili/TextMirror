@@ -13,6 +13,12 @@
         </div>
       </template>
 
+      <el-alert type="info" :closable="false" style="margin-bottom: 12px;">
+        <template #title>
+          校对时<b>永远不报</b>这些词。专有名词、品牌名、人名、行业术语被校对反复误报时，加进来一劳永逸——立即生效，下次校对就不会再被打扰。
+        </template>
+      </el-alert>
+
       <el-input v-model="keyword" placeholder="搜索放行词..." clearable style="width: 260px; margin-bottom: 12px;" @input="fetchList" />
 
       <el-table :data="list" v-loading="loading" stripe>
@@ -46,7 +52,14 @@
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="!loading && list.length === 0" description="暂无放行词" />
+      <el-empty v-if="!loading && list.length === 0" description="暂无放行词">
+        <div class="empty-guide">
+          <p>校对总把你的产品名 / 术语报成"错误"？把它加进来就不会再被打扰。</p>
+          <el-button type="primary" size="small" @click="fillExample">
+            <el-icon><Plus /></el-icon>添加一个试试
+          </el-button>
+        </div>
+      </el-empty>
     </el-card>
 
     <!-- 添加/编辑弹窗 -->
@@ -111,6 +124,13 @@ async function fetchList() {
   loading.value = true
   try { list.value = await listWhitelistApi({ keyword: keyword.value || undefined, page_size: 200 }) } catch {}
   loading.value = false
+}
+
+/** 空状态引导：预填常见示例，打开添加弹窗 */
+function fillExample() {
+  editingItem.value = null
+  form.value = { word: '', type: 'permanent', remark: '专有名词/品牌名/术语，校对不再报', expire_at: null }
+  showAddDialog.value = true
 }
 
 function editWord(row: WhitelistItem) {
