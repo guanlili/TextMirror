@@ -120,6 +120,37 @@
       </el-form>
     </el-card>
 
+    <!-- 审校领域规则 -->
+    <el-card style="margin-top: 16px;">
+      <template #header>
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <span style="font-weight: 600;">审校领域规则</span>
+          <span style="font-size: 12px; color: #999;">用户选择领域后，对应规则注入 AI 审校提示词；留空使用内置默认，保存后即时生效</span>
+        </div>
+      </template>
+      <el-tabs v-model="activeDomainTab">
+        <el-tab-pane v-for="d in DOMAIN_TABS" :key="d.code" :label="d.label" :name="d.code">
+          <div class="domain-prompt-editor">
+            <el-input
+              v-model="domainPrompts[d.code]"
+              type="textarea"
+              :rows="8"
+              :placeholder="`留空使用内置默认规则：\n${domainDefaults[d.code] || ''}`"
+              maxlength="3000"
+              show-word-limit
+            />
+            <div class="domain-actions">
+              <el-button size="small" @click="resetDomainPrompt(d.code)">恢复内置默认</el-button>
+              <span v-if="domainPrompts[d.code]" class="custom-badge">已自定义</span>
+            </div>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
+      <div style="margin-top: 8px;">
+        <el-button type="primary" :loading="savingDomainPrompts" @click="saveDomainPrompts">保存领域规则</el-button>
+      </div>
+    </el-card>
+
     <!-- 数据维护 -->
     <el-card style="margin-top: 16px;">
       <template #header><span style="font-weight: 600;">数据维护</span></template>
@@ -139,9 +170,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadRawFile } from 'element-plus'
 import {
   type BasicSettingsConfig, type FeishuSettingsConfig, type SecuritySettingsConfig,
+  type DomainPromptsConfig,
   getBasicSettingsApi, updateBasicSettingsApi,
   getFeishuSettingsApi, updateFeishuSettingsApi,
   getSecuritySettingsApi, updateSecuritySettingsApi,
+  getDomainPromptsApi, updateDomainPromptsApi, getDomainPromptsDefaultsApi,
   cleanLogsApi, cleanTempFilesApi, cleanCacheApi, cleanExpiredWhitelistApi,
 } from '@/api/admin'
 import {
@@ -249,7 +282,45 @@ onMounted(async () => {
     const security = await getSecuritySettingsApi()
     Object.assign(securitySettings, security)
   } catch {}
+
+  try {
+    const [prompts, defaults] = await Promise.all([getDomainPromptsApi(), getDomainPromptsDefaultsApi()])
+    Object.assign(domainPrompts, prompts)
+    domainDefaults = defaults
+  } catch {}
 })
+
+// ---- 审校领域规则 ----
+const DOMAIN_TABS = [
+  { code: 'general', label: '通用' },
+  { code: 'official', label: '公文' },
+  { code: 'legal', label: '法律' },
+  { code: 'power', label: '电力' },
+  { code: 'new_energy', label: '新能源' },
+  { code: 'meter', label: '电能表' },
+] as const
+
+const activeDomainTab = ref('general')
+const domainPrompts = reactive<DomainPromptsConfig>({
+  general: '', official: '', legal: '', power: '', new_energy: '', meter: '',
+})
+let domainDefaults: DomainPromptsConfig = {
+  general: '', official: '', legal: '', power: '', new_energy: '', meter: '',
+}
+const savingDomainPrompts = ref(false)
+
+function resetDomainPrompt(code: string) {
+  domainPrompts[code as keyof DomainPromptsConfig] = ''
+}
+
+async function saveDomainPrompts() {
+  savingDomainPrompts.value = true
+  try {
+    await updateDomainPromptsApi({ ...domainPrompts })
+    ElMessage.success('领域规则已保存，审校即时生效')
+  } catch {}
+  savingDomainPrompts.value = false
+}
 
 /** 保存品牌设置 */
 async function saveSiteConfig() {
@@ -415,6 +486,20 @@ async function handleClean(type: string) {
       background: #eff6ff;
       box-shadow: 0 0 0 2px rgba(0, 86, 179, 0.1);
     }
+  }
+}
+
+.domain-prompt-editor {
+  .domain-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+  }
+
+  .custom-badge {
+    font-size: 12px;
+    color: #e6a23c;
   }
 }
 </style>

@@ -339,16 +339,35 @@ def _build_global_words_section(global_words: Dict[str, List[Dict]],
     return "; ".join(parts) if parts else ""
 
 
+async def _get_domain_rules(domain: str) -> str:
+    """
+    获取领域专业规则：管理后台配置（Redis）优先，无配置回退内置 DOMAIN_PROMPTS。
+    每次审校实时读取，后台改规则即时生效。
+    自定义配置加"必须执行"前缀强化指令遵循（与用户词库同一策略）。
+    """
+    try:
+        from app.core.redis import get_redis
+        redis = get_redis()
+        configured = await redis.hget("system:config:domain_prompts", domain)
+        if configured:
+            return f"以下为管理员指定的行业校对规则（必须严格执行）：{configured}"
+    except Exception as e:
+        logger.debug(f"读取领域规则配置失败，使用内置默认: {e}")
+    return DOMAIN_PROMPTS.get(domain, DOMAIN_PROMPTS.get("general", ""))
+
+
 def build_system_prompt(check_types: List[str], domain: str,
                         global_words: Optional[Dict[str, List[Dict]]] = None,
-                        user_words: Optional[Dict[str, List[Dict]]] = None) -> str:
+                        user_words: Optional[Dict[str, List[Dict]]] = None,
+                        domain_rules: Optional[str] = None) -> str:
     """构建系统 Prompt,包含领域专业规则、全局词库和用户个性化词库"""
     type_names = [PROOFREAD_TYPES.get(t, t) for t in check_types]
     check_types_str = "、".join(type_names) if type_names else "所有类型的"
     domain_str = DOMAIN_MAP.get(domain, "通用")
 
-    # 获取领域专业规则
-    domain_rules = DOMAIN_PROMPTS.get(domain, DOMAIN_PROMPTS.get("general", ""))
+    # 领域规则（调用方在异步阶段读取后传入；未传时回退内置）
+    if not domain_rules:
+        domain_rules = DOMAIN_PROMPTS.get(domain, DOMAIN_PROMPTS.get("general", ""))
 
     # 构建词库段落（全局 + 用户）
     global_words_section = ""
@@ -430,6 +449,16 @@ async def _load_all_words(user_id: Optional[int]) -> Tuple[Dict[str, List[Dict]]
     return await asyncio.gather(load_global_words(), load_user_words(user_id))
 
 
+async def _gather_preparation(user_id: Optional[int], domain: str, config_id: Optional[int]):
+    """审校准备阶段：词库 + 领域规则 + LLM Provider 三路并行"""
+    (global_words, user_words), domain_rules, provider = await asyncio.gather(
+        _load_all_words(user_id),
+        _get_domain_rules(domain),
+        get_llm_provider(config_id),
+    )
+    return (global_words, user_words, domain_rules), provider
+
+
 async def proofread_text(
     text: str,
     check_types: Optional[List[str]] = None,
@@ -457,12 +486,9 @@ async def proofread_text(
     chunks = split_text_into_chunks(text)
     logger.info(f"[校对] 总长度={len(text)} 分片数={len(chunks)} 领域={domain} user_id={user_id}")
 
-    # 并行：加载全局词库+用户词库 + 获取大模型 Provider，避免串行 DB 等待
+    # 并行：加载词库/领域规则配置 + 获取大模型 Provider，避免串行等待
     t1 = time.perf_counter()
-    (global_words, user_words), provider = await asyncio.gather(
-        _load_all_words(user_id),
-        get_llm_provider(config_id),
-    )
+    (global_words, user_words, domain_rules), provider = await _gather_preparation(user_id, domain, config_id)
     t2 = time.perf_counter()
     logger.info(f"[校对] 准备阶段耗时={t2-t1:.2f}s "
                 f"(全局: 敏感={len(global_words['sensitive'])} 禁={len(global_words['banned'])} "
@@ -470,7 +496,7 @@ async def proofread_text(
                 f"用户: 纠错={len(user_words['correction'])} 放行={len(user_words['whitelist'])})")
 
     # 构建 Prompt
-    system_prompt = build_system_prompt(check_types, domain, global_words, user_words)
+    system_prompt = build_system_prompt(check_types, domain, global_words, user_words, domain_rules)
     logger.info(f"[校对] system_prompt 长度={len(system_prompt)} 字符")
 
     # 调用大模型（并发校对所有分片，加速整体响应）

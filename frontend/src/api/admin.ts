@@ -341,6 +341,28 @@ export function updateSecuritySettingsApi(data: SecuritySettingsConfig): Promise
   return request.put('/admin/system-config/security', data)
 }
 
+/** 审校领域规则配置（空字符串 = 使用内置默认） */
+export interface DomainPromptsConfig {
+  general: string
+  official: string
+  legal: string
+  power: string
+  new_energy: string
+  meter: string
+}
+
+export function getDomainPromptsApi(): Promise<DomainPromptsConfig> {
+  return request.get('/admin/system-config/domain-prompts')
+}
+
+export function updateDomainPromptsApi(data: DomainPromptsConfig): Promise<DomainPromptsConfig> {
+  return request.put('/admin/system-config/domain-prompts', data)
+}
+
+export function getDomainPromptsDefaultsApi(): Promise<DomainPromptsConfig> {
+  return request.get('/admin/system-config/domain-prompts/defaults')
+}
+
 export function cleanLogsApi(days?: number): Promise<MaintenanceResult> {
   return request.post('/admin/system-config/maintenance/clean-logs', null, { params: { days } })
 }
