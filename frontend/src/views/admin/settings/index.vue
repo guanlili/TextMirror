@@ -12,6 +12,18 @@
           <el-input v-model="siteConfig.platform_subtitle" placeholder="请输入平台副标题" maxlength="30" show-word-limit />
           <div class="form-tip">显示在导航栏平台名称右侧、浏览器页签中</div>
         </el-form-item>
+        <el-form-item label="登录页标语">
+          <el-input v-model="siteConfig.login_slogan" placeholder="留空显示「欢迎登录」" maxlength="20" show-word-limit />
+          <div class="form-tip">登录页主标题，如「XX集团文档审校系统」</div>
+        </el-form-item>
+        <el-form-item label="页脚文案">
+          <el-input v-model="siteConfig.footer_text" placeholder="如：© 2026 XX科技有限公司 | 京ICP备XXXXXXXX号" maxlength="60" show-word-limit />
+          <div class="form-tip">显示在页面底部（公司名/备案号等），留空不显示</div>
+        </el-form-item>
+        <el-form-item label="游客模式">
+          <el-switch v-model="guestModeOn" />
+          <span style="font-size: 12px; color: #999; margin-left: 12px;">关闭后所有功能需登录使用，适合企业内部部署</span>
+        </el-form-item>
         <el-form-item label="浏览器图标">
           <div class="favicon-config">
             <div class="favicon-preview">
@@ -136,7 +148,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { reactive, ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadRawFile } from 'element-plus'
 import {
@@ -188,6 +200,15 @@ const siteConfig = reactive<SiteConfig>({
   platform_name: 'TextMirror',
   platform_subtitle: '智能文档审校平台',
   favicon_url: faviconPresets[0].url,
+  login_slogan: '',
+  footer_text: '',
+  guest_mode_enabled: 'on',
+})
+
+// Switch 双向绑定（on/off ↔ true/false）
+const guestModeOn = computed({
+  get: () => siteConfig.guest_mode_enabled !== 'off',
+  set: (v: boolean) => { siteConfig.guest_mode_enabled = v ? 'on' : 'off' },
 })
 
 // 原始值（用于重置）

@@ -94,6 +94,11 @@ async def upload_document(
     上传文档并提取文本
     返回文件 ID 和文本预览，供后续校对使用
     """
+    # 游客模式关闭时拒绝游客上传
+    if current_user is None:
+        from app.core.rate_limit import reject_guest_if_disabled
+        await reject_guest_if_disabled(http_request)
+
     # 校验文件名（净化后使用，防路径穿越）
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名不能为空")

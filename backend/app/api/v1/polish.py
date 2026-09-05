@@ -12,7 +12,7 @@ from loguru import logger
 
 from app.core.database import get_db, async_session_factory
 from app.core.dependencies import get_current_user_optional
-from app.core.rate_limit import check_guest_rate_limit, check_user_quota
+from app.core.rate_limit import check_guest_rate_limit, check_user_quota, reject_guest_if_disabled
 from app.core.config import settings
 from app.schemas.polish import PolishRequest, PolishResponse, PolishVersion
 from app.services.polish import (
@@ -74,6 +74,7 @@ async def text_polish(
     """
     # 游客限流检查
     if current_user is None:
+        await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
     else:
         await check_user_quota(current_user, db)
@@ -185,6 +186,7 @@ async def text_polish_stream(
     """
     # 限流与配额检查（与同步接口同一口径）
     if current_user is None:
+        await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
     else:
         async with async_session_factory() as db:
@@ -315,6 +317,7 @@ async def text_polish_compare(
     供用户横向对比不同模型的输出效果
     """
     if current_user is None:
+        await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
     else:
         # 对比模式并发调用 N 个模型，消耗 N 倍额度：按模型数预检配额
@@ -448,6 +451,7 @@ async def text_polish_compare_stream(
     事件流：meta → delta/done/error（带 config_id，各模型交错）→ end
     """
     if current_user is None:
+        await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
     else:
         # 对比模式并发调用 N 个模型，消耗 N 倍额度：按模型数预检配额

@@ -11,7 +11,7 @@ from loguru import logger
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user_optional
-from app.core.rate_limit import check_guest_rate_limit, check_user_quota
+from app.core.rate_limit import check_guest_rate_limit, check_user_quota, reject_guest_if_disabled
 from app.core.config import settings
 from app.models.proofread import ProofreadRecord
 from app.schemas.proofread import (
@@ -38,6 +38,7 @@ async def text_proofread(
     """
     # 游客限流检查
     if current_user is None:
+        await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
         # 游客文本长度限制
         if len(request.text) > settings.GUEST_TEXT_MAX_LENGTH:
@@ -186,6 +187,7 @@ async def text_proofread_compare(
     import time as _time
 
     if current_user is None:
+        await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
     else:
         # 对比模式并发调用 N 个模型，消耗 N 倍额度：按模型数预检配额

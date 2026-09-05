@@ -7,6 +7,9 @@ export interface SiteConfig {
   platform_name: string
   platform_subtitle: string
   favicon_url: string
+  login_slogan?: string
+  footer_text?: string
+  guest_mode_enabled?: string
 }
 
 /** 获取站点公开配置（无需登录） */

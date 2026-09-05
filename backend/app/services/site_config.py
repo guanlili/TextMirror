@@ -21,7 +21,19 @@ DEFAULT_SITE_CONFIG: Dict[str, str] = {
     "platform_name": "TextMirror",
     "platform_subtitle": "智能文档审校平台",
     "favicon_url": "",
+    # 登录页主标语（空=显示平台副标题）
+    "login_slogan": "",
+    # 页脚文案（公司名/备案号等，空=不显示页脚）
+    "footer_text": "",
+    # 游客模式总开关：off 时所有游客入口关闭，需登录使用
+    "guest_mode_enabled": "on",
 }
+
+
+async def is_guest_mode_enabled() -> bool:
+    """游客模式是否开启（默认开，配置异常时保持开）"""
+    config = await get_site_config()
+    return config.get("guest_mode_enabled", "on") == "on"
 
 
 async def get_site_config() -> Dict[str, str]:

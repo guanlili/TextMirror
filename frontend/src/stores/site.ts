@@ -15,6 +15,9 @@ export const useSiteStore = defineStore('site', () => {
   const platformSubtitle = ref('智能文档审校平台')
   const faviconUrl = ref(DEFAULT_FAVICON)
   const customFaviconSet = ref(false) // 是否管理员上传了自定义图标
+  const loginSlogan = ref('')   // 登录页主标语（空=用副标题）
+  const footerText = ref('')    // 页脚文案（空=不显示）
+  const guestModeEnabled = ref(true)
   const loaded = ref(false)
 
   /** 是否使用自定义图标（用于登录页等需要按图标存在与否切换样式的场景） */
@@ -28,6 +31,9 @@ export const useSiteStore = defineStore('site', () => {
       platformSubtitle.value = config.platform_subtitle || '智能文档审校平台'
       customFaviconSet.value = !!config.favicon_url
       faviconUrl.value = config.favicon_url || DEFAULT_FAVICON
+      loginSlogan.value = config.login_slogan || ''
+      footerText.value = config.footer_text || ''
+      guestModeEnabled.value = (config.guest_mode_enabled ?? 'on') === 'on'
       loaded.value = true
 
       // 更新浏览器标题
@@ -46,6 +52,9 @@ export const useSiteStore = defineStore('site', () => {
     platformSubtitle.value = config.platform_subtitle || '智能文档审校平台'
     customFaviconSet.value = !!config.favicon_url
     faviconUrl.value = config.favicon_url || DEFAULT_FAVICON
+    loginSlogan.value = config.login_slogan || ''
+    footerText.value = config.footer_text || ''
+    guestModeEnabled.value = (config.guest_mode_enabled ?? 'on') === 'on'
     updateDocumentTitle()
     updateFavicon()
   }
@@ -72,6 +81,9 @@ export const useSiteStore = defineStore('site', () => {
     platformSubtitle,
     faviconUrl,
     hasCustomFavicon,
+    loginSlogan,
+    footerText,
+    guestModeEnabled,
     loaded,
     loadSiteConfig,
     applyConfig,

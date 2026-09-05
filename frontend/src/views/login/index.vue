@@ -53,7 +53,7 @@
           <span class="mobile-title">{{ siteStore.platformName }}</span>
         </div>
 
-        <h2 class="login-title">欢迎登录</h2>
+        <h2 class="login-title">{{ siteStore.loginSlogan || '欢迎登录' }}</h2>
         <p class="login-desc">请选择登录方式进入系统</p>
 
         <!-- 登录方式Tab -->
@@ -158,10 +158,13 @@
         </div>
 
         <!-- 底部 -->
-        <div class="login-footer">
+        <div class="login-footer" v-if="siteStore.guestModeEnabled">
           <el-button text type="info" @click="router.push('/')">
             游客模式体验
           </el-button>
+        </div>
+        <div class="login-footer login-footer-text" v-else-if="siteStore.footerText">
+          {{ siteStore.footerText }}
         </div>
       </div>
     </div>

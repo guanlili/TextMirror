@@ -238,3 +238,16 @@ async def refund_api_key_daily_usage(api_key, weight: int = 1) -> None:
         await redis.eval(_REFUND_DAILY_LUA, 1, _api_key_daily_redis_key(api_key), weight)
     except Exception as e:
         logger.error(f"退还密钥日配额 Redis 异常: {e}")
+
+
+async def reject_guest_if_disabled(http_request: Request) -> None:
+    """
+    游客模式关闭时拒绝游客请求（站点配置 guest_mode_enabled=off）。
+    在各游客可用端点的游客分支开头调用。
+    """
+    from app.services.site_config import is_guest_mode_enabled
+    if not await is_guest_mode_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="游客模式已关闭，请登录后使用",
+        )

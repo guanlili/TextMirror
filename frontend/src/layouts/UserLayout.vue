@@ -5,7 +5,7 @@
         <div class="brand-mark"><img :src="siteStore.faviconUrl" alt="" /></div>
         <div class="brand-copy">
           <strong>{{ siteStore.platformName }}</strong>
-          <span>智能审校工作台</span>
+          <span>{{ siteStore.platformSubtitle }}</span>
         </div>
       </div>
 
@@ -81,12 +81,15 @@
         </div>
       </el-header>
 
-      <el-main class="user-main"><router-view /></el-main>
+      <el-main class="user-main">
+        <router-view />
+        <footer v-if="siteStore.footerText" class="app-footer">{{ siteStore.footerText }}</footer>
+      </el-main>
     </el-container>
 
     <el-drawer v-model="mobileMenuVisible" direction="ltr" size="286px" :show-close="false" class="mobile-drawer">
       <template #header>
-        <div class="drawer-brand"><img :src="siteStore.faviconUrl" alt="" /><div><strong>{{ siteStore.platformName }}</strong><span>智能审校工作台</span></div></div>
+        <div class="drawer-brand"><img :src="siteStore.faviconUrl" alt="" /><div><strong>{{ siteStore.platformName }}</strong><span>{{ siteStore.platformSubtitle }}</span></div></div>
       </template>
       <el-menu :default-active="activeMenu" router @select="mobileMenuVisible = false" class="mobile-nav-menu">
         <el-menu-item index="/polish"><el-icon><MagicStick /></el-icon><span>AI 智能润色</span></el-menu-item>
@@ -247,6 +250,11 @@ html.dark .user-info .user-copy strong { color: #dbe4f0; }
   flex: 1; min-height: 0; padding: 24px 28px 28px; overflow: auto;
   background: radial-gradient(circle at 100% 0,rgba(71,138,246,.06),transparent 28%), var(--color-bg);
 }
+.app-footer {
+  margin-top: 24px; padding: 16px 0 4px; text-align: center;
+  font-size: 12px; color: #9aa5b3; border-top: 1px solid rgba(0,0,0,.06);
+}
+html.dark .app-footer { color: #7a8797; border-top-color: #202b3d; }
 .mobile-menu-btn, .mobile-brand { display: none; }
 .mobile-nav-menu { border-right: 0; }
 .drawer-brand { display: flex; align-items: center; gap: 10px; }

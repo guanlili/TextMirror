@@ -169,6 +169,13 @@ router.beforeEach((to, _from, next) => {
     try {
       const siteStore = useSiteStore()
       siteStore.updateDocumentTitle(to.meta.title as string || '')
+
+      // 游客模式关闭时：未登录访问用户区页面 → 跳登录页
+      const token = localStorage.getItem('access_token')
+      if (!token && !siteStore.guestModeEnabled && to.path !== '/login' && !to.path.startsWith('/40')) {
+        next({ name: 'Login', query: { redirect: to.fullPath } })
+        return
+      }
     } catch { /* pinia 未就绪时忽略 */ }
   })
 
