@@ -6,7 +6,7 @@ import time
 from typing import Dict, Any, List
 from loguru import logger
 
-from app.services.proofread import get_llm_provider
+from app.services.proofread import get_llm_provider, load_global_words
 
 # 10种润色风格定义
 # 输出目标：高质量、结构清晰、Markdown富文本格式，适合直接复制到飞书消息
@@ -433,6 +433,19 @@ async def polish_text(text: str, style: str = "formal") -> Dict[str, Any]:
                 # 汇总 token 用量
                 for key in total_usage:
                     total_usage[key] += r["usage"].get(key, 0)
+
+        # 润色产出扫描敏感词/禁词：改写不应引入违禁内容（仅提示不阻断）
+        try:
+            global_words = await load_global_words()
+            banned = {w["word"] for w in global_words.get("banned", [])}
+            sensitive = {w["word"] for w in global_words.get("sensitive", [])}
+            for v in versions:
+                hits = [w for w in (banned | sensitive) if w in v.get("content", "")]
+                if hits:
+                    v["sensitive_words"] = hits[:5]
+                    logger.info(f"[润色] {v['label']} 检出敏感词: {hits[:5]}")
+        except Exception as e:
+            logger.warning(f"[润色] 敏感词扫描跳过: {e}")
 
         logger.info(f"[润色] 全部完成 总耗时={time.perf_counter()-t0:.2f}s 总用量={total_usage}")
 

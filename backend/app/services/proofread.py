@@ -15,6 +15,7 @@ from app.core.secret_crypto import decrypt_secret
 from app.models.global_word import GlobalWord
 from app.models.llm_config import LLMConfig
 from app.services.llm.openai_compat import OpenAICompatProvider
+from app.services.consistency import check_consistency
 from app.services.llm.base import BaseLLMProvider
 
 # 校对类型映射
@@ -516,8 +517,10 @@ async def proofread_text(
 
     # 词库确定性扫描：敏感词/禁词/纠错词字符串匹配，召回 100%、零 LLM 成本
     scanned_issues = scan_words_deterministic(text, global_words, user_words)
+    # 跨片一致性检查（纯规则）：金额/称谓/编号的全文级矛盾——分片送审抓不到
+    scanned_issues.extend(check_consistency(text))
     if scanned_issues:
-        logger.info(f"[校对] 词库扫描命中 {len(scanned_issues)} 项")
+        logger.info(f"[校对] 确定性扫描命中 {len(scanned_issues)} 项")
 
     # 调用大模型（并发校对所有分片，加速整体响应）
     all_issues = []

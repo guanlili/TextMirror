@@ -129,6 +129,7 @@ async def text_polish(
             label=v["label"],
             level=v["level"],
             content=v["content"],
+            **({"sensitive_words": v["sensitive_words"]} if v.get("sensitive_words") else {}),
         )
         for v in result["versions"]
     ]
