@@ -16,6 +16,7 @@ from app.models.global_word import GlobalWord
 from app.models.llm_config import LLMConfig
 from app.services.llm.openai_compat import OpenAICompatProvider
 from app.services.consistency import check_consistency
+from app.services.format_rules import check_format_rules
 from app.services.llm.base import BaseLLMProvider
 
 # 校对类型映射
@@ -42,7 +43,7 @@ DOMAIN_PROMPTS = {
         "1)错别字：注意形近字(已/己、的/地/得、账/帐)和音近字(在/再、做/作)；"
         "2)语法：主谓搭配、语序、成分残缺、句式杂糅；"
         "3)标点：中文用中文标点，英文/数字用半角，顿号与逗号区分，引号层级正确；"
-        "4)数字与单位：数值与单位间加空格，百分比/倍数/量级表述准确，中文语境下万/亿为单位；"
+        "4)数字与单位：百分比/倍数/量级表述准确，中文语境下万/亿为单位；英文单位（kW/GB等）与数值间加空格，中文单位（万元/人/台）不加空格；"
         "5)逻辑：前后矛盾、因果倒置、并列不当、指代不明"
     ),
     "official": (
@@ -152,11 +153,15 @@ async def get_llm_provider(config_id: Optional[int] = None) -> BaseLLMProvider:
     return provider
 
 
-def split_text_into_chunks(text: str, max_chunk_size: int = 800) -> List[str]:
+def split_text_into_chunks(text: str, max_chunk_size: int = 800,
+                           overlap: int = 100) -> List[str]:
     """
     将长文本按段落分片, 每片不超过 max_chunk_size 字符
     优先按段落分割, 保证语义完整
     分片越小,并发越多,长文本总耗时越短（短文本 <800 字仍为单片,不受影响）
+    overlap: 分片重叠窗口——每片开头带上前片尾部约 overlap 字，避免
+    跨切点的指代/矛盾（前句"三台设备"后句变"四台"）在切点处漏检；
+    重复报告由 merge_issues 按 (original, type) 去重兜底。
     """
     if len(text) <= max_chunk_size:
         return [text]
@@ -198,7 +203,20 @@ def split_text_into_chunks(text: str, max_chunk_size: int = 800) -> List[str]:
     if current_chunk:
         chunks.append(current_chunk)
 
-    return [chunk for chunk in chunks if chunk.strip()]
+    chunks = [chunk for chunk in chunks if chunk.strip()]
+    # 重叠窗口：非首片头部带上前片尾部（按句子边界取约 overlap 字）
+    if overlap > 0 and len(chunks) > 1:
+        overlapped = [chunks[0]]
+        for i in range(1, len(chunks)):
+            tail = chunks[i - 1][-overlap:]
+            # 尽量从句子边界开始，避免半句
+            for sep_pos in range(len(tail)):
+                if tail[sep_pos] in "。！？；\n":
+                    tail = tail[sep_pos + 1:]
+                    break
+            overlapped.append(tail + chunks[i])
+        chunks = overlapped
+    return chunks
 
 
 async def load_global_words() -> Dict[str, List[Dict]]:
@@ -519,6 +537,8 @@ async def proofread_text(
     scanned_issues = scan_words_deterministic(text, global_words, user_words)
     # 跨片一致性检查（纯规则）：金额/称谓/编号的全文级矛盾——分片送审抓不到
     scanned_issues.extend(check_consistency(text))
+    # 格式规则引擎（纯规则）：日期/号码/金额量级/编号样式——LLM 对格式类不稳定
+    scanned_issues.extend(check_format_rules(text))
     if scanned_issues:
         logger.info(f"[校对] 确定性扫描命中 {len(scanned_issues)} 项")
 
