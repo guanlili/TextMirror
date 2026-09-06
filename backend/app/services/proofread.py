@@ -595,6 +595,10 @@ async def proofread_text(
     # 合并确定性扫描结果（LLM 版本优先，扫描版补位，按严重度排序）
     all_issues = merge_issues(all_issues, scanned_issues)
 
+    # 幻觉自校验：LLM 报的 original 逐字核验原文，转述偏差自动对齐、
+    # 定位失败的降级——消灭"高亮失败/假问题"这类最伤信任的输出
+    all_issues = verify_llm_issues(text, all_issues)
+
     logger.info(f"[校对] 完成 问题={len(all_issues)} 总耗时={time.perf_counter()-t0:.2f}s 用量={total_usage}")
 
     return {
@@ -631,3 +635,76 @@ def _filter_whitelist_issues(issues: List[Dict[str, Any]],
                 continue
         kept.append(issue)
     return kept
+
+
+# ======================================================================
+# LLM 输出幻觉自校验
+# ======================================================================
+
+def _normalize_for_match(s: str) -> str:
+    """匹配用归一化：去所有空白（LLM 偶尔增删空格/换行导致逐字匹配失败）"""
+    return "".join(s.split())
+
+
+def verify_llm_issues(text: str, issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    校验 LLM 报的问题的 original 是否真实存在于原文：
+    1. 逐字命中 → 通过
+    2. 去空白后命中 → 通过（LLM 增删了空白，不影响高亮定位的主干）
+    3. 未命中 → 尝试模糊定位：在原文中找与 original 最相似的片段，
+       相似度够高则用原文片段替换 original（修正 LLM 的转述偏差）；
+       否则该条降级——suggestion 清空、标记需人工定位（避免前端
+       高亮失败呈现为"假问题"）。
+    确定性扫描层（dict_scan/consistency/format_rule）的 issue 天然
+    来自原文匹配，跳过校验。
+    """
+    text_norm = _normalize_for_match(text)
+    verified: List[Dict[str, Any]] = []
+    fuzzy_fixed = 0
+
+    for issue in issues:
+        if issue.get("source") in ("dict_scan", "consistency", "format_rule"):
+            verified.append(issue)
+            continue
+        original = (issue.get("original") or "").strip()
+        if not original:
+            continue  # 无原文的问题直接丢弃
+        if original in text:
+            verified.append(issue)
+            continue
+        # 容差匹配：去空白
+        if _normalize_for_match(original) in text_norm:
+            verified.append(issue)
+            continue
+        # 模糊定位：滑窗找最相似片段（简单公共子串长度比）
+        best_frag, best_score = None, 0.0
+        win = len(original)
+        for i in range(0, max(len(text) - win, 0) + 1):
+            frag = text[i: i + win]
+            # 快速剪枝：首字符都不同则跳过（相似度必低）
+            common = _common_ratio(original, frag)
+            if common > best_score:
+                best_score, best_frag = common, frag
+        if best_score >= 0.6:
+            issue["original"] = best_frag
+            issue["explanation"] = f"{issue.get('explanation', '')}（已自动对齐原文位置）".strip("；")
+            fuzzy_fixed += 1
+            verified.append(issue)
+        else:
+            # 降级：保留问题提示但不可自动替换
+            issue = {**issue, "suggestion": "", "severity": "info"}
+            issue["explanation"] = f"原文定位失败，需人工核对：{issue.get('explanation', '')[:40]}"
+            verified.append(issue)
+
+    if fuzzy_fixed or len(verified) != len(issues):
+        dropped = len(issues) - len([i for i in issues if (i.get("original") or "").strip()])
+        logger.info(f"[自校验] 模糊对齐 {fuzzy_fixed} 条，降级 {sum(1 for i in verified if '原文定位失败' in i.get('explanation', ''))} 条")
+    return verified
+
+
+def _common_ratio(a: str, b: str) -> float:
+    """两等长字符串的字符一致率（O(n)，足够模糊定位用）"""
+    if not a or len(a) != len(b):
+        return 0.0
+    same = sum(1 for x, y in zip(a, b) if x == y)
+    return same / len(a)
