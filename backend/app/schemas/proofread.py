@@ -18,6 +18,7 @@ class CheckType(str, Enum):
 
 class Domain(str, Enum):
     """领域枚举（开源默认只保留通用场景；行业特化由管理员在「审校规则」后台自定义规则实现）"""
+    auto = "auto"          # 自动识别（特征词路由）
     general = "general"    # 通用
     official = "official"  # 公文
     legal = "legal"        # 法律
@@ -65,6 +66,11 @@ class TextProofreadRequest(BaseModel):
         None,
         description="指定模型配置ID（可选，不填=系统当前默认模型；普通集成方无需关心）",
         examples=[None],
+    )
+    depth: str = Field(
+        default="standard",
+        description="审校深度：quick 仅词库/一致性/格式规则（零LLM成本秒回，批量初筛）；standard 全流程（默认）；deep 全流程+强制二次复查",
+        examples=["standard"],
     )
 
 

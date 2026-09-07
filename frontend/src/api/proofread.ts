@@ -29,6 +29,7 @@ export function textProofreadApi(data: {
   text: string
   check_types?: string[]
   domain?: string
+  depth?: string
   config_id?: number
 }): Promise<TextProofreadResponse> {
   return request.post('/proofread/text', data, { timeout: 300000 })

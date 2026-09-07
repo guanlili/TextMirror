@@ -60,6 +60,7 @@ async def text_proofread(
             domain=request.domain,
             config_id=request.config_id,
             user_id=current_user.id if current_user else None,
+            depth=request.depth,
         )
     except RuntimeError as e:
         import traceback

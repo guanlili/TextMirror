@@ -321,6 +321,26 @@ async def _get_domain_rules(domain: str) -> str:
     return DOMAIN_PROMPTS.get(domain, DOMAIN_PROMPTS.get("general", ""))
 
 
+# 领域自动识别特征词（轻量路由，仅 domain=auto 时生效）
+_DOMAIN_FEATURES = {
+    "legal": ["甲方", "乙方", "违约金", "合同编号", "本合同", "条约", "协议约定", "争议解决", "权利义务"],
+    "official": ["特此通知", "发文字号", "各部门", "关于印发", "请示", "批复", "落实到位", "贯彻落实", "二〇二", "现将"],
+}
+
+
+def detect_domain(text: str) -> str:
+    """
+    特征词路由：统计各领域特征词命中数，最高分且超过阈值才切换；
+    否则 general（保守策略：识别不准不如不识别）。
+    """
+    best_domain, best_score = "general", 0
+    for domain, words in _DOMAIN_FEATURES.items():
+        score = sum(text.count(w) for w in words)
+        if score > best_score:
+            best_domain, best_score = domain, score
+    return best_domain if best_score >= 2 else "general"
+
+
 def build_system_prompt(domain: str,
                         global_words: Optional[Dict[str, List[Dict]]] = None,
                         user_words: Optional[Dict[str, List[Dict]]] = None,
@@ -503,10 +523,13 @@ async def proofread_text(
     config_id: Optional[int] = None,
     user_id: Optional[int] = None,
     check_types: Optional[List[str]] = None,
+    depth: str = "standard",
 ) -> Dict[str, Any]:
     """
     执行文本校对（check_types 已废弃：不再影响审校范围，仅为兼容旧调用保留入参）
 
+    :param depth: 审校深度——quick 仅确定性层（零 LLM 成本秒回，适合批量初筛）；
+                  standard 全流程（默认）；deep 标准+强制二次自检（不限高危阈值）
     :param text: 待校对文本
     :param domain: 领域
     :param config_id: 指定模型配置ID（None 用当前活跃模型）
@@ -515,6 +538,11 @@ async def proofread_text(
     """
     import time
     t0 = time.perf_counter()
+
+    # 领域自动识别（仅 auto 时；特征词≥2 命中才切换，保守策略）
+    if domain == "auto":
+        domain = detect_domain(text)
+        logger.info(f"[校对] 领域自动识别 → {domain}")
 
     # 文本分片
     chunks = split_text_into_chunks(text)
@@ -541,6 +569,22 @@ async def proofread_text(
     scanned_issues.extend(check_format_rules(text))
     if scanned_issues:
         logger.info(f"[校对] 确定性扫描命中 {len(scanned_issues)} 项")
+
+    # 快查模式：仅确定性层（零 LLM 成本），放行词过滤后直接返回——批量初筛场景
+    if depth == "quick":
+        await provider.close()  # quick 不用 LLM，释放已创建的连接
+        scanned_issues = _filter_whitelist_issues(scanned_issues, global_words, user_words)
+        scanned_issues.sort(key=lambda i: {"error": 0, "warning": 1, "info": 2}.get(i.get("severity", "warning"), 1))
+        logger.info(f"[校对][快查] 完成 问题={len(scanned_issues)} 耗时={time.perf_counter()-t0:.2f}s（零LLM）")
+        return {
+            "issues": scanned_issues,
+            "total_issues": len(scanned_issues),
+            "chunks_count": 1,
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "domain": domain,
+            "check_types": list(PROOFREAD_TYPES.keys()),
+            "depth": "quick",
+        }
 
     # 调用大模型（并发校对所有分片，加速整体响应）
     all_issues = []
@@ -584,10 +628,10 @@ async def proofread_text(
         if failed_chunks > 0:
             logger.warning(f"[校对] {failed_chunks}/{len(chunks)} 个分片失败，结果可能不完整")
 
-        # 高危文本二次自检（error 级问题密集时触发）：provider 尚未关闭，
+        # 高危文本二次自检（error 级问题密集时触发；deep 模式强制）：provider 尚未关闭，
         # 把第一轮问题清单喂回 LLM 复查遗漏——尽力而为的增益层
         merged_early = merge_issues(list(all_issues), list(scanned_issues))
-        self_check_extra = await self_check_pass(text, merged_early, provider)
+        self_check_extra = await self_check_pass(text, merged_early, provider, force=(depth == "deep"))
         all_issues.extend(self_check_extra)
         for key in total_usage:
             pass  # 自检用量计入 provider 返回但保持简单，不计入展示
@@ -616,6 +660,7 @@ async def proofread_text(
         "usage": total_usage,
         "domain": domain,
         "check_types": list(PROOFREAD_TYPES.keys()),  # 已废弃字段，恒为全量，仅为响应兼容保留
+        "depth": depth,
     }
 
 
@@ -753,12 +798,13 @@ async def self_check_pass(
     text: str,
     issues: List[Dict[str, Any]],
     provider,
+    force: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     二次自检：把第一轮问题清单喂回 LLM 复查，返回补充遗漏的 issue。
     异常自捕获——二次检查失败不影响第一轮结果（尽力而为的增益层）。
     """
-    if not _needs_self_check(issues):
+    if not force and not _needs_self_check(issues):
         return []
     # 最多带 15 条进 prompt（过长稀释注意力）
     sample = issues[:15]

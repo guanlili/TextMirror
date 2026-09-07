@@ -28,10 +28,20 @@
           <div class="setting-row">
             <span class="setting-label">领域选择：</span>
             <el-radio-group v-model="domain" class="setting-value">
+              <el-radio value="auto">自动</el-radio>
               <el-radio value="general">通用</el-radio>
               <el-radio value="official">公文</el-radio>
               <el-radio value="legal">法律</el-radio>
             </el-radio-group>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">审校深度：</span>
+            <el-radio-group v-model="depth" size="small">
+              <el-radio-button value="quick">快查</el-radio-button>
+              <el-radio-button value="standard">标准</el-radio-button>
+              <el-radio-button value="deep">深度</el-radio-button>
+            </el-radio-group>
+            <span class="depth-tip">{{ depthTip }}</span>
           </div>
           <div v-if="modelOptions.length > 1" class="setting-row">
             <span class="setting-label">校对模型：</span>
@@ -460,7 +470,13 @@ onMounted(() => {
 })
 
 // 设置
-const domain = ref('general')
+const domain = ref('auto')
+const depth = ref('standard')
+const depthTip = computed(() => ({
+  quick: '仅词库/一致性/格式规则，秒回不耗AI额度',
+  standard: '规则+AI全面审校（推荐）',
+  deep: '全面审校+AI二次复查，更准但更慢',
+}[depth.value]))
 
 // 校对模型选择（默认当前活跃模型）
 const modelOptions = ref<AvailableModel[]>([])
@@ -763,6 +779,7 @@ async function handleProofread() {
     const res = await textProofreadApi({
       text: inputText.value,
       domain: domain.value,
+      depth: depth.value,
       config_id: selectedModelId.value ?? undefined,
     })
     issues.value = res.issues.map(i => ({ ...i, _accepted: false, _ignored: false }))
@@ -1372,4 +1389,5 @@ function goBack() {
 .compare-error {
   padding: 8px 0;
 }
+.depth-tip { font-size: 12px; color: #999; margin-left: 8px; }
 </style>
