@@ -196,6 +196,7 @@ async def open_proofread(
             domain=request.domain,
             config_id=request.config_id,
             user_id=user.id,
+            depth=request.depth,
         )
     except RuntimeError as e:
         import traceback

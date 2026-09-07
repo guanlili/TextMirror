@@ -19,6 +19,9 @@ class PolishVersion(BaseModel):
     label: str = Field(..., description="版本标签，如 轻量润色/标准润色/深度润色")
     level: str = Field(..., description="改动级别: light/standard/deep")
     content: str = Field(..., description="润色后正文")
+    sensitive_words: Optional[List[str]] = Field(
+        None, description="润色产出命中的敏感/违禁词（无则不返回该字段）"
+    )
 
 
 class PolishResponse(BaseModel):

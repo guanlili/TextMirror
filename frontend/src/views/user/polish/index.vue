@@ -240,6 +240,12 @@
                 <el-icon><CopyDocument /></el-icon>复制
               </el-button>
             </div>
+            <!-- 敏感词警示（润色产出命中词库） -->
+            <el-alert v-if="ver.sensitive_words?.length" type="warning" :closable="false" class="sensitive-alert">
+              <template #title>
+                润色结果含敏感词：{{ ver.sensitive_words.join('、') }}，请确认适用场景后再使用
+              </template>
+            </el-alert>
             <!-- 卡片内容（支持 Markdown；流式未开始时显示等待态） -->
             <div v-if="streaming && !ver.content" class="card-body card-body-pending">
               <span class="pending-tip"><span class="dot-pulse"></span>等待生成...</span>
@@ -1707,5 +1713,8 @@ function levelDesc(level: string): string {
   .style-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .page-header .strategy-count, .selected-style-preview span:last-child { display: none; }
   .textarea-wrapper :deep(.el-textarea__inner) { min-height: 220px !important; }
+}
+.sensitive-alert {
+  margin-bottom: 8px;
 }
 </style>

@@ -28,10 +28,20 @@
           <div class="setting-row">
             <span class="setting-label">领域选择：</span>
             <el-radio-group v-model="domain" class="setting-value">
+              <el-radio value="auto">自动</el-radio>
               <el-radio value="general">通用</el-radio>
               <el-radio value="official">公文</el-radio>
               <el-radio value="legal">法律</el-radio>
             </el-radio-group>
+          </div>
+          <div class="setting-row">
+            <span class="setting-label">审校深度：</span>
+            <el-radio-group v-model="depth" size="small">
+              <el-radio-button value="quick">快查</el-radio-button>
+              <el-radio-button value="standard">标准</el-radio-button>
+              <el-radio-button value="deep">深度</el-radio-button>
+            </el-radio-group>
+            <span class="depth-tip">{{ depthTip }}</span>
           </div>
           <div v-if="modelOptions.length > 1" class="setting-row">
             <span class="setting-label">校对模型：</span>
@@ -198,8 +208,11 @@
                     <div v-if="item.issue.explanation"><span class="label">说明：</span><span class="text-muted">{{ item.issue.explanation }}</span></div>
                   </div>
                   <div class="issue-actions" v-if="!item.issue._accepted && !item.issue._ignored">
-                    <el-button type="primary" size="small" @click="acceptCompareIssue(item.issue)">
+                    <el-button v-if="item.issue.suggestion" type="primary" size="small" @click="acceptCompareIssue(item.issue)">
                       <el-icon><Check /></el-icon>接受修改
+                    </el-button>
+                    <el-button v-else-if="item.issue.type === 'sensitive' && item.issue.original" type="warning" size="small" @click="deleteCompareIssue(item.issue)">
+                      <el-icon><Delete /></el-icon>删除该词
                     </el-button>
                     <el-button size="small" @click="ignoreCompareIssue(item.issue)">
                       <el-icon><Close /></el-icon>忽略
@@ -263,8 +276,11 @@
                       <div v-if="issue.explanation"><span class="label">说明：</span><span class="text-muted">{{ issue.explanation }}</span></div>
                     </div>
                     <div class="issue-actions" v-if="!issue._accepted && !issue._ignored">
-                      <el-button type="primary" size="small" @click="acceptCompareIssue(issue)">
+                      <el-button v-if="issue.suggestion" type="primary" size="small" @click="acceptCompareIssue(issue)">
                         <el-icon><Check /></el-icon>接受修改
+                      </el-button>
+                      <el-button v-else-if="issue.type === 'sensitive' && issue.original" type="warning" size="small" @click="deleteCompareIssue(issue)">
+                        <el-icon><Delete /></el-icon>删除该词
                       </el-button>
                       <el-button size="small" @click="ignoreCompareIssue(issue)">
                         <el-icon><Close /></el-icon>忽略
@@ -407,8 +423,11 @@
                 </div>
               </div>
               <div class="issue-actions" v-if="!issue._accepted && !issue._ignored">
-                <el-button type="primary" size="small" @click="acceptIssue(index)">
+                <el-button v-if="issue.suggestion" type="primary" size="small" @click="acceptIssue(index)">
                   <el-icon><Check /></el-icon>接受修改
+                </el-button>
+                <el-button v-else-if="issue.type === 'sensitive' && issue.original" type="warning" size="small" @click="deleteIssue(index)">
+                  <el-icon><Delete /></el-icon>删除该词
                 </el-button>
                 <el-button size="small" @click="ignoreIssue(index)">
                   <el-icon><Close /></el-icon>忽略
@@ -460,7 +479,13 @@ onMounted(() => {
 })
 
 // 设置
-const domain = ref('general')
+const domain = ref('auto')
+const depth = ref('standard')
+const depthTip = computed(() => ({
+  quick: '仅词库/一致性/格式规则，秒回不耗AI额度',
+  standard: '规则+AI全面审校（推荐）',
+  deep: '全面审校+AI二次复查，更准但更慢',
+}[depth.value]))
 
 // 校对模型选择（默认当前活跃模型）
 const modelOptions = ref<AvailableModel[]>([])
@@ -591,6 +616,18 @@ function ignoreCompareIssue(issue: any) {
   issue._ignored = true
   syncCompareIssueState(issue)
   reportFeedback([issue], 'ignore')
+}
+
+/** 对比视图：删除敏感词（连同紧邻标点） */
+function deleteCompareIssue(issue: any) {
+  const word = issue.original
+  const nextChar = currentText.value[currentText.value.indexOf(word) + word.length]
+  const punct = '，。！？；、,'
+  const target = nextChar && punct.includes(nextChar) ? word + nextChar : word
+  currentText.value = currentText.value.replace(target, '')
+  issue._accepted = true
+  syncCompareIssueState(issue)
+  reportFeedback([issue], 'accept')
 }
 
 /** 同一原文在多个模型结果里出现时，保持状态一致 */
@@ -763,6 +800,7 @@ async function handleProofread() {
     const res = await textProofreadApi({
       text: inputText.value,
       domain: domain.value,
+      depth: depth.value,
       config_id: selectedModelId.value ?? undefined,
     })
     issues.value = res.issues.map(i => ({ ...i, _accepted: false, _ignored: false }))
@@ -810,6 +848,18 @@ function ignoreIssue(index: number) {
   const issue = filteredIssues.value[index]
   issue._ignored = true
   reportFeedback([issue], 'ignore')
+}
+
+// 删除敏感词（违禁词的自动修复 = 删除，连同紧邻标点避免悬空标点）
+function deleteIssue(index: number) {
+  const issue = filteredIssues.value[index]
+  const word = issue.original
+  const nextChar = currentText.value[currentText.value.indexOf(word) + word.length]
+  const punct = '，。！？；、,'
+  const target = nextChar && punct.includes(nextChar) ? word + nextChar : word
+  currentText.value = currentText.value.replace(target, '')
+  issue._accepted = true
+  reportFeedback([issue], 'accept')
 }
 
 // 撤销
@@ -1372,4 +1422,5 @@ function goBack() {
 .compare-error {
   padding: 8px 0;
 }
+.depth-tip { font-size: 12px; color: #999; margin-left: 8px; }
 </style>

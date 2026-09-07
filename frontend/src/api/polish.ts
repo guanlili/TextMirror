@@ -20,6 +20,7 @@ export interface PolishVersion {
   label: string
   level: string
   content: string
+  sensitive_words?: string[]
 }
 
 /** 润色响应 */

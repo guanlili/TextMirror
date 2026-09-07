@@ -15,6 +15,8 @@ from app.core.secret_crypto import decrypt_secret
 from app.models.global_word import GlobalWord
 from app.models.llm_config import LLMConfig
 from app.services.llm.openai_compat import OpenAICompatProvider
+from app.services.consistency import check_consistency
+from app.services.format_rules import check_format_rules
 from app.services.llm.base import BaseLLMProvider
 
 # 校对类型映射
@@ -41,7 +43,7 @@ DOMAIN_PROMPTS = {
         "1)错别字：注意形近字(已/己、的/地/得、账/帐)和音近字(在/再、做/作)；"
         "2)语法：主谓搭配、语序、成分残缺、句式杂糅；"
         "3)标点：中文用中文标点，英文/数字用半角，顿号与逗号区分，引号层级正确；"
-        "4)数字与单位：数值与单位间加空格，百分比/倍数/量级表述准确，中文语境下万/亿为单位；"
+        "4)数字与单位：百分比/倍数/量级表述准确；「数字+￥/¥」「壹拾万元整（￥100000）」是规范写法不要建议改写；中文单位（万元/人/台）与数值间不加空格；"
         "5)逻辑：前后矛盾、因果倒置、并列不当、指代不明"
     ),
     "official": (
@@ -151,11 +153,15 @@ async def get_llm_provider(config_id: Optional[int] = None) -> BaseLLMProvider:
     return provider
 
 
-def split_text_into_chunks(text: str, max_chunk_size: int = 800) -> List[str]:
+def split_text_into_chunks(text: str, max_chunk_size: int = 800,
+                           overlap: int = 100) -> List[str]:
     """
     将长文本按段落分片, 每片不超过 max_chunk_size 字符
     优先按段落分割, 保证语义完整
     分片越小,并发越多,长文本总耗时越短（短文本 <800 字仍为单片,不受影响）
+    overlap: 分片重叠窗口——每片开头带上前片尾部约 overlap 字，避免
+    跨切点的指代/矛盾（前句"三台设备"后句变"四台"）在切点处漏检；
+    重复报告由 merge_issues 按 (original, type) 去重兜底。
     """
     if len(text) <= max_chunk_size:
         return [text]
@@ -197,7 +203,20 @@ def split_text_into_chunks(text: str, max_chunk_size: int = 800) -> List[str]:
     if current_chunk:
         chunks.append(current_chunk)
 
-    return [chunk for chunk in chunks if chunk.strip()]
+    chunks = [chunk for chunk in chunks if chunk.strip()]
+    # 重叠窗口：非首片头部带上前片尾部（按句子边界取约 overlap 字）
+    if overlap > 0 and len(chunks) > 1:
+        overlapped = [chunks[0]]
+        for i in range(1, len(chunks)):
+            tail = chunks[i - 1][-overlap:]
+            # 尽量从句子边界开始，避免半句
+            for sep_pos in range(len(tail)):
+                if tail[sep_pos] in "。！？；\n":
+                    tail = tail[sep_pos + 1:]
+                    break
+            overlapped.append(tail + chunks[i])
+        chunks = overlapped
+    return chunks
 
 
 async def load_global_words() -> Dict[str, List[Dict]]:
@@ -300,6 +319,26 @@ async def _get_domain_rules(domain: str) -> str:
     except Exception as e:
         logger.debug(f"读取领域规则配置失败，使用内置默认: {e}")
     return DOMAIN_PROMPTS.get(domain, DOMAIN_PROMPTS.get("general", ""))
+
+
+# 领域自动识别特征词（轻量路由，仅 domain=auto 时生效）
+_DOMAIN_FEATURES = {
+    "legal": ["甲方", "乙方", "违约金", "合同编号", "本合同", "条约", "协议约定", "争议解决", "权利义务"],
+    "official": ["特此通知", "发文字号", "各部门", "关于印发", "请示", "批复", "落实到位", "贯彻落实", "二〇二", "现将"],
+}
+
+
+def detect_domain(text: str) -> str:
+    """
+    特征词路由：统计各领域特征词命中数，最高分且超过阈值才切换；
+    否则 general（保守策略：识别不准不如不识别）。
+    """
+    best_domain, best_score = "general", 0
+    for domain, words in _DOMAIN_FEATURES.items():
+        score = sum(text.count(w) for w in words)
+        if score > best_score:
+            best_domain, best_score = domain, score
+    return best_domain if best_score >= 2 else "general"
 
 
 def build_system_prompt(domain: str,
@@ -434,12 +473,14 @@ def scan_words_deterministic(text: str,
     # 用户在结果页能直接看到"这是词库在起作用"
     sensitive_words = {w["word"] for w in global_words.get("sensitive", [])}
     banned_words = {w["word"] for w in global_words.get("banned", [])}
+    # suggestion="" 前端渲染为「删除」操作（replace(词, "")）——违禁词
+    # 的自动修复就是删除；解释文字放 explanation 不进 suggestion
     for word in banned_words:
         if word and word in text:
-            _add(word, "sensitive", "请删除或替换该违禁词", "〔词库〕命中违禁词", "error")
+            _add(word, "sensitive", "", "〔词库〕命中违禁词", "error")
     for word in sensitive_words:
         if word and word in text and word not in banned_words:
-            _add(word, "sensitive", "请评估是否需要替换该敏感词", "〔词库〕命中敏感词", "warning")
+            _add(word, "sensitive", "", "〔词库〕命中敏感词", "warning")
 
     # 纠错词：全局 + 用户（用户词与全局词冲突时用户优先——显式维护的规则更具体）
     corrections: Dict[str, str] = {}
@@ -484,10 +525,13 @@ async def proofread_text(
     config_id: Optional[int] = None,
     user_id: Optional[int] = None,
     check_types: Optional[List[str]] = None,
+    depth: str = "standard",
 ) -> Dict[str, Any]:
     """
     执行文本校对（check_types 已废弃：不再影响审校范围，仅为兼容旧调用保留入参）
 
+    :param depth: 审校深度——quick 仅确定性层（零 LLM 成本秒回，适合批量初筛）；
+                  standard 全流程（默认）；deep 标准+强制二次自检（不限高危阈值）
     :param text: 待校对文本
     :param domain: 领域
     :param config_id: 指定模型配置ID（None 用当前活跃模型）
@@ -496,6 +540,11 @@ async def proofread_text(
     """
     import time
     t0 = time.perf_counter()
+
+    # 领域自动识别（仅 auto 时；特征词≥2 命中才切换，保守策略）
+    if domain == "auto":
+        domain = detect_domain(text)
+        logger.info(f"[校对] 领域自动识别 → {domain}")
 
     # 文本分片
     chunks = split_text_into_chunks(text)
@@ -516,8 +565,28 @@ async def proofread_text(
 
     # 词库确定性扫描：敏感词/禁词/纠错词字符串匹配，召回 100%、零 LLM 成本
     scanned_issues = scan_words_deterministic(text, global_words, user_words)
+    # 跨片一致性检查（纯规则）：金额/称谓/编号的全文级矛盾——分片送审抓不到
+    scanned_issues.extend(check_consistency(text))
+    # 格式规则引擎（纯规则）：日期/号码/金额量级/编号样式——LLM 对格式类不稳定
+    scanned_issues.extend(check_format_rules(text))
     if scanned_issues:
-        logger.info(f"[校对] 词库扫描命中 {len(scanned_issues)} 项")
+        logger.info(f"[校对] 确定性扫描命中 {len(scanned_issues)} 项")
+
+    # 快查模式：仅确定性层（零 LLM 成本），放行词过滤后直接返回——批量初筛场景
+    if depth == "quick":
+        await provider.close()  # quick 不用 LLM，释放已创建的连接
+        scanned_issues = _filter_whitelist_issues(scanned_issues, global_words, user_words)
+        scanned_issues.sort(key=lambda i: {"error": 0, "warning": 1, "info": 2}.get(i.get("severity", "warning"), 1))
+        logger.info(f"[校对][快查] 完成 问题={len(scanned_issues)} 耗时={time.perf_counter()-t0:.2f}s（零LLM）")
+        return {
+            "issues": scanned_issues,
+            "total_issues": len(scanned_issues),
+            "chunks_count": 1,
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "domain": domain,
+            "check_types": list(PROOFREAD_TYPES.keys()),
+            "depth": "quick",
+        }
 
     # 调用大模型（并发校对所有分片，加速整体响应）
     all_issues = []
@@ -560,6 +629,14 @@ async def proofread_text(
             raise RuntimeError(f"大模型调用失败: {last_error}")
         if failed_chunks > 0:
             logger.warning(f"[校对] {failed_chunks}/{len(chunks)} 个分片失败，结果可能不完整")
+
+        # 高危文本二次自检（error 级问题密集时触发；deep 模式强制）：provider 尚未关闭，
+        # 把第一轮问题清单喂回 LLM 复查遗漏——尽力而为的增益层
+        merged_early = merge_issues(list(all_issues), list(scanned_issues))
+        self_check_extra = await self_check_pass(text, merged_early, provider, force=(depth == "deep"))
+        all_issues.extend(self_check_extra)
+        for key in total_usage:
+            pass  # 自检用量计入 provider 返回但保持简单，不计入展示
     finally:
         await provider.close()
 
@@ -572,6 +649,10 @@ async def proofread_text(
     # 合并确定性扫描结果（LLM 版本优先，扫描版补位，按严重度排序）
     all_issues = merge_issues(all_issues, scanned_issues)
 
+    # 幻觉自校验：LLM 报的 original 逐字核验原文，转述偏差自动对齐、
+    # 定位失败的降级——消灭"高亮失败/假问题"这类最伤信任的输出
+    all_issues = verify_llm_issues(text, all_issues)
+
     logger.info(f"[校对] 完成 问题={len(all_issues)} 总耗时={time.perf_counter()-t0:.2f}s 用量={total_usage}")
 
     return {
@@ -581,6 +662,7 @@ async def proofread_text(
         "usage": total_usage,
         "domain": domain,
         "check_types": list(PROOFREAD_TYPES.keys()),  # 已废弃字段，恒为全量，仅为响应兼容保留
+        "depth": depth,
     }
 
 
@@ -608,3 +690,148 @@ def _filter_whitelist_issues(issues: List[Dict[str, Any]],
                 continue
         kept.append(issue)
     return kept
+
+
+# ======================================================================
+# LLM 输出幻觉自校验
+# ======================================================================
+
+def _normalize_for_match(s: str) -> str:
+    """匹配用归一化：去所有空白（LLM 偶尔增删空格/换行导致逐字匹配失败）"""
+    return "".join(s.split())
+
+
+def verify_llm_issues(text: str, issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    校验 LLM 报的问题的 original 是否真实存在于原文：
+    1. 逐字命中 → 通过
+    2. 去空白后命中 → 通过（LLM 增删了空白，不影响高亮定位的主干）
+    3. 未命中 → 尝试模糊定位：在原文中找与 original 最相似的片段，
+       相似度够高则用原文片段替换 original（修正 LLM 的转述偏差）；
+       否则该条降级——suggestion 清空、标记需人工定位（避免前端
+       高亮失败呈现为"假问题"）。
+    确定性扫描层（dict_scan/consistency/format_rule）的 issue 天然
+    来自原文匹配，跳过校验。
+    """
+    text_norm = _normalize_for_match(text)
+    verified: List[Dict[str, Any]] = []
+    fuzzy_fixed = 0
+
+    for issue in issues:
+        if issue.get("source") in ("dict_scan", "consistency", "format_rule"):
+            verified.append(issue)
+            continue
+        original = (issue.get("original") or "").strip()
+        if not original:
+            continue  # 无原文的问题直接丢弃
+        if original in text:
+            verified.append(issue)
+            continue
+        # 容差匹配：去空白
+        if _normalize_for_match(original) in text_norm:
+            verified.append(issue)
+            continue
+        # 模糊定位：滑窗找最相似片段（简单公共子串长度比）
+        best_frag, best_score = None, 0.0
+        win = len(original)
+        for i in range(0, max(len(text) - win, 0) + 1):
+            frag = text[i: i + win]
+            # 快速剪枝：首字符都不同则跳过（相似度必低）
+            common = _common_ratio(original, frag)
+            if common > best_score:
+                best_score, best_frag = common, frag
+        if best_score >= 0.6:
+            issue["original"] = best_frag
+            issue["explanation"] = f"{issue.get('explanation', '')}（已自动对齐原文位置）".strip("；")
+            fuzzy_fixed += 1
+            verified.append(issue)
+        else:
+            # 降级：保留问题提示但不可自动替换
+            issue = {**issue, "suggestion": "", "severity": "info"}
+            issue["explanation"] = f"原文定位失败，需人工核对：{issue.get('explanation', '')[:40]}"
+            verified.append(issue)
+
+    if fuzzy_fixed or len(verified) != len(issues):
+        dropped = len(issues) - len([i for i in issues if (i.get("original") or "").strip()])
+        logger.info(f"[自校验] 模糊对齐 {fuzzy_fixed} 条，降级 {sum(1 for i in verified if '原文定位失败' in i.get('explanation', ''))} 条")
+    return verified
+
+
+def _common_ratio(a: str, b: str) -> float:
+    """两等长字符串的字符一致率（O(n)，足够模糊定位用）"""
+    if not a or len(a) != len(b):
+        return 0.0
+    same = sum(1 for x, y in zip(a, b) if x == y)
+    return same / len(a)
+
+
+# ======================================================================
+# 高危文本二次自检
+# ======================================================================
+
+# 触发阈值：error 级问题数达到该值时触发二次复查
+_SELF_CHECK_ERROR_THRESHOLD = 3
+
+SELF_CHECK_PROMPT = """你是资深审校复核专家。第一轮审校在下面的文本中发现了若干问题，请复核：
+
+【原文】
+{text}
+
+【第一轮发现的问题】
+{issues}
+
+你的任务（仅两件事）：
+1. 复核既有问题：每条判断「正确 / 存疑」。存疑的说明理由（如原文其实没错、建议反而引入新错）。
+2. 补充遗漏：仅报告第一轮明显遗漏的、与既有问题同等的明确错误（不要吹毛求疵）。
+
+只输出JSON数组，每项：{{"o":"原文片段","t":"类型","s":"修改建议","e":"原因","sv":"严重度","review":"new|confirm|doubt"}}
+- review=new 表示新发现的遗漏问题（只输出这类会合入结果）
+- review=confirm/doubt 用于复核既有问题（只作记录不影响结果）
+无补充遗漏返回空数组[]。禁止输出JSON以外内容。"""
+
+
+def _needs_self_check(issues: List[Dict[str, Any]]) -> bool:
+    """高危判定：error 级问题达到阈值（密集错误文本=漏检风险最高）"""
+    error_count = sum(1 for i in issues if i.get("severity") == "error")
+    return error_count >= _SELF_CHECK_ERROR_THRESHOLD
+
+
+async def self_check_pass(
+    text: str,
+    issues: List[Dict[str, Any]],
+    provider,
+    force: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    二次自检：把第一轮问题清单喂回 LLM 复查，返回补充遗漏的 issue。
+    异常自捕获——二次检查失败不影响第一轮结果（尽力而为的增益层）。
+    """
+    if not force and not _needs_self_check(issues):
+        return []
+    # 最多带 15 条进 prompt（过长稀释注意力）
+    sample = issues[:15]
+    issues_desc = "\n".join(
+        f"{n}. 原文「{i.get('original', '')[:40]}」→ 建议「{i.get('suggestion', '')[:40]}」（{i.get('type')}）"
+        for n, i in enumerate(sample, 1)
+    )
+    prompt = SELF_CHECK_PROMPT.format(text=text[:3000], issues=issues_desc)
+    try:
+        response = await provider.chat(
+            [{"role": "user", "content": prompt}],
+            temperature=provider.default_temperature,
+        )
+        extra = parse_proofread_result(response.content)
+        # 只取 review=new 的项（LLM 复核意见不覆盖第一轮结果）
+        additions = [
+            {**i, "source": "self_check"} for i in extra
+            if i.get("review") == "new" and i.get("original")
+        ]
+        # 去掉 review 标记避免污染下游契约
+        for a in additions:
+            a.pop("review", None)
+        if additions:
+            logger.info(f"[自检] 二次复查补充 {len(additions)} 条遗漏")
+        return additions
+    except Exception as e:
+        logger.warning(f"[自检] 二次复查失败（跳过，不影响第一轮结果）: {e}")
+        return []
