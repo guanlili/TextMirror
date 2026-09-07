@@ -457,6 +457,8 @@ import { getAvailableModelsApi, type AvailableModel } from '@/api/polish'
 interface IssueWithStatus extends ProofreadIssue {
   _accepted?: boolean
   _ignored?: boolean
+  _deletedText?: string    // 删除该词操作的实际删除内容（含标点），供撤销恢复
+  _undoAnchor?: number     // 删除时的词首位置，撤销按此插回
 }
 
 // 状态
@@ -621,11 +623,15 @@ function ignoreCompareIssue(issue: any) {
 /** 对比视图：删除敏感词（连同紧邻标点） */
 function deleteCompareIssue(issue: any) {
   const word = issue.original
-  const nextChar = currentText.value[currentText.value.indexOf(word) + word.length]
+  const wordIdx = currentText.value.indexOf(word)
+  if (wordIdx < 0) return
+  const nextChar = currentText.value[wordIdx + word.length]
   const punct = '，。！？；、,'
   const target = nextChar && punct.includes(nextChar) ? word + nextChar : word
   currentText.value = currentText.value.replace(target, '')
   issue._accepted = true
+  issue._deletedText = target
+  issue._undoAnchor = wordIdx
   syncCompareIssueState(issue)
   reportFeedback([issue], 'accept')
 }
@@ -648,6 +654,12 @@ function syncCompareIssueState(source: any) {
 function undoCompareIssue(issue: any) {
   if (issue._accepted && issue.original && issue.suggestion) {
     currentText.value = currentText.value.replace(issue.suggestion, issue.original)
+  } else if (issue._accepted && issue._deletedText !== undefined) {
+    const anchor = issue._undoAnchor ?? 0
+    const pos = Math.min(anchor, currentText.value.length)
+    currentText.value = currentText.value.slice(0, pos) + issue._deletedText + currentText.value.slice(pos)
+    issue._deletedText = undefined
+    issue._undoAnchor = undefined
   }
   issue._accepted = false
   issue._ignored = false
@@ -854,11 +866,16 @@ function ignoreIssue(index: number) {
 function deleteIssue(index: number) {
   const issue = filteredIssues.value[index]
   const word = issue.original
-  const nextChar = currentText.value[currentText.value.indexOf(word) + word.length]
+  const wordIdx = currentText.value.indexOf(word)
+  if (wordIdx < 0) return
+  const nextChar = currentText.value[wordIdx + word.length]
   const punct = '，。！？；、,'
   const target = nextChar && punct.includes(nextChar) ? word + nextChar : word
   currentText.value = currentText.value.replace(target, '')
   issue._accepted = true
+  // 记录删除内容与词首位置，撤销时按锚点插回
+  issue._deletedText = target
+  issue._undoAnchor = wordIdx
   reportFeedback([issue], 'accept')
 }
 
@@ -867,6 +884,14 @@ function undoIssue(index: number) {
   const issue = filteredIssues.value[index]
   if (issue._accepted && issue.original && issue.suggestion) {
     currentText.value = currentText.value.replace(issue.suggestion, issue.original)
+  } else if (issue._accepted && issue._deletedText) {
+    // 删除类撤销：把删掉的词（含标点）插回原位——按删除时的锚点定位
+    const anchor = issue._undoAnchor
+    if (anchor !== undefined && anchor >= 0 && anchor <= currentText.value.length) {
+      currentText.value = currentText.value.slice(0, anchor) + issue._deletedText + currentText.value.slice(anchor)
+    }
+    issue._deletedText = undefined
+    issue._undoAnchor = undefined
   }
   issue._accepted = false
   issue._ignored = false
