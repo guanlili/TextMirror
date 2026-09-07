@@ -163,40 +163,34 @@ const router = createRouter({
 })
 
 // 路由守卫
-router.beforeEach((to, _from, next) => {
-  // 动态设置页面标题（站点配置在 main.ts 中加载到 DOM title 上，此处做路由级覆盖）
-  import('@/stores/site').then(({ useSiteStore }) => {
-    try {
-      const siteStore = useSiteStore()
-      siteStore.updateDocumentTitle(to.meta.title as string || '')
-
-      // 游客模式关闭时：未登录访问用户区页面 → 跳登录页
-      const token = localStorage.getItem('access_token')
-      if (!token && !siteStore.guestModeEnabled && to.path !== '/login' && !to.path.startsWith('/40')) {
-        next({ name: 'Login', query: { redirect: to.fullPath } })
-        return
-      }
-    } catch { /* pinia 未就绪时忽略 */ }
-  })
-
+router.beforeEach(async (to) => {
   const token = localStorage.getItem('access_token')
 
   // 需要登录的页面
   if (to.meta.requireAuth && !token) {
-    next({ name: 'Login', query: { redirect: to.fullPath } })
-    return
+    return { name: 'Login', query: { redirect: to.fullPath } }
   }
 
   // 已登录不允许访问登录页（除非有飞书回调参数）
   if (to.name === 'Login' && token) {
     const hasFeishuParams = to.query.code || to.query.feishu_token
-    if (!hasFeishuParams) {
-      next({ path: '/' })
-      return
+    if (!hasFeishuParams) return { path: '/' }
+  }
+
+  // 动态引入避免 router → stores/site → api/site → utils/request → router 的循环依赖
+  const { useSiteStore } = await import('@/stores/site')
+  const siteStore = useSiteStore()
+
+  // 游客模式关闭时：未登录访问用户区页面 → 跳登录页（须先拿到站点配置才能判断）
+  if (!token && to.path !== '/login' && !to.path.startsWith('/40')) {
+    await siteStore.ensureLoaded()
+    if (!siteStore.guestModeEnabled) {
+      return { name: 'Login', query: { redirect: to.fullPath } }
     }
   }
 
-  next()
+  // 动态设置页面标题（站点配置在 main.ts 中加载到 DOM title 上，此处做路由级覆盖）
+  siteStore.updateDocumentTitle((to.meta.title as string) || '')
 })
 
 export default router

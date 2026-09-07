@@ -29,6 +29,11 @@ RUN pip install --no-cache-dir --upgrade pip -i https://mirrors.aliyun.com/pypi/
 # 复制项目代码
 COPY . .
 
+# 入口脚本置于 /usr/local/bin，避免开发环境挂载 ./backend:/app 时被覆盖
+RUN cp docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+
 # 暴露端口
 EXPOSE 3020
 

@@ -46,6 +46,18 @@ export const useSiteStore = defineStore('site', () => {
     }
   }
 
+  /** 确保站点配置已加载（并发调用共享同一次请求） */
+  let pendingLoad: Promise<void> | null = null
+  async function ensureLoaded() {
+    if (loaded.value) return
+    if (!pendingLoad) {
+      pendingLoad = loadSiteConfig().finally(() => {
+        pendingLoad = null
+      })
+    }
+    await pendingLoad
+  }
+
   /** 更新配置（管理员保存后调用） */
   function applyConfig(config: SiteConfig) {
     platformName.value = config.platform_name || 'TextMirror'
@@ -59,10 +71,13 @@ export const useSiteStore = defineStore('site', () => {
     updateFavicon()
   }
 
-  /** 更新页面标题 */
+  /** 更新页面标题（无参调用沿用上次的页面名，避免异步加载完成后覆盖路由标题） */
+  const currentPageTitle = ref('')
   function updateDocumentTitle(pageTitle?: string) {
-    const base = `${platformName.value} - ${platformSubtitle.value}`
-    document.title = pageTitle ? `${pageTitle} - ${platformName.value}` : base
+    if (pageTitle !== undefined) currentPageTitle.value = pageTitle
+    document.title = currentPageTitle.value
+      ? `${currentPageTitle.value} - ${platformName.value}`
+      : `${platformName.value} - ${platformSubtitle.value}`
   }
 
   /** 更新 favicon */
@@ -86,6 +101,7 @@ export const useSiteStore = defineStore('site', () => {
     guestModeEnabled,
     loaded,
     loadSiteConfig,
+    ensureLoaded,
     applyConfig,
     updateDocumentTitle,
     updateFavicon,
