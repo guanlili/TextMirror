@@ -15,7 +15,7 @@ class Dictionary(BaseModel):
     __tablename__ = "dictionaries"
 
     user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=False, comment="所属用户ID"
+        Integer, ForeignKey("users.id"), nullable=False, index=True, comment="所属用户ID"
     )
     name: Mapped[str] = mapped_column(
         String(100), nullable=False, comment="词库名称"
@@ -39,7 +39,7 @@ class DictionaryEntry(BaseModel):
     __tablename__ = "dictionary_entries"
 
     dictionary_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("dictionaries.id", ondelete="CASCADE"), nullable=False, comment="所属词库ID"
+        Integer, ForeignKey("dictionaries.id", ondelete="CASCADE"), nullable=False, index=True, comment="所属词库ID"
     )
     wrong_word: Mapped[str] = mapped_column(
         String(200), nullable=False, comment="错误词"
@@ -60,7 +60,7 @@ class WhitelistWord(BaseModel):
     __tablename__ = "whitelist_words"
 
     user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=False, comment="所属用户ID"
+        Integer, ForeignKey("users.id"), nullable=False, index=True, comment="所属用户ID"
     )
     word: Mapped[str] = mapped_column(
         String(200), nullable=False, comment="放行词"

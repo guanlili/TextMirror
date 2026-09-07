@@ -35,7 +35,9 @@ class Role(BaseModel):
     )
 
     # 关联关系
-    users = relationship("User", back_populates="role", lazy="selectin")
+    # users 不做 eager load：权限校验每请求都 select(Role)，selectin 会连带捞出该角色
+    # 全部用户；删除角色时 flush 会在 greenlet 内按需加载以解开外键，行为不变
+    users = relationship("User", back_populates="role")
     role_permissions = relationship(
         "RolePermission", back_populates="role", lazy="selectin", cascade="all, delete-orphan"
     )
