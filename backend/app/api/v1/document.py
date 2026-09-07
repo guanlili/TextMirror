@@ -2,6 +2,7 @@
 TextMirror 文档校对 API
 支持上传 .doc / .docx / .pdf / .txt 文件进行校对
 """
+import asyncio
 import os
 import json
 import uuid
@@ -136,9 +137,9 @@ async def upload_document(
     with open(file_path, "wb") as f:
         f.write(content)
 
-    # 提取文本
+    # 提取文本（同步解析放线程池：.doc 走 LibreOffice subprocess，最长阻塞 60s）
     try:
-        extracted_text = extract_text_from_file(file_path, file_ext)
+        extracted_text = await asyncio.to_thread(extract_text_from_file, file_path, file_ext)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -163,7 +164,7 @@ async def upload_document(
     # 提取格式化 HTML（保留排版和字体样式）
     extracted_html = ""
     try:
-        extracted_html = extract_html_from_file(file_path, file_ext, extracted_text)
+        extracted_html = await asyncio.to_thread(extract_html_from_file, file_path, file_ext, extracted_text)
     except Exception as e:
         logger.warning(f"HTML格式提取失败，将降级使用纯文本: {e}")
 
@@ -244,7 +245,9 @@ async def document_proofread(
             # extracted_text 为空，尝试从磁盘重新提取
             if os.path.exists(doc_record.file_path):
                 try:
-                    extracted_text = extract_text_from_file(doc_record.file_path, doc_record.file_ext)
+                    extracted_text = await asyncio.to_thread(
+                        extract_text_from_file, doc_record.file_path, doc_record.file_ext
+                    )
                 except Exception as e:
                     logger.error(f"重新提取文本失败: {e}")
                     raise HTTPException(status_code=500, detail="文本提取失败，请重新上传")
@@ -305,9 +308,9 @@ async def document_proofread(
             corrected_filename = sanitize_filename(f"校对修订_{filename}")
             corrected_path = safe_upload_path(request.file_id, corrected_filename)
             if file_ext == ".docx":
-                generate_corrected_docx(file_path, result["issues"], corrected_path)
+                await asyncio.to_thread(generate_corrected_docx, file_path, result["issues"], corrected_path)
             else:
-                generate_corrected_txt(text, result["issues"], corrected_path)
+                await asyncio.to_thread(generate_corrected_txt, text, result["issues"], corrected_path)
             corrected_url = build_download_url(request.file_id, corrected_filename)
 
     except Exception as e:
@@ -393,7 +396,9 @@ async def document_proofread_async(
             if not extracted_text:
                 if os.path.exists(doc_record.file_path):
                     try:
-                        extracted_text = extract_text_from_file(doc_record.file_path, doc_record.file_ext)
+                        extracted_text = await asyncio.to_thread(
+                            extract_text_from_file, doc_record.file_path, doc_record.file_ext
+                        )
                     except Exception as e:
                         logger.error(f"重新提取文本失败: {e}")
                         raise HTTPException(status_code=500, detail="文本提取失败，请重新上传")

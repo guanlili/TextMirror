@@ -538,7 +538,7 @@ async def open_submit_document(
     # 此后任何失败路径都不该在磁盘留下孤儿文件
     try:
         try:
-            extracted_text = extract_text_from_file(file_path, file_ext)
+            extracted_text = await asyncio.to_thread(extract_text_from_file, file_path, file_ext)
         except ValueError as e:
             raise HTTPException(status_code=400, detail={"code": "INVALID_FILE", "message": str(e)})
         except Exception as e:

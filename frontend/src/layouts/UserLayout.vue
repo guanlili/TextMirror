@@ -28,7 +28,7 @@
 
       <div class="sidebar-spacer" />
       <button class="theme-toggle" :title="isDark ? '切换到亮色模式' : '切换到暗色模式'" @click="toggle">
-        <el-icon><component :is="isDark ? 'Sunny' : 'Moon'" /></el-icon>
+        <el-icon><component :is="isDark ? Sunny : Moon" /></el-icon>
         <span>{{ isDark ? '亮色模式' : '暗色模式' }}</span>
       </button>
       <div class="security-note">
@@ -107,6 +107,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+// :is 绑定的是组件对象，按需解析器只处理模板标签，故显式引入
+import { Sunny, Moon } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useSiteStore } from '@/stores/site'
 import { getTodayUsageApi } from '@/api/history'
