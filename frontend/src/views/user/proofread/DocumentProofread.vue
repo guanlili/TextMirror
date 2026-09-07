@@ -204,7 +204,7 @@
                 </div>
               </div>
               <div class="issue-actions" v-if="!issue._accepted && !issue._ignored">
-                <el-button type="primary" size="small" @click="acceptIssue(issue)">
+                <el-button v-if="issue.suggestion" type="primary" size="small" @click="acceptIssue(issue)">
                   <el-icon><Check /></el-icon>接受修改
                 </el-button>
                 <el-button size="small" @click="ignoreIssue(issue)">

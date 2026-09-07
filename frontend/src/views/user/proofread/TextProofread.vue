@@ -208,7 +208,7 @@
                     <div v-if="item.issue.explanation"><span class="label">说明：</span><span class="text-muted">{{ item.issue.explanation }}</span></div>
                   </div>
                   <div class="issue-actions" v-if="!item.issue._accepted && !item.issue._ignored">
-                    <el-button type="primary" size="small" @click="acceptCompareIssue(item.issue)">
+                    <el-button v-if="item.issue.suggestion" type="primary" size="small" @click="acceptCompareIssue(item.issue)">
                       <el-icon><Check /></el-icon>接受修改
                     </el-button>
                     <el-button size="small" @click="ignoreCompareIssue(item.issue)">
@@ -273,7 +273,7 @@
                       <div v-if="issue.explanation"><span class="label">说明：</span><span class="text-muted">{{ issue.explanation }}</span></div>
                     </div>
                     <div class="issue-actions" v-if="!issue._accepted && !issue._ignored">
-                      <el-button type="primary" size="small" @click="acceptCompareIssue(issue)">
+                      <el-button v-if="issue.suggestion" type="primary" size="small" @click="acceptCompareIssue(issue)">
                         <el-icon><Check /></el-icon>接受修改
                       </el-button>
                       <el-button size="small" @click="ignoreCompareIssue(issue)">
@@ -417,7 +417,7 @@
                 </div>
               </div>
               <div class="issue-actions" v-if="!issue._accepted && !issue._ignored">
-                <el-button type="primary" size="small" @click="acceptIssue(index)">
+                <el-button v-if="issue.suggestion" type="primary" size="small" @click="acceptIssue(index)">
                   <el-icon><Check /></el-icon>接受修改
                 </el-button>
                 <el-button size="small" @click="ignoreIssue(index)">
