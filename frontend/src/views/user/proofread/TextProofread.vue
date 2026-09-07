@@ -457,6 +457,8 @@ import { getAvailableModelsApi, type AvailableModel } from '@/api/polish'
 interface IssueWithStatus extends ProofreadIssue {
   _accepted?: boolean
   _ignored?: boolean
+  _deletedText?: string    // 删除该词操作的实际删除内容（含标点），供撤销恢复
+  _undoAnchor?: number     // 删除时的词首位置，撤销按此插回
 }
 
 // 状态
@@ -572,7 +574,10 @@ const summaryStats = computed(() => {
 
 /** 分级一键接受：consensus=仅共识；high=共识+高严重度独有；all=全部 */
 async function handleAcceptByStrategy(level: 'consensus' | 'high' | 'all') {
-  let targets = summaryIssues.value.filter(i => !i.issue._accepted && !i.issue._ignored && i.issue.original && i.issue.suggestion)
+  let targets = summaryIssues.value.filter(i =>
+    !i.issue._accepted && !i.issue._ignored && i.issue.original
+    && (i.issue.suggestion || i.issue.type === 'sensitive')
+  )
   if (level === 'consensus') targets = targets.filter(i => i.isConsensus)
   else if (level === 'high') targets = targets.filter(i => i.isConsensus || i.issue.severity === 'error')
   if (targets.length === 0) return
@@ -585,7 +590,18 @@ async function handleAcceptByStrategy(level: 'consensus' | 'high' | 'all') {
       { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
     )
     for (const item of targets) {
-      currentText.value = currentText.value.replace(item.issue.original, item.issue.suggestion)
+      if (item.issue.suggestion) {
+        currentText.value = currentText.value.replace(item.issue.original, item.issue.suggestion)
+      } else {
+        const wordIdx = currentText.value.indexOf(item.issue.original)
+        if (wordIdx < 0) continue
+        const nextChar = currentText.value[wordIdx + item.issue.original.length]
+        const punct = '，。！？；、,'
+        const target = nextChar && punct.includes(nextChar) ? item.issue.original + nextChar : item.issue.original
+        currentText.value = currentText.value.replace(target, '')
+        item.issue._deletedText = target
+        item.issue._undoAnchor = wordIdx
+      }
       item.issue._accepted = true
       syncCompareIssueState(item.issue)
     }
@@ -621,11 +637,15 @@ function ignoreCompareIssue(issue: any) {
 /** 对比视图：删除敏感词（连同紧邻标点） */
 function deleteCompareIssue(issue: any) {
   const word = issue.original
-  const nextChar = currentText.value[currentText.value.indexOf(word) + word.length]
+  const wordIdx = currentText.value.indexOf(word)
+  if (wordIdx < 0) return
+  const nextChar = currentText.value[wordIdx + word.length]
   const punct = '，。！？；、,'
   const target = nextChar && punct.includes(nextChar) ? word + nextChar : word
   currentText.value = currentText.value.replace(target, '')
   issue._accepted = true
+  issue._deletedText = target
+  issue._undoAnchor = wordIdx
   syncCompareIssueState(issue)
   reportFeedback([issue], 'accept')
 }
@@ -648,6 +668,12 @@ function syncCompareIssueState(source: any) {
 function undoCompareIssue(issue: any) {
   if (issue._accepted && issue.original && issue.suggestion) {
     currentText.value = currentText.value.replace(issue.suggestion, issue.original)
+  } else if (issue._accepted && issue._deletedText !== undefined) {
+    const anchor = issue._undoAnchor ?? 0
+    const pos = Math.min(anchor, currentText.value.length)
+    currentText.value = currentText.value.slice(0, pos) + issue._deletedText + currentText.value.slice(pos)
+    issue._deletedText = undefined
+    issue._undoAnchor = undefined
   }
   issue._accepted = false
   issue._ignored = false
@@ -656,7 +682,10 @@ function undoCompareIssue(issue: any) {
 
 /** 对比视图：一键接受全部待处理问题 */
 async function handleCompareAcceptAll() {
-  const pending = compareAllIssues.value.filter(i => !i._accepted && !i._ignored && i.original && i.suggestion)
+  // 与单条操作语义一致：有建议的替换 + 敏感词删除
+  const pending = compareAllIssues.value.filter(i =>
+    !i._accepted && !i._ignored && i.original && (i.suggestion || i.type === 'sensitive')
+  )
   if (pending.length === 0) return
   try {
     await ElMessageBox.confirm(
@@ -665,7 +694,18 @@ async function handleCompareAcceptAll() {
       { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
     )
     for (const issue of pending) {
-      currentText.value = currentText.value.replace(issue.original, issue.suggestion)
+      if (issue.suggestion) {
+        currentText.value = currentText.value.replace(issue.original, issue.suggestion)
+      } else {
+        const wordIdx = currentText.value.indexOf(issue.original)
+        if (wordIdx < 0) continue
+        const nextChar = currentText.value[wordIdx + issue.original.length]
+        const punct = '，。！？；、,'
+        const target = nextChar && punct.includes(nextChar) ? issue.original + nextChar : issue.original
+        currentText.value = currentText.value.replace(target, '')
+        issue._deletedText = target
+        issue._undoAnchor = wordIdx
+      }
       issue._accepted = true
       syncCompareIssueState(issue)
     }
@@ -854,11 +894,16 @@ function ignoreIssue(index: number) {
 function deleteIssue(index: number) {
   const issue = filteredIssues.value[index]
   const word = issue.original
-  const nextChar = currentText.value[currentText.value.indexOf(word) + word.length]
+  const wordIdx = currentText.value.indexOf(word)
+  if (wordIdx < 0) return
+  const nextChar = currentText.value[wordIdx + word.length]
   const punct = '，。！？；、,'
   const target = nextChar && punct.includes(nextChar) ? word + nextChar : word
   currentText.value = currentText.value.replace(target, '')
   issue._accepted = true
+  // 记录删除内容与词首位置，撤销时按锚点插回
+  issue._deletedText = target
+  issue._undoAnchor = wordIdx
   reportFeedback([issue], 'accept')
 }
 
@@ -867,6 +912,14 @@ function undoIssue(index: number) {
   const issue = filteredIssues.value[index]
   if (issue._accepted && issue.original && issue.suggestion) {
     currentText.value = currentText.value.replace(issue.suggestion, issue.original)
+  } else if (issue._accepted && issue._deletedText) {
+    // 删除类撤销：把删掉的词（含标点）插回原位——按删除时的锚点定位
+    const anchor = issue._undoAnchor
+    if (anchor !== undefined && anchor >= 0 && anchor <= currentText.value.length) {
+      currentText.value = currentText.value.slice(0, anchor) + issue._deletedText + currentText.value.slice(anchor)
+    }
+    issue._deletedText = undefined
+    issue._undoAnchor = undefined
   }
   issue._accepted = false
   issue._ignored = false
@@ -874,19 +927,34 @@ function undoIssue(index: number) {
 
 // 一键修改全部
 async function handleAcceptAll() {
+  // 可处理项：有建议的替换 + 敏感词删除（与单条操作语义一致）
+  const actionable = issues.value.filter(i =>
+    !i._accepted && !i._ignored && i.original && (i.suggestion || i.type === 'sensitive')
+  )
   try {
     await ElMessageBox.confirm(
-      `确认接受全部 ${issues.value.filter(i => !i._accepted && !i._ignored).length} 条修改建议？`,
+      `确认接受全部 ${actionable.length} 条修改建议？`,
       '一键修改',
       { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
     )
     const accepted: any[] = []
-    for (const issue of issues.value) {
-      if (!issue._accepted && !issue._ignored && issue.original && issue.suggestion) {
+    for (const issue of actionable) {
+      if (issue.suggestion) {
         currentText.value = currentText.value.replace(issue.original, issue.suggestion)
         issue._accepted = true
-        accepted.push(issue)
+      } else {
+        // 敏感词：删除（含紧邻标点），记录撤销锚点
+        const wordIdx = currentText.value.indexOf(issue.original)
+        if (wordIdx < 0) continue
+        const nextChar = currentText.value[wordIdx + issue.original.length]
+        const punct = '，。！？；、,'
+        const target = nextChar && punct.includes(nextChar) ? issue.original + nextChar : issue.original
+        currentText.value = currentText.value.replace(target, '')
+        issue._deletedText = target
+        issue._undoAnchor = wordIdx
+        issue._accepted = true
       }
+      accepted.push(issue)
     }
     reportFeedback(accepted, 'accept')
     ElMessage.success('已接受所有修改')
@@ -923,7 +991,7 @@ function handleExport(kind: string) {
       const status = issue._accepted ? '已采纳' : issue._ignored ? '已忽略' : '待处理'
       lines.push(`【${idx + 1}】${typeLabel(issue.type)}｜${severityLabel(issue.severity)}｜${status}`)
       lines.push(`原文：${issue.original}`)
-      lines.push(`建议：${issue.suggestion}`)
+      lines.push(`建议：${issue.suggestion || (issue.type === 'sensitive' ? '（删除该词）' : '（需人工核对）')}`)
       if (issue.explanation) lines.push(`说明：${issue.explanation}`)
       lines.push('')
     })
