@@ -39,16 +39,20 @@ def _get_client_ip(request: Request) -> str:
     return direct
 
 
-async def check_guest_rate_limit(request: Request):
+async def check_guest_rate_limit(request: Request, daily_limit: int | None = None):
     """
     游客限流检查
     对未携带 Token 的请求进行 IP 维度的每日限流
-    每日限制次数由 settings.GUEST_DAILY_LIMIT 控制
+    每日限制次数取后台「策略管理」配置，未配置时回落到 settings.GUEST_DAILY_LIMIT
 
     注意：本函数只在请求未通过认证（get_current_user_optional 返回 None）时调用，
     不再依据 Authorization 头是否存在放行——否则伪造任意 Bearer 头即可绕过限流。
     """
+    from app.services.guest_policy import get_guest_policy
+
     client_ip = _get_client_ip(request)
+    if daily_limit is None:
+        daily_limit = (await get_guest_policy())["daily_limit"]
 
     # Redis 计数器 key
     redis_key = f"textmirror:guest_limit:{client_ip}"
@@ -57,11 +61,11 @@ async def check_guest_rate_limit(request: Request):
         redis = get_redis()
         current_count = await redis.get(redis_key)
 
-        if current_count is not None and int(current_count) >= settings.GUEST_DAILY_LIMIT:
+        if current_count is not None and int(current_count) >= daily_limit:
             logger.warning(f"游客限流触发: IP={client_ip}, count={current_count}")
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"游客每日最多使用 {settings.GUEST_DAILY_LIMIT} 次，请登录后继续使用",
+                detail=f"游客每日最多使用 {daily_limit} 次，请登录后继续使用",
             )
 
         # 计数器自增

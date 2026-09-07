@@ -268,28 +268,12 @@ export interface GuestPolicyConfig {
   allow_upload: boolean
 }
 
-export interface UserPolicyConfig {
-  daily_limit: number
-  max_text_length: number
-  allow_upload: boolean
-  allow_export: boolean
-  allow_dictionary: boolean
-}
-
 export function getGuestPolicyApi(): Promise<GuestPolicyConfig> {
   return request.get('/admin/policy/guest')
 }
 
 export function updateGuestPolicyApi(data: GuestPolicyConfig): Promise<GuestPolicyConfig> {
   return request.put('/admin/policy/guest', data)
-}
-
-export function getUserPolicyApi(): Promise<UserPolicyConfig> {
-  return request.get('/admin/policy/user')
-}
-
-export function updateUserPolicyApi(data: UserPolicyConfig): Promise<UserPolicyConfig> {
-  return request.put('/admin/policy/user', data)
 }
 
 // ========== 系统配置 ==========

@@ -2,42 +2,23 @@
   <div class="admin-policy">
     <el-card>
       <template #header><span style="font-weight: 600;">游客策略</span></template>
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px;">
+        保存后即时生效，无需重启；未保存过时以 <code>.env</code> 的
+        <code>GUEST_DAILY_LIMIT</code> / <code>GUEST_TEXT_MAX_LENGTH</code> 为准。
+        登录用户的每日额度在「用户管理」逐人设置，功能开关在「角色权限」配置。
+      </el-alert>
       <el-form label-width="160px" style="max-width: 500px;">
         <el-form-item label="每日校对次数上限">
-          <el-input-number v-model="guestPolicy.daily_limit" :min="0" :max="1000" />
+          <el-input-number v-model="guestPolicy.daily_limit" :min="0" :max="100000" />
         </el-form-item>
         <el-form-item label="单次最大字数">
-          <el-input-number v-model="guestPolicy.max_text_length" :min="100" :max="100000" :step="1000" />
+          <el-input-number v-model="guestPolicy.max_text_length" :min="100" :max="500000" :step="1000" />
         </el-form-item>
         <el-form-item label="允许上传文档">
           <el-switch v-model="guestPolicy.allow_upload" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="saveGuestPolicy">保存游客策略</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
-
-    <el-card style="margin-top: 16px;">
-      <template #header><span style="font-weight: 600;">登录用户默认策略</span></template>
-      <el-form label-width="160px" style="max-width: 500px;">
-        <el-form-item label="每日校对次数上限">
-          <el-input-number v-model="userPolicy.daily_limit" :min="0" :max="100000" />
-        </el-form-item>
-        <el-form-item label="单次最大字数">
-          <el-input-number v-model="userPolicy.max_text_length" :min="100" :max="500000" :step="5000" />
-        </el-form-item>
-        <el-form-item label="允许上传文档">
-          <el-switch v-model="userPolicy.allow_upload" />
-        </el-form-item>
-        <el-form-item label="允许导出报告">
-          <el-switch v-model="userPolicy.allow_export" />
-        </el-form-item>
-        <el-form-item label="允许个性化词库">
-          <el-switch v-model="userPolicy.allow_dictionary" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="saveUserPolicy">保存用户策略</el-button>
+          <el-button type="primary" :loading="saving" @click="saveGuestPolicy">保存游客策略</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -45,58 +26,42 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, onMounted } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import {
-  type GuestPolicyConfig, type UserPolicyConfig,
-  getGuestPolicyApi, updateGuestPolicyApi,
-  getUserPolicyApi, updateUserPolicyApi,
-} from '@/api/admin'
+import { type GuestPolicyConfig, getGuestPolicyApi, updateGuestPolicyApi } from '@/api/admin'
 
 const guestPolicy = reactive<GuestPolicyConfig>({
-  daily_limit: 20,
-  max_text_length: 5000,
+  daily_limit: 0,
+  max_text_length: 100,
   allow_upload: true,
 })
-
-const userPolicy = reactive<UserPolicyConfig>({
-  daily_limit: 200,
-  max_text_length: 50000,
-  allow_upload: true,
-  allow_export: true,
-  allow_dictionary: true,
-})
+const saving = ref(false)
 
 onMounted(async () => {
   try {
-    const guest = await getGuestPolicyApi()
-    Object.assign(guestPolicy, guest)
-  } catch {}
-  
-  try {
-    const user = await getUserPolicyApi()
-    Object.assign(userPolicy, user)
-  } catch {}
+    Object.assign(guestPolicy, await getGuestPolicyApi())
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '游客策略加载失败')
+  }
 })
 
 async function saveGuestPolicy() {
+  saving.value = true
   try {
-    await updateGuestPolicyApi(guestPolicy)
-    ElMessage.success('游客策略已保存')
+    Object.assign(guestPolicy, await updateGuestPolicyApi(guestPolicy))
+    ElMessage.success('游客策略已保存，即时生效')
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || '保存失败')
-  }
-}
-
-async function saveUserPolicy() {
-  try {
-    await updateUserPolicyApi(userPolicy)
-    ElMessage.success('用户策略已保存')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '保存失败')
+  } finally {
+    saving.value = false
   }
 }
 </script>
 
 <style scoped lang="scss">
+code {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.06);
+}
 </style>

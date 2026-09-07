@@ -12,7 +12,6 @@ from loguru import logger
 from app.core.database import get_db
 from app.core.dependencies import get_current_user_optional
 from app.core.rate_limit import check_guest_rate_limit, check_user_quota, reject_guest_if_disabled
-from app.core.config import settings
 from app.models.proofread import ProofreadRecord
 from app.schemas.proofread import (
     TextProofreadRequest,
@@ -39,13 +38,16 @@ async def text_proofread(
     # 游客限流检查
     if current_user is None:
         await reject_guest_if_disabled(http_request)
-        await check_guest_rate_limit(http_request)
-        # 游客文本长度限制
-        if len(request.text) > settings.GUEST_TEXT_MAX_LENGTH:
+        from app.services.guest_policy import get_guest_policy
+        guest_policy = await get_guest_policy()
+        # 先校验长度：非法请求不消耗游客当日次数
+        max_text_length = guest_policy["max_text_length"]
+        if len(request.text) > max_text_length:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"游客模式文本长度不能超过{settings.GUEST_TEXT_MAX_LENGTH}字，请登录后使用",
+                detail=f"游客模式文本长度不能超过{max_text_length}字，请登录后使用",
             )
+        await check_guest_rate_limit(http_request, daily_limit=guest_policy["daily_limit"])
     else:
         await check_user_quota(current_user, db)
 
@@ -314,6 +316,18 @@ async def submit_issue_feedback(
 
     if current_user is None:
         return {"saved": 0}
+
+    # 归属校验：否则可给他人记录写反馈，污染词库建议飞轮
+    if request.record_id is not None:
+        from sqlalchemy import select
+        owner = await db.execute(
+            select(ProofreadRecord.user_id).where(ProofreadRecord.id == request.record_id)
+        )
+        owner_id = owner.scalar_one_or_none()
+        if owner_id is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="校对记录不存在")
+        if owner_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权对该记录提交反馈")
 
     saved = 0
     for item in request.items:

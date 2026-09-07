@@ -3,6 +3,7 @@ TextMirror Celery 应用实例
 使用 Redis 作为 Broker 和 Result Backend
 """
 from celery import Celery
+from celery.schedules import crontab
 from app.core.config import settings
 
 # 使用独立 Redis DB 避免和缓存冲突 (db=8)
@@ -31,7 +32,7 @@ celery_app.conf.update(
     beat_schedule={
         "clean-old-audit-logs-daily": {
             "task": "maintenance.clean_old_audit_logs",
-            "schedule": 30.0 * 60 * 24,  # 每 24 小时；首次启动后 24h 触发
+            "schedule": crontab(hour=3, minute=30),  # Asia/Shanghai 每日 03:30
             "args": (90,),
         },
     },
