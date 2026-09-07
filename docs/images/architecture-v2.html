@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>TextMirror 审校引擎架构</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #0d1421; color: #dbe4f0; padding: 32px;
+    min-width: 1200px;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; color: #fff; }
+  .sub { font-size: 12px; color: #687d98; margin-bottom: 24px; }
+  .pipeline { display: flex; align-items: stretch; gap: 0; }
+
+  .stage { display: flex; flex-direction: column; }
+  .stage-head {
+    padding: 8px 14px; border-radius: 10px 10px 0 0; font-weight: 600;
+    font-size: 14px; text-align: center; letter-spacing: 1px;
+  }
+  .stage-body {
+    flex: 1; border-radius: 0 0 10px 10px; padding: 14px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+
+  /* 输入 */
+  .in .stage-head { background: #1a2b45; color: #7ab8ff; }
+  .in .stage-body { background: #111d31; border: 1px solid #1a2b45; border-top: none; width: 150px; }
+  .input-box {
+    background: #1a2b45; border-radius: 8px; padding: 10px; text-align: center;
+    font-size: 13px; color: #a8c8f0;
+  }
+  .input-note { font-size: 11px; color: #687d98; text-align: center; line-height: 1.6; }
+
+  /* 分片 */
+  .split .stage-head { background: #1f3323; color: #7dd87d; }
+  .split .stage-body { background: #122015; border: 1px solid #1f3323; border-top: none; width: 170px; }
+  .chunk { background: #1a2e1e; border: 1px solid #2d4a2f; border-radius: 8px; padding: 8px 10px; font-size: 12px; }
+  .chunk b { color: #7dd87d; }
+  .overlap { color: #e6c86e; font-size: 11px; }
+
+  /* 确定性层 */
+  .det .stage-head { background: #3a2440; color: #d08de0; }
+  .det .stage-body { background: #1d1522; border: 1px solid #3a2440; border-top: none; width: 240px; }
+  .det-tag {
+    font-size: 10px; color: #d08de0; background: #3a2440; padding: 2px 8px;
+    border-radius: 10px; display: inline-block; margin-bottom: 6px;
+  }
+  .rule-card {
+    background: #2a1e31; border: 1px solid #4a3352; border-radius: 8px; padding: 9px 11px; font-size: 12px;
+  }
+  .rule-card b { color: #e0b8f0; display: block; margin-bottom: 3px; font-size: 12.5px; }
+  .rule-card span { color: #9d86ad; line-height: 1.5; display: block; font-size: 11px; }
+  .zero-cost { color: #7dd87d; font-size: 11px; text-align: center; padding: 4px; border: 1px dashed #3a5a3f; border-radius: 6px; }
+
+  /* LLM 层 */
+  .llm .stage-head { background: #402a1a; color: #f0a868; }
+  .llm .stage-body { background: #22180f; border: 1px solid #402a1a; border-top: none; width: 210px; }
+  .llm-card { background: #3a2718; border: 1px solid #5a3f24; border-radius: 8px; padding: 9px 11px; font-size: 12px; }
+  .llm-card b { color: #f0c890; display: block; margin-bottom: 3px; }
+  .llm-card span { color: #a88a68; font-size: 11px; line-height: 1.5; display: block; }
+
+  /* 后处理 */
+  .post .stage-head { background: #1a2f3a; color: #68c8e0; }
+  .post .stage-body { background: #0f1d24; border: 1px solid #1a2f3a; border-top: none; width: 230px; }
+  .post-card { background: #162a33; border: 1px solid #27444f; border-radius: 8px; padding: 9px 11px; font-size: 12px; }
+  .post-card b { color: #90d8e8; display: block; margin-bottom: 3px; font-size: 12.5px; }
+  .post-card span { color: #7a9aa8; font-size: 11px; line-height: 1.5; display: block; }
+
+  /* 输出 */
+  .out .stage-head { background: #3a1a1a; color: #f08d8d; }
+  .out .stage-body { background: #220f0f; border: 1px solid #3a1a1a; border-top: none; width: 150px; }
+
+  /* 箭头 */
+  .arrow { display: flex; align-items: center; padding: 0 2px; color: #3d5470; font-size: 22px; }
+
+  /* 底部支撑系统 */
+  .supports { display: flex; gap: 14px; margin-top: 22px; }
+  .support {
+    flex: 1; border-radius: 10px; padding: 12px 16px; font-size: 12px;
+  }
+  .support h3 { font-size: 13px; margin-bottom: 6px; }
+  .support p { color: #9d86ad; line-height: 1.6; font-size: 11.5px; }
+  .sup-eval { background: #101d14; border: 1px solid #234a2b; }
+  .sup-eval h3 { color: #7dd87d; }
+  .sup-fly { background: #1a1420; border: 1px solid #3a2a4a; }
+  .sup-fly h3 { color: #d08de0; }
+  .sup-config { background: #101828; border: 1px solid #24364f; }
+  .sup-config h3 { color: #7ab8ff; }
+
+  .legend { margin-top: 18px; font-size: 11px; color: #687d98; display: flex; gap: 20px; }
+  .legend i { font-style: normal; }
+</style>
+</head>
+<body>
+  <h1>TextMirror 审校引擎架构 v2</h1>
+  <div class="sub">确定性层 100% 保证 + LLM 专注语义 + 输出全量校验 —— 精准度从概率变成分层保证</div>
+
+  <div class="pipeline">
+    <!-- 输入 -->
+    <div class="stage in">
+      <div class="stage-head">输入</div>
+      <div class="stage-body">
+        <div class="input-box">📄 原文<br>文本 / 文档</div>
+        <div class="input-note">用户身份<br>↓<br>注入其词库</div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+
+    <!-- 分片 -->
+    <div class="stage split">
+      <div class="stage-head">① 分片</div>
+      <div class="stage-body">
+        <div class="chunk"><b>片 1</b>（≤800字）<br><span class="overlap">尾部 100 字 →</span></div>
+        <div class="chunk"><b>片 2</b><br><span class="overlap">← 重叠窗口（句界对齐）</span></div>
+        <div class="input-note">跨切点指代可见<br>「三台…那四台」不再漏</div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+
+    <!-- 确定性层 -->
+    <div class="stage det">
+      <div class="stage-head">② 确定性层（对全文）</div>
+      <div class="stage-body">
+        <div>
+          <span class="det-tag">词库扫描</span>
+          <div class="rule-card"><b>敏感词 / 禁词 / 纠错词</b><span>字符串匹配必中，命中带〔我的词库〕/〔全局词库〕来源标识</span></div>
+        </div>
+        <div>
+          <span class="det-tag">一致性检查</span>
+          <div class="rule-card"><b>金额 / 称谓 / 编号</b><span>大小写金额矛盾 · 全称简称混用 · 编号断档（全文级比对）</span></div>
+        </div>
+        <div>
+          <span class="det-tag">格式规则</span>
+          <div class="rule-card"><b>日期 / 号码 / 单位</b><span>非法月份 · 手机位数 · 身份证校验位 · 量级冗余（10000万元）</span></div>
+        </div>
+        <div class="zero-cost">⚡ 纯规则 · 零 LLM 成本 · 100% 召回</div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+
+    <!-- LLM 层 -->
+    <div class="stage llm">
+      <div class="stage-head">③ LLM 层（并发分片）</div>
+      <div class="stage-body">
+        <div class="llm-card"><b>语法 / 搭配</b><span>主谓一致 · 成分残缺 ·「通过…使…」</span></div>
+        <div class="llm-card"><b>逻辑 / 事实</b><span>前后矛盾 · 指代照应 · 事实错误（元好问是金代）</span></div>
+        <div class="llm-card"><b>表达 / 风格</b><span>冗余 · 口语化 · 领域规范</span></div>
+        <div class="llm-card"><b>prompt 注入</b><span>领域规则（后台可配）+ 用户纠错词库</span></div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+
+    <!-- 后处理 -->
+    <div class="stage post">
+      <div class="stage-head">④ 后处理</div>
+      <div class="stage-body">
+        <div class="post-card"><b>放行词过滤</b><span>命中放行词的误报直接剔除；用户纠错优先于放行</span></div>
+        <div class="post-card"><b>去重合并</b><span>LLM 版本优先 · 规则版补位 · 按严重度排序（error→info）</span></div>
+        <div class="post-card"><b>幻觉自校验</b><span>original 逐字核验原文；偏差模糊对齐；幻觉降级「人工核对」</span></div>
+      </div>
+    </div>
+    <div class="arrow">→</div>
+
+    <!-- 输出 -->
+    <div class="stage out">
+      <div class="stage-head">输出</div>
+      <div class="stage-body">
+        <div class="input-box">✅ 问题清单<br><span style="font-size:11px;color:#9aa5b3">原文→建议→说明<br>来源·严重度·定位可靠</span></div>
+        <div class="input-note">前端高亮 · 接受/忽略<br>↓ 反馈落库</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 支撑系统 -->
+  <div class="supports">
+    <div class="support sup-eval">
+      <h3>📏 评测集（精准度有数字）</h3>
+      <p>20 固定样本 · 六维度锚点 · 召回率/零误报/幻觉率跑分脚本<br>当前基线：召回 100%（14/14）· 零误报 5/5 · 幻觉 0</p>
+    </div>
+    <div class="support sup-fly">
+      <h3>🔄 反馈飞轮（越用越准）</h3>
+      <p>接受/忽略落库（三入口）→ 优化建议看板（高忽略→放行词候选 / 高接受→纠错词候选）→ 一键采纳</p>
+    </div>
+    <div class="support sup-config">
+      <h3>⚙️ 运营配置（实时生效）</h3>
+      <p>领域审校规则后台编辑（无需发版）· 三层词库（全局/用户/放行）· 多模型可插拔（OpenAI 兼容皆可接入）</p>
+    </div>
+  </div>
+
+  <div class="legend">
+    <i>🟣 确定性层：规则即真理，100% 保证</i>
+    <i>🟠 LLM 层：只做语义判断（它真正擅长的）</i>
+    <i>🔵 后处理：所有输出经校验才见用户</i>
+  </div>
+</body>
+</html>
