@@ -473,14 +473,14 @@ def scan_words_deterministic(text: str,
     # 用户在结果页能直接看到"这是词库在起作用"
     sensitive_words = {w["word"] for w in global_words.get("sensitive", [])}
     banned_words = {w["word"] for w in global_words.get("banned", [])}
-    # suggestion 留空：无合适的自动替换文本（前端对空 suggestion 不显示
-    # 「接受」按钮，只展示提示——避免说明文字被替换进原文的 bug）
+    # suggestion="" 前端渲染为「删除」操作（replace(词, "")）——违禁词
+    # 的自动修复就是删除；解释文字放 explanation 不进 suggestion
     for word in banned_words:
         if word and word in text:
-            _add(word, "sensitive", "", "〔词库〕命中违禁词，请删除或替换", "error")
+            _add(word, "sensitive", "", "〔词库〕命中违禁词", "error")
     for word in sensitive_words:
         if word and word in text and word not in banned_words:
-            _add(word, "sensitive", "", "〔词库〕命中敏感词，请评估是否替换", "warning")
+            _add(word, "sensitive", "", "〔词库〕命中敏感词", "warning")
 
     # 纠错词：全局 + 用户（用户词与全局词冲突时用户优先——显式维护的规则更具体）
     corrections: Dict[str, str] = {}

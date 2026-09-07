@@ -211,6 +211,9 @@
                     <el-button v-if="item.issue.suggestion" type="primary" size="small" @click="acceptCompareIssue(item.issue)">
                       <el-icon><Check /></el-icon>接受修改
                     </el-button>
+                    <el-button v-else-if="item.issue.type === 'sensitive' && item.issue.original" type="warning" size="small" @click="deleteCompareIssue(item.issue)">
+                      <el-icon><Delete /></el-icon>删除该词
+                    </el-button>
                     <el-button size="small" @click="ignoreCompareIssue(item.issue)">
                       <el-icon><Close /></el-icon>忽略
                     </el-button>
@@ -275,6 +278,9 @@
                     <div class="issue-actions" v-if="!issue._accepted && !issue._ignored">
                       <el-button v-if="issue.suggestion" type="primary" size="small" @click="acceptCompareIssue(issue)">
                         <el-icon><Check /></el-icon>接受修改
+                      </el-button>
+                      <el-button v-else-if="issue.type === 'sensitive' && issue.original" type="warning" size="small" @click="deleteCompareIssue(issue)">
+                        <el-icon><Delete /></el-icon>删除该词
                       </el-button>
                       <el-button size="small" @click="ignoreCompareIssue(issue)">
                         <el-icon><Close /></el-icon>忽略
@@ -419,6 +425,9 @@
               <div class="issue-actions" v-if="!issue._accepted && !issue._ignored">
                 <el-button v-if="issue.suggestion" type="primary" size="small" @click="acceptIssue(index)">
                   <el-icon><Check /></el-icon>接受修改
+                </el-button>
+                <el-button v-else-if="issue.type === 'sensitive' && issue.original" type="warning" size="small" @click="deleteIssue(index)">
+                  <el-icon><Delete /></el-icon>删除该词
                 </el-button>
                 <el-button size="small" @click="ignoreIssue(index)">
                   <el-icon><Close /></el-icon>忽略
@@ -607,6 +616,18 @@ function ignoreCompareIssue(issue: any) {
   issue._ignored = true
   syncCompareIssueState(issue)
   reportFeedback([issue], 'ignore')
+}
+
+/** 对比视图：删除敏感词（连同紧邻标点） */
+function deleteCompareIssue(issue: any) {
+  const word = issue.original
+  const nextChar = currentText.value[currentText.value.indexOf(word) + word.length]
+  const punct = '，。！？；、,'
+  const target = nextChar && punct.includes(nextChar) ? word + nextChar : word
+  currentText.value = currentText.value.replace(target, '')
+  issue._accepted = true
+  syncCompareIssueState(issue)
+  reportFeedback([issue], 'accept')
 }
 
 /** 同一原文在多个模型结果里出现时，保持状态一致 */
@@ -827,6 +848,18 @@ function ignoreIssue(index: number) {
   const issue = filteredIssues.value[index]
   issue._ignored = true
   reportFeedback([issue], 'ignore')
+}
+
+// 删除敏感词（违禁词的自动修复 = 删除，连同紧邻标点避免悬空标点）
+function deleteIssue(index: number) {
+  const issue = filteredIssues.value[index]
+  const word = issue.original
+  const nextChar = currentText.value[currentText.value.indexOf(word) + word.length]
+  const punct = '，。！？；、,'
+  const target = nextChar && punct.includes(nextChar) ? word + nextChar : word
+  currentText.value = currentText.value.replace(target, '')
+  issue._accepted = true
+  reportFeedback([issue], 'accept')
 }
 
 // 撤销

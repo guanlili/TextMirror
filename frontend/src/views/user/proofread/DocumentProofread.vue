@@ -207,6 +207,9 @@
                 <el-button v-if="issue.suggestion" type="primary" size="small" @click="acceptIssue(issue)">
                   <el-icon><Check /></el-icon>接受修改
                 </el-button>
+                <el-button v-else-if="issue.type === 'sensitive' && issue.original" type="warning" size="small" @click="deleteIssue(issue)">
+                  <el-icon><Delete /></el-icon>删除该词
+                </el-button>
                 <el-button size="small" @click="ignoreIssue(issue)">
                   <el-icon><Close /></el-icon>忽略
                 </el-button>
@@ -511,6 +514,20 @@ function acceptIssue(issue: IssueWithStatus) {
 function ignoreIssue(issue: IssueWithStatus) {
   issue._ignored = true
   reportFeedback([issue], 'ignore')
+}
+
+// 删除敏感词（连同紧邻标点）
+function deleteIssue(issue: IssueWithStatus) {
+  const word = issue.original
+  const nextChar = currentText.value[currentText.value.indexOf(word) + word.length]
+  const punct = '，。！？；、,'
+  const target = nextChar && punct.includes(nextChar) ? word + nextChar : word
+  currentText.value = currentText.value.replace(target, '')
+  if (currentHtml.value) {
+    currentHtml.value = currentHtml.value.replace(target, '')
+  }
+  issue._accepted = true
+  reportFeedback([issue], 'accept')
 }
 
 // 撤销
