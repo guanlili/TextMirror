@@ -195,14 +195,93 @@ def check_sequence_continuity(text: str) -> List[Dict[str, Any]]:
 
 
 def check_consistency(text: str) -> List[Dict[str, Any]]:
-    """跨片一致性检查入口：金额一致 + 称谓统一 + 编号连续"""
+    """跨片一致性检查入口：金额一致 + 金额加总 + 称谓统一 + 编号连续"""
     issues: List[Dict[str, Any]] = []
     try:
         issues.extend(check_amount_consistency(text))
+        issues.extend(check_amount_summation(text))
         issues.extend(check_naming_consistency(text))
         issues.extend(check_sequence_continuity(text))
     except Exception as e:
         logger.warning(f"[一致性检查] 执行异常（跳过）: {e}")
     if issues:
         logger.info(f"[一致性检查] 命中 {len(issues)} 项")
+    return issues
+
+
+# 加总语境：合计/总计/总投资/总费用/总支出 后跟数字金额
+_SUM_TOTAL_RE = re.compile(r"(合计|总计|总金额|总投资|总费用|总支出|总额|共计)[为是:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(万元|亿元|元|万|亿)")
+# 前文金额项：数字 + 可选万元/亿元单位
+_AMOUNT_ITEM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(万元|亿元|元|万|亿)")
+
+_SUM_TOTAL_WORDS = ("合计", "总计", "总金额", "总投资", "总费用", "总支出", "总额", "共计")
+
+
+def _amount_to_yuan(value: float, unit: str) -> float:
+    """金额+单位 → 元（统一量纲）"""
+    unit = unit or "元"
+    if unit in ("万元", "万"):
+        return value * 10000
+    if unit in ("亿元", "亿"):
+        return value * 100000000
+    return value
+
+
+def check_amount_summation(text: str) -> List[Dict[str, Any]]:
+    """
+    金额加总核验：「合计X」与前文金额项的算术和比对。
+    防误报约束（全满足才报）：
+    - 前文金额项 ≥2 个且单位一致（同万元/同元）
+    - 金额项出现在合计句之前 300 字内（语义相关性）
+    - 差值超过 1%（容差处理四舍五入）
+    """
+    issues: List[Dict[str, Any]] = []
+    for m in _SUM_TOTAL_RE.finditer(text):
+        total_str, unit = m.group(2), m.group(3)
+        try:
+            total_val = float(total_str)
+        except ValueError:
+            # 中文数字合计（如 合计贰佰万元）暂不处理，交给括号并注规则
+            continue
+        if not unit:
+            continue  # 无单位无法定量纲
+        total_yuan = _amount_to_yuan(total_val, unit)
+
+        # 收集合计之前的金额项（300 字窗口）
+        prefix = text[max(0, m.start() - 300): m.start()]
+        items = []
+        for am in _AMOUNT_ITEM_RE.finditer(prefix):
+            v = float(am.group(1))
+            u = am.group(2)
+            yuan = _amount_to_yuan(v, u)
+            items.append((yuan, am.group(0)))
+        # 单位一致性：按主导单位（万元级）过滤——混单位（元与万元）时
+        # 语义上可能各有归属，保守跳过
+        unit_kinds = set()
+        for _, raw in items:
+            if "亿" in raw:
+                unit_kinds.add("亿")
+            elif "万" in raw:
+                unit_kinds.add("万")
+            else:
+                unit_kinds.add("元")
+        if len(items) < 2 or len(unit_kinds) > 1:
+            continue
+        # 同量纲（都是万元级或都是元级）
+        item_yuans = [y for y, _ in items]
+        # 有占比/比例数字混入的风险：过滤掉明显的百分比语境
+        item_yuans = [y for y, raw in items if "%" not in prefix[max(0, prefix.find(raw) - 5): prefix.find(raw)]]
+        if len(item_yuans) < 2:
+            continue
+        s = sum(item_yuans)
+        if total_yuan <= 0 or s <= 0:
+            continue
+        # 容差 1%
+        if abs(s - total_yuan) / total_yuan > 0.01:
+            issues.append(_issue(
+                m.group(0),
+                m.group(0),
+                f"金额加总不符：前文各项合计 {s / 10000:.1f} 万元，与「{m.group(0)}」不符（差额 {abs(s - total_yuan) / 10000:.1f} 万元）",
+                "error",
+            ))
     return issues
