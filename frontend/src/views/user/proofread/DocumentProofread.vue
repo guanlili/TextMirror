@@ -556,22 +556,38 @@ function undoIssue(issue: IssueWithStatus) {
 
 // 一键修改全部
 async function handleAcceptAll() {
+  // 与单条操作语义一致：有建议的替换 + 敏感词删除
+  const actionable = issues.value.filter(i =>
+    !i._accepted && !i._ignored && i.original && (i.suggestion || i.type === 'sensitive')
+  )
   try {
     await ElMessageBox.confirm(
-      `确认接受全部 ${pendingCount.value} 条修改建议？`,
+      `确认接受全部 ${actionable.length} 条修改建议？`,
       '一键修改',
       { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
     )
     const accepted: IssueWithStatus[] = []
-    for (const issue of issues.value) {
-      if (!issue._accepted && !issue._ignored && issue.original && issue.suggestion) {
+    for (const issue of actionable) {
+      if (issue.suggestion) {
         currentText.value = currentText.value.replace(issue.original, issue.suggestion)
         if (currentHtml.value) {
           currentHtml.value = replaceTextInHtml(currentHtml.value, issue.original, escapeHtml(issue.suggestion))
         }
-        issue._accepted = true
-        accepted.push(issue)
+      } else {
+        const wordIdx = currentText.value.indexOf(issue.original)
+        if (wordIdx < 0) continue
+        const nextChar = currentText.value[wordIdx + issue.original.length]
+        const punct = '，。！？；、,'
+        const target = nextChar && punct.includes(nextChar) ? issue.original + nextChar : issue.original
+        currentText.value = currentText.value.replace(target, '')
+        if (currentHtml.value) {
+          currentHtml.value = currentHtml.value.replace(target, '')
+        }
+        issue._deletedText = target
+        issue._undoAnchor = wordIdx
       }
+      issue._accepted = true
+      accepted.push(issue)
     }
     reportFeedback(accepted, 'accept')
     ElMessage.success('已接受所有修改')
