@@ -575,7 +575,8 @@ async def open_submit_document(
         status="uploaded",
     )
     db.add(doc_record)
-    await db.flush()
+    # 必须先提交再投递：否则事务回滚后 worker 仍会处理一条不存在的记录
+    await db.commit()
 
     # ---- 提交异步任务 ----
     try:
@@ -599,9 +600,9 @@ async def open_submit_document(
         _remove_file_silently(file_path)
         try:
             await db.delete(doc_record)
-            await db.flush()
-        except Exception:
-            pass
+            await db.commit()
+        except Exception as cleanup_error:
+            logger.warning(f"[OpenAPI] 上传记录清理失败 file_id={file_id}: {cleanup_error}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "TASK_QUEUE_UNAVAILABLE", "message": "任务队列暂时不可用，请稍后重试"},

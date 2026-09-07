@@ -30,7 +30,7 @@ app.mount('#app')
 // 启动时加载站点配置（平台名称、图标等）
 import { useSiteStore } from './stores/site'
 const siteStore = useSiteStore()
-siteStore.loadSiteConfig()
+siteStore.ensureLoaded()
 
 // 刷新页面后恢复登录用户信息与权限（否则管理后台入口/权限指令失效）
 import { useUserStore } from './stores/user'

@@ -13,6 +13,5 @@ test_*.py
 .pytest_cache/
 *.md
 *.bat
-alembic/versions/
 *.log
 docker-images/

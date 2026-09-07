@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     # ---- 应用基础配置 ----
     APP_NAME: str = "TextMirror"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
     SECRET_KEY: str = "please-change-this-secret-key-in-production"
     API_PREFIX: str = "/api/v1"
 
@@ -91,6 +91,25 @@ class Settings(BaseSettings):
             except json.JSONDecodeError:
                 return [origin.strip() for origin in v.split(",")]
         return v
+
+    def model_post_init(self, __context) -> None:
+        """生产环境（DEBUG=False）拒绝使用可预测密钥启动：否则任何人都能伪造 JWT"""
+        if self.DEBUG:
+            return
+
+        insecure = {
+            "please-change-this-secret-key-in-production",
+            "please-change-this-jwt-secret-key",
+            "请替换为随机安全密钥-建议32位以上",
+            "请替换为JWT随机安全密钥-建议32位以上",
+        }
+        for name in ("SECRET_KEY", "JWT_SECRET_KEY"):
+            value = getattr(self, name)
+            if value in insecure or len(value) < 32:
+                raise RuntimeError(
+                    f"{name} 仍为默认/占位值或长度不足 32 位，生产环境拒绝启动。"
+                    f"请在 .env.production 中设置：{name}=$(openssl rand -hex 32)"
+                )
 
     model_config = {
         "env_file": ".env",

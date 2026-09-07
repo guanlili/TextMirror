@@ -101,8 +101,11 @@ async def get_current_user_optional(
 
     try:
         return await get_current_user(credentials, db)
-    except HTTPException:
-        return None
+    except HTTPException as e:
+        # 仅「凭证无效/过期」降级为游客；403（如账号已被禁用）必须原样抛出
+        if e.status_code == status.HTTP_401_UNAUTHORIZED:
+            return None
+        raise
 
 
 def require_permission(permission_code: str):
