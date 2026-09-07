@@ -1,112 +1,40 @@
 """
 TextMirror 策略管理 API（管理后台）
-配置游客和登录用户的使用策略
+配置游客使用策略；登录用户的额度走「用户管理」逐用户 daily_quota，功能开关走 RBAC 权限
 """
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from loguru import logger
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 
 from app.core.dependencies import require_permission
-from app.core.redis import get_redis
+from app.services.guest_policy import get_guest_policy, update_guest_policy
 
 router = APIRouter(prefix="/policy", tags=["策略管理"])
-
-# Redis 键前缀
-GUEST_POLICY_KEY = "system:policy:guest"
-USER_POLICY_KEY = "system:policy:user"
 
 
 class GuestPolicyConfig(BaseModel):
     """游客策略配置"""
-    daily_limit: int = 20
-    max_text_length: int = 5000
-    allow_upload: bool = True
+    daily_limit: int = Field(..., ge=0, le=100000, description="每日校对次数上限")
+    max_text_length: int = Field(..., ge=100, le=500000, description="单次最大字数")
+    allow_upload: bool = Field(..., description="是否允许上传文档")
 
 
-class UserPolicyConfig(BaseModel):
-    """登录用户策略配置"""
-    daily_limit: int = 200
-    max_text_length: int = 50000
-    allow_upload: bool = True
-    allow_export: bool = True
-    allow_dictionary: bool = True
-
-
-@router.get("/guest", response_model=GuestPolicyConfig, summary='获取游客策略配置')
-async def get_guest_policy(
+@router.get("/guest", response_model=GuestPolicyConfig, summary='获取游客策略配置（未配置时返回 .env 生效值）')
+async def get_guest_policy_config(
     _user=Depends(require_permission("admin:policy:edit")),
 ):
     """获取游客策略配置"""
-    redis = await get_redis()
-    data = await redis.hgetall(GUEST_POLICY_KEY)
-    
-    if not data:
-        # 返回默认值
-        return GuestPolicyConfig()
-    
-    return GuestPolicyConfig(
-        daily_limit=int(data.get(b"daily_limit", 20)),
-        max_text_length=int(data.get(b"max_text_length", 5000)),
-        allow_upload=data.get(b"allow_upload", b"1") == b"1",
-    )
+    return GuestPolicyConfig(**await get_guest_policy())
 
 
-@router.put("/guest", response_model=GuestPolicyConfig, summary='更新游客策略配置')
-async def update_guest_policy(
+@router.put("/guest", response_model=GuestPolicyConfig, summary='更新游客策略配置（即时生效）')
+async def update_guest_policy_config(
     config: GuestPolicyConfig,
     _user=Depends(require_permission("admin:policy:edit")),
 ):
     """更新游客策略配置"""
-    redis = await get_redis()
-    await redis.hset(
-        GUEST_POLICY_KEY,
-        mapping={
-            "daily_limit": config.daily_limit,
-            "max_text_length": config.max_text_length,
-            "allow_upload": "1" if config.allow_upload else "0",
-        }
+    updated = await update_guest_policy(
+        daily_limit=config.daily_limit,
+        max_text_length=config.max_text_length,
+        allow_upload=config.allow_upload,
     )
-    logger.info(f"游客策略已更新: {config.model_dump()}")
-    return config
-
-
-@router.get("/user", response_model=UserPolicyConfig, summary='获取登录用户策略配置')
-async def get_user_policy(
-    _user=Depends(require_permission("admin:policy:edit")),
-):
-    """获取登录用户策略配置"""
-    redis = await get_redis()
-    data = await redis.hgetall(USER_POLICY_KEY)
-    
-    if not data:
-        return UserPolicyConfig()
-    
-    return UserPolicyConfig(
-        daily_limit=int(data.get(b"daily_limit", 200)),
-        max_text_length=int(data.get(b"max_text_length", 50000)),
-        allow_upload=data.get(b"allow_upload", b"1") == b"1",
-        allow_export=data.get(b"allow_export", b"1") == b"1",
-        allow_dictionary=data.get(b"allow_dictionary", b"1") == b"1",
-    )
-
-
-@router.put("/user", response_model=UserPolicyConfig, summary='更新登录用户策略配置')
-async def update_user_policy(
-    config: UserPolicyConfig,
-    _user=Depends(require_permission("admin:policy:edit")),
-):
-    """更新登录用户策略配置"""
-    redis = await get_redis()
-    await redis.hset(
-        USER_POLICY_KEY,
-        mapping={
-            "daily_limit": config.daily_limit,
-            "max_text_length": config.max_text_length,
-            "allow_upload": "1" if config.allow_upload else "0",
-            "allow_export": "1" if config.allow_export else "0",
-            "allow_dictionary": "1" if config.allow_dictionary else "0",
-        }
-    )
-    logger.info(f"用户策略已更新: {config.model_dump()}")
-    return config
+    return GuestPolicyConfig(**updated)

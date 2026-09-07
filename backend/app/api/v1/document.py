@@ -98,7 +98,13 @@ async def upload_document(
     # 游客模式关闭时拒绝游客上传
     if current_user is None:
         from app.core.rate_limit import reject_guest_if_disabled
+        from app.services.guest_policy import get_guest_policy
         await reject_guest_if_disabled(http_request)
+        if not (await get_guest_policy())["allow_upload"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="当前未开放游客上传文档，请登录后使用",
+            )
 
     # 校验文件名（净化后使用，防路径穿越）
     if not file.filename:
