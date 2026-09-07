@@ -583,6 +583,14 @@ async def proofread_text(
             raise RuntimeError(f"大模型调用失败: {last_error}")
         if failed_chunks > 0:
             logger.warning(f"[校对] {failed_chunks}/{len(chunks)} 个分片失败，结果可能不完整")
+
+        # 高危文本二次自检（error 级问题密集时触发）：provider 尚未关闭，
+        # 把第一轮问题清单喂回 LLM 复查遗漏——尽力而为的增益层
+        merged_early = merge_issues(list(all_issues), list(scanned_issues))
+        self_check_extra = await self_check_pass(text, merged_early, provider)
+        all_issues.extend(self_check_extra)
+        for key in total_usage:
+            pass  # 自检用量计入 provider 返回但保持简单，不计入展示
     finally:
         await provider.close()
 
@@ -708,3 +716,74 @@ def _common_ratio(a: str, b: str) -> float:
         return 0.0
     same = sum(1 for x, y in zip(a, b) if x == y)
     return same / len(a)
+
+
+# ======================================================================
+# 高危文本二次自检
+# ======================================================================
+
+# 触发阈值：error 级问题数达到该值时触发二次复查
+_SELF_CHECK_ERROR_THRESHOLD = 3
+
+SELF_CHECK_PROMPT = """你是资深审校复核专家。第一轮审校在下面的文本中发现了若干问题，请复核：
+
+【原文】
+{text}
+
+【第一轮发现的问题】
+{issues}
+
+你的任务（仅两件事）：
+1. 复核既有问题：每条判断「正确 / 存疑」。存疑的说明理由（如原文其实没错、建议反而引入新错）。
+2. 补充遗漏：仅报告第一轮明显遗漏的、与既有问题同等的明确错误（不要吹毛求疵）。
+
+只输出JSON数组，每项：{{"o":"原文片段","t":"类型","s":"修改建议","e":"原因","sv":"严重度","review":"new|confirm|doubt"}}
+- review=new 表示新发现的遗漏问题（只输出这类会合入结果）
+- review=confirm/doubt 用于复核既有问题（只作记录不影响结果）
+无补充遗漏返回空数组[]。禁止输出JSON以外内容。"""
+
+
+def _needs_self_check(issues: List[Dict[str, Any]]) -> bool:
+    """高危判定：error 级问题达到阈值（密集错误文本=漏检风险最高）"""
+    error_count = sum(1 for i in issues if i.get("severity") == "error")
+    return error_count >= _SELF_CHECK_ERROR_THRESHOLD
+
+
+async def self_check_pass(
+    text: str,
+    issues: List[Dict[str, Any]],
+    provider,
+) -> List[Dict[str, Any]]:
+    """
+    二次自检：把第一轮问题清单喂回 LLM 复查，返回补充遗漏的 issue。
+    异常自捕获——二次检查失败不影响第一轮结果（尽力而为的增益层）。
+    """
+    if not _needs_self_check(issues):
+        return []
+    # 最多带 15 条进 prompt（过长稀释注意力）
+    sample = issues[:15]
+    issues_desc = "\n".join(
+        f"{n}. 原文「{i.get('original', '')[:40]}」→ 建议「{i.get('suggestion', '')[:40]}」（{i.get('type')}）"
+        for n, i in enumerate(sample, 1)
+    )
+    prompt = SELF_CHECK_PROMPT.format(text=text[:3000], issues=issues_desc)
+    try:
+        response = await provider.chat(
+            [{"role": "user", "content": prompt}],
+            temperature=provider.default_temperature,
+        )
+        extra = parse_proofread_result(response.content)
+        # 只取 review=new 的项（LLM 复核意见不覆盖第一轮结果）
+        additions = [
+            {**i, "source": "self_check"} for i in extra
+            if i.get("review") == "new" and i.get("original")
+        ]
+        # 去掉 review 标记避免污染下游契约
+        for a in additions:
+            a.pop("review", None)
+        if additions:
+            logger.info(f"[自检] 二次复查补充 {len(additions)} 条遗漏")
+        return additions
+    except Exception as e:
+        logger.warning(f"[自检] 二次复查失败（跳过，不影响第一轮结果）: {e}")
+        return []
