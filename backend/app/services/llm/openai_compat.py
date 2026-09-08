@@ -9,14 +9,26 @@ TextMirror 通用 OpenAI 兼容 Provider
   - 文心一言（兼容模式）
   - 其他自建/转发网关
 """
+import asyncio
 import json
 import re
+import weakref
 from typing import AsyncIterator, Optional, List, Dict
 
 import httpx
 from loguru import logger
 
 from app.services.llm.base import BaseLLMProvider, LLMResponse
+
+# httpx.AsyncClient 绑定创建时的事件循环，不能跨循环复用：
+# Web 进程单循环可长期复用连接池；Celery 子进程任务间复用同一循环时同样受益；
+# 事件循环被回收后，对应条目随 WeakKeyDictionary 自动消失
+_client_pools: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, Dict[tuple, httpx.AsyncClient]]" = (
+    weakref.WeakKeyDictionary()
+)
+
+# 各 api_base 已验证成功的 chat 路径，跨实例共享，避免每个新实例重新 404 试探
+_verified_endpoints: Dict[str, str] = {}
 
 
 class OpenAICompatProvider(BaseLLMProvider):
@@ -54,17 +66,41 @@ class OpenAICompatProvider(BaseLLMProvider):
             self._endpoints = ["/chat/completions", "/v1/chat/completions"]
         else:
             self._endpoints = ["/v1/chat/completions", "/chat/completions"]
-        # 已确认成功的 endpoint，后续直接复用，避免每次都试探
-        self._verified_endpoint: Optional[str] = None
+        # 已确认成功的 endpoint，跨实例共享，避免每次都试探
+        self._verified_endpoint: Optional[str] = _verified_endpoints.get(self.api_base)
 
-        self.client = httpx.AsyncClient(
+        # 优先复用共享 client（同一事件循环 + 相同 base/key/timeout），
+        # 避免每次审校/润色请求都重建连接池、重做 TLS 握手
+        self._owns_client = False
+        client = self._get_shared_client()
+        if client is None:
+            # 无运行中的事件循环（罕见的同步上下文）：退回独享 client，由 close() 负责关闭
+            self._owns_client = True
+            client = self._new_client()
+        self.client = client
+
+    def _new_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
             base_url=self.api_base,
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             },
-            timeout=httpx.Timeout(timeout, connect=15),
+            timeout=httpx.Timeout(self.timeout, connect=15),
         )
+
+    def _get_shared_client(self) -> Optional[httpx.AsyncClient]:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+        pool = _client_pools.setdefault(loop, {})
+        key = (self.api_base, self.api_key, self.timeout)
+        client = pool.get(key)
+        if client is None or client.is_closed:
+            client = self._new_client()
+            pool[key] = client
+        return client
 
     async def chat(
         self,
@@ -95,8 +131,9 @@ class OpenAICompatProvider(BaseLLMProvider):
                     response.raise_for_status()
                     data = response.json()
 
-                    # 记忆已验证的 endpoint，后续调用直接复用
+                    # 记忆已验证的 endpoint，后续调用与新实例直接复用
                     self._verified_endpoint = endpoint
+                    _verified_endpoints[self.api_base] = endpoint
 
                     choice = data["choices"][0]
                     usage = data.get("usage", {})
@@ -185,6 +222,7 @@ class OpenAICompatProvider(BaseLLMProvider):
                                 )
                             break
                         self._verified_endpoint = endpoint
+                        _verified_endpoints[self.api_base] = endpoint
 
                         async for line in response.aiter_lines():
                             if not line.startswith("data: "):
@@ -229,8 +267,9 @@ class OpenAICompatProvider(BaseLLMProvider):
         )
 
     async def close(self):
-        """关闭 HTTP 客户端"""
-        await self.client.aclose()
+        """释放 HTTP 客户端：共享 client 随事件循环生命周期管理，只关自有的"""
+        if self._owns_client:
+            await self.client.aclose()
 
     async def test_connection(self) -> Dict:
         """
