@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # ---- 文件存储配置 ----
     UPLOAD_DIR: str = "./uploads"
     MAX_UPLOAD_SIZE_MB: int = 20
+    # 上传频率上限（次/分钟，登录用户按 id、游客按 IP；0=不限制）
+    UPLOAD_MAX_PER_MINUTE: int = 10
+    # 游客上传文件保留天数（游客无历史入口，过期即可回收；登录用户文件不自动删除）
+    GUEST_FILE_RETENTION_DAYS: int = 7
+    # 孤儿目录最小年龄（小时）——避免误删正在上传中的目录
+    ORPHAN_DIR_MIN_AGE_HOURS: int = 24
 
     # ---- 游客限流配置 ----
     GUEST_DAILY_LIMIT: int = 2000

@@ -25,6 +25,7 @@ from app.core.file_security import sanitize_filename
 from app.core.rate_limit import (
     charge_api_key_daily,
     check_api_key_rpm,
+    check_upload_rate_limit,
     check_user_quota,
     check_user_quota_n_times,
     refund_api_key_daily_usage,
@@ -488,6 +489,9 @@ async def open_submit_document(
 
     if api_key is not None:
         await check_api_key_rpm(api_key)
+
+    # 上传频率限制（JWT 调用此前不受任何频率限制）
+    await check_upload_rate_limit(http_request, user)
 
     # ---- 文件校验 ----
     if not file.filename:

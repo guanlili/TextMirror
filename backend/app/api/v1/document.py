@@ -14,7 +14,7 @@ from loguru import logger
 
 from app.core.database import get_db, async_session_factory
 from app.core.dependencies import get_current_user_optional
-from app.core.rate_limit import check_guest_rate_limit, check_user_quota
+from app.core.rate_limit import check_guest_rate_limit, check_upload_rate_limit, check_user_quota
 from app.core.file_security import (
     sanitize_filename,
     safe_upload_path,
@@ -164,6 +164,9 @@ async def upload_document(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="当前未开放游客上传文档，请登录后使用",
             )
+
+    # 上传频率限制（避免反复上传只做解析落盘，绕过按校对次数计的配额）
+    await check_upload_rate_limit(http_request, current_user)
 
     # 校验文件名（净化后使用，防路径穿越）
     if not file.filename:
