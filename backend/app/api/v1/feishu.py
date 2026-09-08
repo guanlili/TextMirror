@@ -236,7 +236,16 @@ async def feishu_callback(
     await db.commit()
 
     # Step 6: 生成JWT Token
-    access_token = create_access_token(subject=user.id)
+    role_code = None
+    if user.role_id is not None:
+        result = await db.execute(select(Role).where(Role.id == user.role_id))
+        role = result.scalar_one_or_none()
+        if role is not None:
+            role_code = role.code
+    access_token = create_access_token(
+        subject=user.id,
+        extra_data={"role_code": role_code} if role_code else None,
+    )
     refresh_token = create_refresh_token(subject=user.id)
 
     logger.info(f"[飞书登录] 登录成功: {user.employee_id} ({user.username}), new_user={is_new_user}")
@@ -404,7 +413,16 @@ async def feishu_sso(
     await db.commit()
 
     # 生成Token
-    access_token = create_access_token(subject=user.id)
+    role_code = None
+    if user.role_id is not None:
+        result = await db.execute(select(Role).where(Role.id == user.role_id))
+        role = result.scalar_one_or_none()
+        if role is not None:
+            role_code = role.code
+    access_token = create_access_token(
+        subject=user.id,
+        extra_data={"role_code": role_code} if role_code else None,
+    )
     refresh_token = create_refresh_token(subject=user.id)
 
     record_audit_log_sync(

@@ -5,6 +5,7 @@ TextMirror 异步文档校对任务
 import os
 import json
 import asyncio
+import threading
 from loguru import logger
 from sqlalchemy import select, update
 
@@ -38,6 +39,13 @@ _REFUND_LUA = (
     "return 0"
 )
 
+# ---- Celery worker 子进程级同步引擎单例 ----
+# _sync_engine / _sync_engine_pid 在 prefork 子进程首次 _get_sync_engine() 时惰性创建，
+# PID 漂移（fork）后重建；worker_shutdown 信号统一 dispose。
+_sync_engine = None
+_sync_engine_pid = None
+_sync_engine_lock = threading.Lock()
+
 
 def _refund_key_daily_quota(api_key_id: int) -> None:
     """同步 Redis 退还密钥日配额计数（失败不抛出，仅记日志）"""
@@ -63,10 +71,46 @@ def _refund_key_daily_quota(api_key_id: int) -> None:
 
 
 def _get_sync_engine():
-    """创建同步数据库引擎（Celery worker 是同步上下文）"""
-    from sqlalchemy import create_engine
-    sync_url = settings.DATABASE_URL.replace("postgresql+asyncpg", "postgresql+psycopg2")
-    return create_engine(sync_url)
+    """同步数据库引擎（Celery worker 子进程级单例）。
+
+    prefork worker 的子进程长驻且每个任务只跑在一个进程里，因此引擎可在进程内
+    复用连接池。首次调用时创建；fork 后子进程继承的父进程引擎不可用，按 PID
+    检测并重建。worker_shutdown 信号统一 dispose，避免容器停止时残留连接。
+    """
+    global _sync_engine, _sync_engine_pid
+    pid = os.getpid()
+    if _sync_engine is None or _sync_engine_pid != pid:
+        with _sync_engine_lock:
+            if _sync_engine is None or _sync_engine_pid != pid:
+                from sqlalchemy import create_engine
+                sync_url = settings.DATABASE_URL.replace("postgresql+asyncpg", "postgresql+psycopg2")
+                _sync_engine = create_engine(
+                    sync_url,
+                    pool_pre_ping=True,
+                    pool_size=5,
+                    max_overflow=10,
+                    pool_recycle=1800,
+                )
+                _sync_engine_pid = pid
+                logger.info(
+                    f"[celery-engine] 创建同步引擎 pid={pid} url={sync_url.split('@')[-1]}"
+                )
+    return _sync_engine
+
+
+@celery.signals.worker_shutdown.connect
+def _dispose_sync_engine(**_kwargs) -> None:
+    """worker 退出时释放连接池（prefork 主/子进程均会触发，无害幂等）"""
+    global _sync_engine, _sync_engine_pid
+    if _sync_engine is not None:
+        try:
+            _sync_engine.dispose()
+            logger.info(f"[celery-engine] 已 dispose 同步引擎 pid={os.getpid()}")
+        except Exception as e:
+            logger.warning(f"[celery-engine] dispose 失败: {e}")
+        finally:
+            _sync_engine = None
+            _sync_engine_pid = None
 
 
 def _update_task_progress(session, db_task, phase: str, progress: int, message: str, status: str = None):
