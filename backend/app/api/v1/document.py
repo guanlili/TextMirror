@@ -3,17 +3,21 @@ TextMirror 文档校对 API
 支持上传 .doc / .docx / .pdf / .txt 文件进行校对
 """
 import asyncio
+import hashlib
 import os
 import json
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Request
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Header, Request
 from fastapi.responses import FileResponse
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
 from app.core.database import get_db, async_session_factory
 from app.core.dependencies import get_current_user_optional
+from app.core.security import derive_guest_task_access_token, hash_scoped_idempotency_key
 from app.core.rate_limit import check_guest_rate_limit, check_upload_rate_limit, check_user_quota
 from app.core.file_security import (
     sanitize_filename,
@@ -36,6 +40,26 @@ from app.services.audit_log import record_audit_log, AuditTimer
 from app.tasks.proofread_task import async_proofread_document
 
 router = APIRouter(prefix="/document", tags=["文档校对"])
+
+
+def _normalize_idempotency_key(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    value = value.strip()
+    if not value or len(value) > 128:
+        raise HTTPException(status_code=400, detail="Idempotency-Key 必须为 1-128 个非空字符")
+    return value
+
+
+def _build_async_task_response(db_task) -> dict:
+    response = {
+        "task_id": db_task.task_id,
+        "message": "校对任务已提交，请通过 task_id 查询进度",
+    }
+    if db_task.owner_kind == "guest":
+        response["access_token"] = derive_guest_task_access_token(db_task.task_id)
+    return response
+
 
 # 允许的文件扩展名
 ALLOWED_EXTENSIONS = {".doc", ".docx", ".pdf", ".txt"}
@@ -401,35 +425,48 @@ async def document_proofread(
 async def document_proofread_async(
     request: DocumentProofreadRequest,
     http_request: Request,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     current_user=Depends(get_current_user_optional),
 ):
     """
     异步文档校对 - 先写 proofread_tasks 再投递 Celery（broker 消息不含全文）。
     返回 task_id；游客额外返回 access_token 用于后续状态查询鉴权。
     """
+    raw_idempotency_key = _normalize_idempotency_key(idempotency_key)
+
     async with async_session_factory() as db:
         file_info = await _load_document_info(request.file_id, db)
-        # 归属校验无条件执行：此前用 user_id is not None 包裹，legacy 文档会整体跳过
         await _check_document_ownership(file_info, current_user, db)
 
-    # 游客限流
+    owner_kind = "user" if current_user else "guest"
+    owner_scope = f"web:user:{current_user.id}" if current_user else f"web:guest-document:{request.file_id}"
+    scoped_idempotency_key = (
+        hash_scoped_idempotency_key(owner_scope, raw_idempotency_key)
+        if raw_idempotency_key else None
+    )
+
+    from app.models.proofread_task import ProofreadTask
+
+    if scoped_idempotency_key:
+        async with async_session_factory() as db:
+            existing = (await db.execute(
+                select(ProofreadTask).where(ProofreadTask.idempotency_key == scoped_idempotency_key)
+            )).scalar_one_or_none()
+            if existing:
+                return _build_async_task_response(existing)
+
     if current_user is None:
         await check_guest_rate_limit(http_request)
     else:
         async with async_session_factory() as db:
             await check_user_quota(current_user, db)
 
-    # ---- 构造持久任务记录 ----
-    from app.models.proofread_task import ProofreadTask
-    import hashlib
-
     task_uuid = str(uuid.uuid4())
-    owner_kind = "user" if current_user else "guest"
-    access_token_raw = None
     access_token_hash = None
-    if current_user is None:
-        access_token_raw = uuid.uuid4().hex
-        access_token_hash = hashlib.sha256(access_token_raw.encode()).hexdigest()
+    if owner_kind == "guest":
+        access_token_hash = hashlib.sha256(
+            derive_guest_task_access_token(task_uuid).encode()
+        ).hexdigest()
 
     async with async_session_factory() as db:
         db_task = ProofreadTask(
@@ -438,21 +475,31 @@ async def document_proofread_async(
             owner_kind=owner_kind,
             owner_user_id=current_user.id if current_user else None,
             access_token_hash=access_token_hash,
+            idempotency_key=scoped_idempotency_key,
             status="PENDING",
             progress=0,
             message="任务排队中...",
-            result_json={
+            params_json={
                 "domain": request.domain,
                 "config_id": request.config_id,
                 "check_types": request.check_types,
             },
         )
         db.add(db_task)
-        await db.commit()
-        await db.refresh(db_task)
+        try:
+            await db.commit()
+            await db.refresh(db_task)
+        except IntegrityError:
+            await db.rollback()
+            if scoped_idempotency_key:
+                existing = (await db.execute(
+                    select(ProofreadTask).where(ProofreadTask.idempotency_key == scoped_idempotency_key)
+                )).scalar_one_or_none()
+                if existing:
+                    return _build_async_task_response(existing)
+            raise
         db_task_pk_id = db_task.id
 
-    # ---- 投递 Celery（只传 DB 主键，worker 自行加载全文） ----
     try:
         async_proofread_document.apply_async(
             args=(db_task_pk_id,),
@@ -460,30 +507,20 @@ async def document_proofread_async(
         )
     except Exception as e:
         logger.error(f"异步任务投递失败: {e}")
-        from sqlalchemy import select as sa_select
         async with async_session_factory() as db:
-            db_task = (await db.execute(
-                sa_select(ProofreadTask).where(ProofreadTask.id == db_task_pk_id)
-            )).scalar_one_or_none()
-            if db_task:
-                db_task.status = "FAILURE"
-                db_task.error_code = "DISPATCH_FAILED"
-                db_task.message = "任务投递失败，请重试"
-                await db.commit()
+            await db.execute(
+                update(ProofreadTask)
+                .where(ProofreadTask.id == db_task_pk_id, ProofreadTask.status == "PENDING")
+                .values(status="FAILURE", error_code="DISPATCH_FAILED", message="任务投递失败，请重试")
+            )
+            await db.commit()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="任务队列暂时不可用，请稍后重试",
         )
 
     logger.info(f"异步校对任务已提交: task_id={task_uuid}, file={file_info['filename']}")
-
-    resp = {
-        "task_id": task_uuid,
-        "message": "校对任务已提交，请通过 task_id 查询进度",
-    }
-    if access_token_raw:
-        resp["access_token"] = access_token_raw
-    return resp
+    return _build_async_task_response(db_task)
 
 
 @router.get("/download/{file_id}/{filename:path}", summary='签名下载：校验 HMAC 签名与有效期后返回上传目录内的文件')

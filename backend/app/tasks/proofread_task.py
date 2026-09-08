@@ -6,7 +6,7 @@ import os
 import json
 import asyncio
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.celery_app import celery_app
 from app.core.config import settings
@@ -113,6 +113,19 @@ def async_proofread_document(self, db_task_id: int):
 
     try:
         with Session(sync_engine) as session:
+            from datetime import datetime, timezone
+
+            claim = session.execute(
+                update(ProofreadTask)
+                .where(ProofreadTask.id == db_task_id, ProofreadTask.status == "PENDING")
+                .values(status="STARTED", started_at=datetime.now(timezone.utc))
+            )
+            if claim.rowcount != 1:
+                session.rollback()
+                logger.info(f"[Task {celery_task_id}] 任务非 PENDING，跳过重复消息")
+                return {"skipped": True, "task_id": celery_task_id}
+            session.commit()
+
             db_task = session.get(ProofreadTask, db_task_id)
             if db_task is None:
                 logger.error(f"[Task {celery_task_id}] proofread_tasks id={db_task_id} 不存在")
@@ -139,21 +152,16 @@ def async_proofread_document(self, db_task_id: int):
                 session.commit()
                 raise ValueError("Document text is empty")
 
-            domain = db_task.result_json.get("domain", "general") if db_task.result_json else "general"
-            config_id = db_task.result_json.get("config_id") if db_task.result_json else None
+            params = db_task.params_json or {}
+            domain = params.get("domain", "general")
+            config_id = params.get("config_id")
             user_id = db_task.owner_user_id
             api_key_id = db_task.owner_api_key_id
             file_id = doc_record.file_id
             filename = doc_record.filename
             file_path = doc_record.file_path
             file_ext = doc_record.file_ext
-            check_types = db_task.result_json.get("check_types") if db_task.result_json else None
-
-            from datetime import datetime, timezone
-            db_task.status = "STARTED"
-            db_task.started_at = datetime.now(timezone.utc)
-            db_task.celery_task_id = celery_task_id
-            session.commit()
+            check_types = params.get("check_types")
 
             logger.info(
                 f"[Task {celery_task_id}] 开始异步校对: db_task_id={db_task_id} "
@@ -250,17 +258,9 @@ def async_proofread_document(self, db_task_id: int):
 
     except _CancelledError:
         logger.info(f"[Task {celery_task_id}] 任务已被用户取消")
-        try:
-            sync_engine.dispose()
-        except Exception:
-            pass
         return {"cancelled": True, "task_id": celery_task_id}
-    except (ValueError, Exception):
-        try:
-            sync_engine.dispose()
-        except Exception:
-            pass
-        raise
+    finally:
+        sync_engine.dispose()
 
 
 @celery_app.task(name="maintenance.clean_uploaded_documents")

@@ -81,8 +81,16 @@
           <h3>{{ statusText }}</h3>
           <p class="processing-info">{{ processingInfo }}</p>
           <el-progress :percentage="progress" :stroke-width="8" style="width: 400px; max-width: 100%; margin-top: 16px;" />
-          <el-button type="danger" plain size="small" style="margin-top: 16px;" @click="handleCancel">
-            取消任务
+          <el-button
+            type="danger"
+            plain
+            size="small"
+            style="margin-top: 16px;"
+            :loading="cancelling"
+            :disabled="cancelling"
+            @click="handleCancel"
+          >
+            {{ currentTaskId ? '取消任务' : '取消上传' }}
           </el-button>
         </div>
       </el-card>
@@ -238,10 +246,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { sanitizeDocumentHtml } from '@/utils/sanitize'
 import {
   uploadDocumentApi,
-  type DocumentUploadResponse,
   type DocumentProofreadResponse,
 } from '@/api/document'
-import { asyncDocumentProofreadApi, streamTaskStatus, cancelTaskApi, type TaskStatus, type SubmitResponse } from '@/api/tasks'
+import { asyncDocumentProofreadApi, streamTaskStatus, cancelTaskApi, type TaskStatus } from '@/api/tasks'
 import { submitIssueFeedbackApi } from '@/api/proofread'
 import { getAvailableModelsApi, type AvailableModel } from '@/api/polish'
 
@@ -271,80 +278,26 @@ const stepIndex = computed(() => {
 const selectedFile = ref<File | null>(null)
 const uploading = ref(false)
 const proofreading = ref(false)
+const cancelling = ref(false)
 const progress = ref(0)
 const processingInfo = ref('')
 const accessToken = ref('')
 const currentTaskId = ref('')
 const abortController = ref<AbortController | null>(null)
 const uploadRef = ref()
+let activeRunId = 0
 
 // 校对模型选择（默认当前活跃模型）
 const modelOptions = ref<AvailableModel[]>([])
 const selectedModelId = ref<number | null>(null)
 
-onMounted(async () => {
-  try {
-    const res = await getAvailableModelsApi()
-    modelOptions.value = res.models
-    const active = res.models.find(m => m.is_active)
-    selectedModelId.value = active ? active.id : (res.models[0]?.id ?? null)
-  } catch { /* 模型列表加载失败时用默认活跃模型 */ }
-
-  // 刷新恢复：如果有未完成的任务快照，继续轮询
-  const snap = loadSnapshot()
-  if (snap?.taskId) {
-    originalText.value = snap.originalText || ''
-    currentText.value = snap.originalText || ''
-    currentHtml.value = snap.currentHtml || ''
-    domain.value = snap.domain || 'general'
-    if (snap.configId) selectedModelId.value = snap.configId
-    resultFilename.value = snap.filename || ''
-    accessToken.value = snap.accessToken || ''
-    currentTaskId.value = snap.taskId
-
-    step.value = 'processing'
-    stepKey.value = 'proofread'
-    proofreading.value = true
-    progress.value = 50
-    processingInfo.value = '恢复连接中...'
-
-    abortController.value = new AbortController()
-
-    streamTaskStatus(snap.taskId, (status) => {
-      if (status.step) stepKey.value = status.step
-      if (status.progress) {
-        progress.value = Math.min(50 + Math.floor(status.progress * 0.5), 99)
-      }
-      if (status.message) processingInfo.value = status.message
-    }, {
-      accessToken: snap.accessToken,
-      signal: abortController.value?.signal,
-    }).then((taskResult) => {
-      const r = taskResult.result as any
-      if (!r || !r.issues) {
-        ElMessage.error('校对结果格式异常')
-        resetAll()
-        return
-      }
-      issues.value = r.issues.map((i: any) => ({ ...i, _accepted: false, _ignored: false }))
-      recordId.value = r.record_id ?? null
-      correctedDownloadUrl.value = r.corrected_download_url || ''
-      progress.value = 100
-      stepKey.value = 'save'
-      proofreading.value = false
-      step.value = 'result'
-      clearSnapshot()
-      ElMessage.info(`共发现 ${r.total_issues ?? r.issues.length} 个问题，请逐条审阅`)
-    }).catch((err) => {
-      if (err?.name === 'AbortError') return
-      ElMessage.error('恢复连接失败，请重试')
-      resetAll()
-    })
-  }
+onMounted(() => {
+  void restoreTaskSnapshot()
+  void loadModelOptions()
 })
 
 onUnmounted(() => {
-  abortController.value?.abort()
+  invalidateTaskRun()
 })
 
 // 设置
@@ -362,6 +315,7 @@ const activeIssueIndex = ref(-1)
 
 // 计算属性
 const statusText = computed(() => {
+  if (cancelling.value) return '正在取消...'
   if (uploading.value) return '上传中...'
   if (proofreading.value) return 'AI 校对中...'
   return '开始校对'
@@ -471,7 +425,8 @@ function handleFileRemove() {
 const SESSION_KEY = 'textmirror_task_snapshot'
 
 interface TaskSnapshot {
-  taskId: string
+  taskId?: string
+  idempotencyKey?: string
   fileId: string
   filename: string
   domain: string
@@ -496,152 +451,275 @@ function loadSnapshot(): TaskSnapshot | null {
   } catch { return null }
 }
 
+function startTaskRun(): number {
+  abortController.value?.abort()
+  activeRunId += 1
+  abortController.value = new AbortController()
+  return activeRunId
+}
+
+function invalidateTaskRun() {
+  activeRunId += 1
+  abortController.value?.abort()
+  abortController.value = null
+}
+
+function isCurrentRun(runId: number): boolean {
+  return runId === activeRunId
+}
+
+function isAbortError(error: any): boolean {
+  return error?.name === 'AbortError' || error?.code === 'ERR_CANCELED'
+}
+
+function createIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+async function loadModelOptions() {
+  try {
+    const res = await getAvailableModelsApi()
+    modelOptions.value = res.models
+    if (selectedModelId.value === null) {
+      const active = res.models.find(m => m.is_active)
+      selectedModelId.value = active ? active.id : (res.models[0]?.id ?? null)
+    }
+  } catch { /* 模型列表加载失败时用默认活跃模型 */ }
+}
+
+function applyTaskProgress(status: TaskStatus, runId: number) {
+  if (!isCurrentRun(runId)) return
+  if (status.step) stepKey.value = status.step
+  if (typeof status.progress === 'number') {
+    progress.value = Math.min(50 + Math.floor(status.progress * 0.5), 99)
+  }
+  if (status.message) processingInfo.value = status.message
+}
+
+function completeTask(taskResult: TaskStatus, fallbackFilename: string, runId: number) {
+  if (!isCurrentRun(runId)) return
+
+  uploading.value = false
+  proofreading.value = false
+  cancelling.value = false
+  clearSnapshot()
+  currentTaskId.value = ''
+  accessToken.value = ''
+
+  if (taskResult.status !== 'SUCCESS') {
+    step.value = 'upload'
+    stepKey.value = 'upload'
+    progress.value = 0
+    processingInfo.value = ''
+    invalidateTaskRun()
+    if (taskResult.status === 'CANCELLED') {
+      ElMessage.info('任务已取消')
+    } else {
+      ElMessage.error(taskResult.error || taskResult.message || '校对任务执行失败，请重试')
+    }
+    return
+  }
+
+  const result = taskResult.result as any
+  if (!result || !result.issues) {
+    step.value = 'upload'
+    stepKey.value = 'upload'
+    progress.value = 0
+    processingInfo.value = ''
+    invalidateTaskRun()
+    ElMessage.error('校对结果格式异常，请重试')
+    return
+  }
+
+  const proofreadRes: DocumentProofreadResponse = {
+    filename: result.filename || fallbackFilename,
+    issues: result.issues,
+    total_issues: result.total_issues ?? result.issues.length,
+    corrected_download_url: result.corrected_download_url || '',
+    record_id: result.record_id ?? undefined,
+  } as DocumentProofreadResponse
+
+  recordId.value = proofreadRes.record_id ?? null
+  resultFilename.value = proofreadRes.filename
+  correctedDownloadUrl.value = proofreadRes.corrected_download_url || ''
+  issues.value = proofreadRes.issues.map((issue: any) => ({
+    ...issue,
+    _accepted: false,
+    _ignored: false,
+  }))
+  progress.value = 100
+  stepKey.value = 'save'
+  step.value = 'result'
+  invalidateTaskRun()
+
+  if (proofreadRes.total_issues === 0) {
+    ElMessage.success('文档没有发现任何问题')
+  } else {
+    ElMessage.info(`共发现 ${proofreadRes.total_issues} 个问题，请逐条审阅`)
+  }
+}
+
+async function trackTask(snapshot: TaskSnapshot, runId: number) {
+  if (!snapshot.taskId || !isCurrentRun(runId)) return
+
+  try {
+    const taskResult = await streamTaskStatus(snapshot.taskId, (status) => {
+      applyTaskProgress(status, runId)
+    }, {
+      accessToken: snapshot.accessToken,
+      signal: abortController.value?.signal,
+    })
+    completeTask(taskResult, snapshot.filename, runId)
+  } catch (error: any) {
+    if (!isCurrentRun(runId) || isAbortError(error)) return
+    uploading.value = false
+    proofreading.value = true
+    processingInfo.value = '连接中断，刷新页面后会继续恢复任务状态'
+    ElMessage.warning('任务状态连接中断，请稍后刷新页面继续恢复')
+  }
+}
+
+async function submitTaskSnapshot(snapshot: TaskSnapshot, runId: number) {
+  const submitRes = await asyncDocumentProofreadApi({
+    file_id: snapshot.fileId,
+    domain: snapshot.domain,
+    config_id: snapshot.configId,
+  }, {
+    idempotencyKey: snapshot.idempotencyKey,
+    signal: abortController.value?.signal,
+  })
+  if (!isCurrentRun(runId)) return
+
+  snapshot.taskId = submitRes.task_id
+  snapshot.accessToken = submitRes.access_token
+  saveSnapshot(snapshot)
+  accessToken.value = submitRes.access_token || ''
+  currentTaskId.value = submitRes.task_id
+  await trackTask(snapshot, runId)
+}
+
+async function restoreTaskSnapshot() {
+  const snapshot = loadSnapshot()
+  if (!snapshot) return
+
+  originalText.value = snapshot.originalText || ''
+  currentText.value = snapshot.originalText || ''
+  currentHtml.value = snapshot.currentHtml || ''
+  domain.value = snapshot.domain || 'general'
+  if (snapshot.configId !== undefined) selectedModelId.value = snapshot.configId
+  resultFilename.value = snapshot.filename || ''
+  accessToken.value = snapshot.accessToken || ''
+  currentTaskId.value = snapshot.taskId || ''
+  step.value = 'processing'
+  stepKey.value = 'proofread'
+  proofreading.value = true
+  progress.value = 50
+
+  const runId = startTaskRun()
+  if (snapshot.taskId) {
+    processingInfo.value = '恢复连接中...'
+    await trackTask(snapshot, runId)
+    return
+  }
+  if (!snapshot.idempotencyKey) {
+    clearSnapshot()
+    resetAll()
+    ElMessage.warning('未完成任务缺少恢复信息，请重新提交')
+    return
+  }
+
+  processingInfo.value = '正在恢复任务提交...'
+  try {
+    await submitTaskSnapshot(snapshot, runId)
+  } catch (error: any) {
+    if (!isCurrentRun(runId) || isAbortError(error)) return
+    processingInfo.value = '任务提交状态暂未确认，刷新页面后将自动重试'
+    ElMessage.warning('任务提交状态暂未确认，请稍后刷新页面继续恢复')
+  }
+}
+
 // 开始校对
 async function handleStartProofread() {
   if (!selectedFile.value) return
 
-  abortController.value = new AbortController()
-
+  const runId = startTaskRun()
+  let snapshot: TaskSnapshot | null = null
   try {
-    // 步骤1: 上传文件
     step.value = 'processing'
     stepKey.value = 'upload'
     uploading.value = true
+    proofreading.value = false
+    cancelling.value = false
     progress.value = 20
     processingInfo.value = '正在上传文件并提取文本...'
 
-    const uploadRes = await uploadDocumentApi(selectedFile.value)
-    uploading.value = false
-    progress.value = 40
-    processingInfo.value = `文本提取完成，共 ${uploadRes.text_length} 字，正在调用 AI 校对...`
+    const uploadRes = await uploadDocumentApi(selectedFile.value, abortController.value?.signal)
+    if (!isCurrentRun(runId)) return
 
-    // 保存提取的文本和格式化 HTML
+    uploading.value = false
+    proofreading.value = true
+    progress.value = 50
+    stepKey.value = 'proofread'
+    processingInfo.value = `文本提取完成，共 ${uploadRes.text_length} 字，正在提交校对任务...`
     originalText.value = uploadRes.extracted_text
     currentText.value = uploadRes.extracted_text
     currentHtml.value = uploadRes.extracted_html || ''
 
-    // 步骤2: 提交异步校对任务并订阅进度（SSE，失败降级轮询）
-    proofreading.value = true
-    stepKey.value = 'proofread'
-    progress.value = 50
-
-    let submitRes: SubmitResponse
-    try {
-      submitRes = await asyncDocumentProofreadApi({
-        file_id: uploadRes.file_id,
-        domain: domain.value,
-        config_id: selectedModelId.value ?? undefined,
-      })
-    } catch (err: any) {
-      throw { kind: 'submit', cause: err }
-    }
-
-    accessToken.value = submitRes.access_token || ''
-    currentTaskId.value = submitRes.task_id
-
-    saveSnapshot({
-      taskId: submitRes.task_id,
+    snapshot = {
+      idempotencyKey: createIdempotencyKey(),
       fileId: uploadRes.file_id,
       filename: uploadRes.filename,
       domain: domain.value,
       configId: selectedModelId.value ?? undefined,
-      accessToken: submitRes.access_token,
       originalText: uploadRes.extracted_text,
       currentHtml: uploadRes.extracted_html || '',
-    })
-
-    let taskResult: TaskStatus
-    try {
-      taskResult = await streamTaskStatus(submitRes.task_id, (status) => {
-        if (status.step) stepKey.value = status.step
-        if (status.progress) {
-          progress.value = Math.min(50 + Math.floor(status.progress * 0.5), 99)
-        }
-        if (status.message) processingInfo.value = status.message
-      }, {
-        accessToken: submitRes.access_token,
-        signal: abortController.value?.signal,
-      })
-    } catch (err: any) {
-      if (err?.name === 'AbortError') return
-      throw { kind: 'transport', cause: err }
     }
-
-    const r = taskResult.result as any
-    if (!r || !r.issues) {
-      throw { kind: 'invalid_result' }
-    }
-
-    const proofreadRes: DocumentProofreadResponse = {
-      filename: r.filename || uploadRes.filename,
-      issues: r.issues,
-      total_issues: r.total_issues ?? r.issues.length,
-      corrected_download_url: r.corrected_download_url || '',
-      record_id: r.record_id ?? undefined,
-    } as DocumentProofreadResponse
-
-    // 保存结果
-    recordId.value = proofreadRes.record_id ?? null
-    resultFilename.value = proofreadRes.filename
-    correctedDownloadUrl.value = proofreadRes.corrected_download_url || ''
-    issues.value = proofreadRes.issues.map((i: any) => ({
-      ...i,
-      _accepted: false,
-      _ignored: false,
-    }))
-
-    progress.value = 100
-    stepKey.value = 'save'
-    proofreading.value = false
-    step.value = 'result'
-    clearSnapshot()
-
-    if (proofreadRes.total_issues === 0) {
-      ElMessage.success('文档没有发现任何问题')
-    } else {
-      ElMessage.info(`共发现 ${proofreadRes.total_issues} 个问题，请逐条审阅`)
-    }
-  } catch (e: any) {
-    proofreading.value = false
+    saveSnapshot(snapshot)
+    await submitTaskSnapshot(snapshot, runId)
+  } catch (error: any) {
+    if (!isCurrentRun(runId) || isAbortError(error)) return
     uploading.value = false
-
-    if (e?.kind === 'submit') {
-      processingInfo.value = '任务提交失败，请重试'
-      step.value = 'upload'
-      progress.value = 0
-    } else if (e?.kind === 'transport') {
-      processingInfo.value = '连接中断，请重试'
-      step.value = 'upload'
-      progress.value = 0
-    } else if (e?.kind === 'invalid_result') {
-      ElMessage.error('校对结果格式异常，请重试')
-      step.value = 'upload'
-      progress.value = 0
-    } else if (e?.message === '任务执行失败' || e?.cause?.message === '任务执行失败') {
-      ElMessage.error('校对任务执行失败，请重试')
-      step.value = 'upload'
-      progress.value = 0
-    } else {
-      step.value = 'upload'
-      progress.value = 0
+    if (snapshot) {
+      proofreading.value = true
+      processingInfo.value = '任务提交状态暂未确认，刷新页面后将自动重试'
+      ElMessage.warning('任务提交状态暂未确认，请稍后刷新页面继续恢复')
+      return
     }
+    proofreading.value = false
+    step.value = 'upload'
+    stepKey.value = 'upload'
+    progress.value = 0
+    processingInfo.value = ''
+    ElMessage.error('文件上传失败，请重试')
   }
 }
 
 // 取消任务
 async function handleCancel() {
-  if (!currentTaskId.value) return
-  try {
-    await cancelTaskApi(currentTaskId.value, accessToken.value || undefined)
-    ElMessage.info('任务已取消')
-  } catch {
-    ElMessage.warning('取消请求发送失败')
+  if (!currentTaskId.value) {
+    resetAll()
+    ElMessage.info('已取消上传')
+    return
   }
-  abortController.value?.abort()
-  proofreading.value = false
-  step.value = 'upload'
-  progress.value = 0
-  clearSnapshot()
+  if (cancelling.value) return
+
+  const taskId = currentTaskId.value
+  const runId = activeRunId
+  cancelling.value = true
+  try {
+    await cancelTaskApi(taskId, accessToken.value || undefined)
+    if (!isCurrentRun(runId) || currentTaskId.value !== taskId) return
+    processingInfo.value = '取消请求已提交，正在等待任务停止...'
+    ElMessage.info('取消请求已提交，正在等待任务停止')
+  } catch {
+    if (isCurrentRun(runId) && currentTaskId.value === taskId) {
+      cancelling.value = false
+      ElMessage.warning('取消请求发送失败')
+    }
+  }
 }
 
 // 审校建议反馈上报（fire-and-forget：失败不打扰用户）
@@ -802,10 +880,13 @@ function handleExportReport() {
 
 // 重置
 function resetAll() {
-  abortController.value?.abort()
+  invalidateTaskRun()
   step.value = 'upload'
   stepKey.value = 'upload'
   selectedFile.value = null
+  uploading.value = false
+  proofreading.value = false
+  cancelling.value = false
   originalText.value = ''
   currentText.value = ''
   currentHtml.value = ''
@@ -818,7 +899,6 @@ function resetAll() {
   recordId.value = null
   accessToken.value = ''
   currentTaskId.value = ''
-  abortController.value = null
   clearSnapshot()
   uploadRef.value?.clearFiles()
 }

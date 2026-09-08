@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlalchemy import select, update
@@ -117,20 +117,19 @@ async def get_task_status(
 @router.get("/{task_id}/stream", summary='任务状态 SSE 推送')
 async def stream_task_status(
     task_id: str,
+    http_request: Request,
     current_user=Depends(get_current_user_optional),
     token: str = None,
     access_token: str = None,
 ):
     """
     任务状态 SSE 推送。
-    服务端轮询 proofread_tasks 表（500ms）仅在变化时推送，
-    终态（SUCCESS/FAILURE/REVOKED/CANCELLED）推送后关闭流。
+    服务端以短会话自适应轮询 proofread_tasks 表，终态推送后关闭流。
 
     认证方式：
-    - 登录用户：Cookie JWT 或 ?token= (EventSource 无法发 header)
-    - 游客：?access_token= (提交时返回的一次性令牌)
+    - 登录用户：Authorization header 或 ?token=
+    - 游客：?access_token=
     """
-    # EventSource 场景：query token 兜底认证（登录用户 JWT 解码）
     if current_user is None and token:
         from app.core.security import decode_token
         from app.models.user import User
@@ -143,40 +142,47 @@ async def stream_task_status(
         except Exception:
             current_user = None
 
-    # 首次归属校验（流开始前，避免无权限连接占用资源）
     db_task = await _load_task_with_auth(task_id, current_user, access_token)
     if db_task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
 
     async def event_stream():
+        from app.models.proofread_task import ProofreadTask
+
         last_payload = None
-        idle_seconds = 0
-        heartbeat_counter = 0
-        # 空闲 10 分钟自动断开
+        idle_seconds = 0.0
+        heartbeat_seconds = 0.0
+        interval = 1.0
         while idle_seconds < 600:
+            if await http_request.is_disconnected():
+                return
+
             async with async_session_factory() as db:
-                from app.models.proofread_task import ProofreadTask
                 result = await db.execute(
                     select(ProofreadTask).where(ProofreadTask.task_id == task_id)
                 )
                 fresh_task = result.scalar_one_or_none()
 
             payload = _build_status_payload(task_id, fresh_task)
-            if payload != last_payload:
+            changed = payload != last_payload
+            if changed:
                 last_payload = payload
-                idle_seconds = 0
-                heartbeat_counter = 0
+                idle_seconds = 0.0
+                heartbeat_seconds = 0.0
+                interval = 1.0
                 yield f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
                 if payload["status"] in ("SUCCESS", "FAILURE", "REVOKED", "CANCELLED"):
                     return
             else:
-                idle_seconds += 0.5
-                heartbeat_counter += 0.5
-                # 每 15 秒发心跳保活
-                if heartbeat_counter >= 15:
-                    heartbeat_counter = 0
+                idle_seconds += interval
+                heartbeat_seconds += interval
+                if heartbeat_seconds >= 15:
+                    heartbeat_seconds = 0.0
                     yield ": heartbeat\n\n"
-            await asyncio.sleep(0.5)
+
+            await asyncio.sleep(interval)
+            if not changed:
+                interval = min(interval + 1.0, 5.0)
 
     return StreamingResponse(
         event_stream(),
@@ -217,7 +223,7 @@ async def cancel_task(
             return {"message": "任务已结束", "task_id": task_id}
 
         if fresh.status == "PENDING":
-            stmt = (
+            result = await db.execute(
                 update(ProofreadTask)
                 .where(
                     ProofreadTask.task_id == task_id,
@@ -231,24 +237,34 @@ async def cancel_task(
                     finished_at=datetime.now(timezone.utc),
                 )
             )
-            await db.execute(stmt)
-            await db.commit()
+            if result.rowcount:
+                await db.commit()
+                try:
+                    from app.celery_app import celery_app
+                    celery_app.control.revoke(task_id, terminate=False)
+                except Exception as e:
+                    logger.warning(f"revoke 失败 (非致命): {e}")
+                logger.info(f"[Cancel] 排队任务已取消: task_id={task_id}")
+                return {"message": "取消请求已接受", "task_id": task_id}
+            await db.rollback()
+            fresh = (await db.execute(
+                select(ProofreadTask).where(ProofreadTask.task_id == task_id)
+            )).scalar_one_or_none()
+            if fresh is None or fresh.status in TERMINAL:
+                return {"message": "任务已结束", "task_id": task_id}
 
-            try:
-                from app.celery_app import celery_app
-                celery_app.control.revoke(task_id, terminate=False)
-            except Exception as e:
-                logger.warning(f"revoke 失败 (非致命): {e}")
-
-            logger.info(f"[Cancel] 排队任务已取消: task_id={task_id}")
-        else:
-            stmt = (
-                update(ProofreadTask)
-                .where(ProofreadTask.task_id == task_id)
-                .values(cancel_requested=True, message="正在取消...")
+        cancel_request = await db.execute(
+            update(ProofreadTask)
+            .where(
+                ProofreadTask.task_id == task_id,
+                ProofreadTask.status.not_in(TERMINAL),
             )
-            await db.execute(stmt)
-            await db.commit()
-            logger.info(f"[Cancel] 已发送取消请求: task_id={task_id}, status={fresh.status}")
+            .values(cancel_requested=True, message="正在取消...")
+        )
+        if not cancel_request.rowcount:
+            await db.rollback()
+            return {"message": "任务已结束", "task_id": task_id}
+        await db.commit()
+        logger.info(f"[Cancel] 已发送取消请求: task_id={task_id}, status={fresh.status}")
 
     return {"message": "取消请求已接受", "task_id": task_id}

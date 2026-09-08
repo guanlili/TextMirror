@@ -53,7 +53,10 @@ class ProofreadTask(BaseModel):
         String(500), nullable=True, comment="当前阶段描述"
     )
     idempotency_key: Mapped[Optional[str]] = mapped_column(
-        String(64), nullable=True, comment="幂等键（相同键并发提交只产生一个任务）"
+        String(64), nullable=True, comment="作用域化幂等键 SHA-256"
+    )
+    params_json: Mapped[Optional[dict]] = mapped_column(
+        JSON, nullable=True, comment="提交参数 JSON"
     )
     result_json: Mapped[Optional[dict]] = mapped_column(
         JSON, nullable=True, comment="校对结果 JSON"
@@ -63,9 +66,6 @@ class ProofreadTask(BaseModel):
     )
     output_path: Mapped[Optional[str]] = mapped_column(
         String(1000), nullable=True, comment="修订文档路径"
-    )
-    celery_task_id: Mapped[Optional[str]] = mapped_column(
-        String(64), nullable=True, comment="Celery AsyncResult UUID"
     )
     cancel_requested: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false",

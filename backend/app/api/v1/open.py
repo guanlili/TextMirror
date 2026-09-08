@@ -10,15 +10,17 @@ import time
 import uuid
 from typing import Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user_or_apikey
+from app.core.security import hash_scoped_idempotency_key
 from app.core.file_security import sanitize_filename
 from app.core.rate_limit import (
     charge_api_key_daily,
@@ -54,6 +56,37 @@ from app.services.audit_log import record_audit_log, AuditTimer
 from app.tasks.proofread_task import async_proofread_document
 
 router = APIRouter(tags=["开放API"])
+
+
+def _normalize_idempotency_key(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    value = value.strip()
+    if not value or len(value) > 128:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_IDEMPOTENCY_KEY", "message": "Idempotency-Key 必须为 1-128 个非空字符"},
+        )
+    return value
+
+
+async def _existing_submit_response(db: AsyncSession, db_task) -> OpenDocumentSubmitResponse:
+    doc_record = (await db.execute(
+        select(UploadedDocument).where(UploadedDocument.file_id == db_task.document_id)
+    )).scalar_one_or_none()
+    if doc_record is None:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "IDEMPOTENCY_CONFLICT", "message": "已有任务的文档记录不可用"},
+        )
+    return OpenDocumentSubmitResponse(
+        job_id=db_task.task_id,
+        filename=doc_record.filename,
+        text_length=doc_record.text_length,
+        status="queued",
+        status_url=f"/api/v1/open/jobs/{db_task.task_id}",
+    )
+
 
 # 错误响应示例（对外契约的一部分，写进 OpenAPI 文档）
 def _error_example(code: str, msg: str) -> dict:
@@ -474,6 +507,7 @@ async def open_submit_document(
     check_types: Optional[str] = Form(None, deprecated=True, description="（已废弃，传入无效果）历史参数：校对类型"),
     domain: str = Form("general", description="文本领域"),
     config_id: Optional[int] = Form(None, description="指定模型配置ID（可选）"),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_db),
     auth: Tuple[User, Optional[ApiKey]] = Depends(get_current_user_or_apikey),
 ):
@@ -481,6 +515,21 @@ async def open_submit_document(
     开放文档异步审校：上传 → 提交 Celery 任务 → 返回 job_id
     """
     user, api_key = auth
+    raw_idempotency_key = _normalize_idempotency_key(idempotency_key)
+    owner_scope = f"open:api-key:{api_key.id}" if api_key else f"open:user:{user.id}"
+    scoped_idempotency_key = (
+        hash_scoped_idempotency_key(owner_scope, raw_idempotency_key)
+        if raw_idempotency_key else None
+    )
+
+    from app.models.proofread_task import ProofreadTask
+
+    if scoped_idempotency_key:
+        existing = (await db.execute(
+            select(ProofreadTask).where(ProofreadTask.idempotency_key == scoped_idempotency_key)
+        )).scalar_one_or_none()
+        if existing:
+            return await _existing_submit_response(db, existing)
 
     parsed_check_types = _parse_form_check_types(check_types)
     parsed_domain = _validate_form_domain(domain)
@@ -541,7 +590,7 @@ async def open_submit_document(
         remove_upload_silently(file_path)
         raise
 
-    # ---- 上传记录（管理后台可见）----
+    # ---- 在同一事务中保存上传记录与持久任务 ----
     doc_record = UploadedDocument(
         file_id=file_id,
         filename=filename,
@@ -555,23 +604,6 @@ async def open_submit_document(
         owner_kind="user",
         status="uploaded",
     )
-    db.add(doc_record)
-    # 必须先提交再投递：否则事务回滚后 worker 仍会处理一条不存在的记录
-    try:
-        await db.commit()
-    except Exception as e:
-        logger.error(f"[OpenAPI] 上传记录保存失败: {e}")
-        if api_key is not None:
-            await refund_api_key_daily_usage(api_key)
-        remove_upload_silently(file_path)
-        raise HTTPException(
-            status_code=500,
-            detail={"code": "INTERNAL_ERROR", "message": "上传记录保存失败，请重新提交"},
-        )
-
-    # ---- 构造持久任务记录 ----
-    from app.models.proofread_task import ProofreadTask
-
     task_uuid = str(uuid.uuid4())
     db_task = ProofreadTask(
         task_id=task_uuid,
@@ -579,22 +611,40 @@ async def open_submit_document(
         owner_kind="api_key" if api_key else "user",
         owner_user_id=user.id,
         owner_api_key_id=api_key.id if api_key else None,
+        idempotency_key=scoped_idempotency_key,
         status="PENDING",
         progress=0,
         message="任务排队中...",
-        result_json={
+        params_json={
             "domain": parsed_domain,
             "config_id": config_id,
             "check_types": parsed_check_types,
         },
     )
-    db.add(db_task)
+    db.add_all([doc_record, db_task])
     try:
-        await db.commit()
-        await db.refresh(db_task)
+        await db.flush()
         db_task_pk_id = db_task.id
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        if api_key is not None:
+            await refund_api_key_daily_usage(api_key)
+        remove_upload_silently(file_path)
+        if scoped_idempotency_key:
+            existing = (await db.execute(
+                select(ProofreadTask).where(ProofreadTask.idempotency_key == scoped_idempotency_key)
+            )).scalar_one_or_none()
+            if existing:
+                return await _existing_submit_response(db, existing)
+        logger.exception("[OpenAPI] 幂等任务记录冲突但未找到既有任务")
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "INTERNAL_ERROR", "message": "任务记录保存失败，请重新提交"},
+        )
     except Exception as e:
-        logger.error(f"[OpenAPI] 任务记录保存失败: {e}")
+        await db.rollback()
+        logger.error(f"[OpenAPI] 上传/任务记录保存失败: {e}")
         if api_key is not None:
             await refund_api_key_daily_usage(api_key)
         remove_upload_silently(file_path)
@@ -611,15 +661,14 @@ async def open_submit_document(
         )
     except Exception as e:
         logger.error(f"[OpenAPI] 任务队列不可用: {e}")
+        await db.execute(
+            update(ProofreadTask)
+            .where(ProofreadTask.id == db_task_pk_id, ProofreadTask.status == "PENDING")
+            .values(status="FAILURE", error_code="DISPATCH_FAILED", message="任务投递失败，请重试")
+        )
+        await db.commit()
         if api_key is not None:
             await refund_api_key_daily_usage(api_key)
-        remove_upload_silently(file_path)
-        try:
-            await db.delete(db_task)
-            await db.delete(doc_record)
-            await db.commit()
-        except Exception as cleanup_error:
-            logger.warning(f"[OpenAPI] 任务/上传记录清理失败: {cleanup_error}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "TASK_QUEUE_UNAVAILABLE", "message": "任务队列暂时不可用，请稍后重试"},

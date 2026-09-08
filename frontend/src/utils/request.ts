@@ -35,6 +35,9 @@ request.interceptors.response.use(
     return response.data
   },
   (error) => {
+    if (error.config?.headers?.['X-Silent-Error'] === 'true') {
+      return Promise.reject(error)
+    }
     if (error.response) {
       const { status, data } = error.response
 

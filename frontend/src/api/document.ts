@@ -36,11 +36,15 @@ export interface DocumentProofreadResponse {
 /**
  * 上传文档
  */
-export function uploadDocumentApi(file: File): Promise<DocumentUploadResponse> {
+export function uploadDocumentApi(
+  file: File,
+  signal?: AbortSignal,
+): Promise<DocumentUploadResponse> {
   const formData = new FormData()
   formData.append('file', file)
   return request.post('/document/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    signal,
     timeout: 60000,
   })
 }

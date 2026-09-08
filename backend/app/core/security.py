@@ -3,6 +3,7 @@ TextMirror 安全模块
 JWT Token 签发与校验、密码加密、API Key 生成与哈希
 """
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any, Tuple
@@ -28,6 +29,18 @@ def generate_api_key() -> Tuple[str, str, str, str]:
 def hash_api_key(plaintext: str) -> str:
     """计算 API Key 的 SHA-256 哈希（十六进制）"""
     return hashlib.sha256(plaintext.encode()).hexdigest()
+
+
+def hash_scoped_idempotency_key(scope: str, raw_key: str) -> str:
+    """对调用方作用域与原始幂等键一起哈希，避免跨主体冲突和明文落库。"""
+    return hashlib.sha256(f"{scope}\x00{raw_key}".encode()).hexdigest()
+
+
+def derive_guest_task_access_token(task_id: str) -> str:
+    """基于服务端密钥派生可重建的游客任务访问令牌。"""
+    return hmac.new(
+        settings.SECRET_KEY.encode(), f"proofread-task:{task_id}".encode(), hashlib.sha256
+    ).hexdigest()
 
 
 def hash_password(password: str) -> str:
