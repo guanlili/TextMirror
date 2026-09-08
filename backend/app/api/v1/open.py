@@ -21,10 +21,9 @@ from loguru import logger
 from app.celery_app import celery_app
 from app.core.database import get_db
 from app.core.dependencies import get_current_user_or_apikey
-from app.core.file_security import sanitize_filename, safe_upload_path
+from app.core.file_security import sanitize_filename
 from app.core.rate_limit import (
     charge_api_key_daily,
-    check_api_key_rate_limit,
     check_api_key_rpm,
     check_user_quota,
     check_user_quota_n_times,
@@ -51,6 +50,7 @@ from app.schemas.proofread import (
 )
 from app.services.document import extract_text_from_file
 from app.services.proofread import proofread_text
+from app.services.upload import UploadRejected, remove_upload_silently, store_upload
 from app.services.audit_log import record_audit_log, AuditTimer
 from app.tasks.proofread_task import async_proofread_document
 
@@ -449,20 +449,6 @@ async def open_proofread_compare(
 ALLOWED_DOC_EXTENSIONS = {".doc", ".docx", ".pdf", ".txt"}
 
 
-def _remove_file_silently(file_path: str) -> None:
-    """失败路径清理已落盘的文件及其所属 file_id 目录（不存在/删除失败都不抛出）"""
-    try:
-        import shutil
-        dir_path = os.path.dirname(file_path)
-        if os.path.isfile(file_path):
-            os.remove(file_path)
-        # 目录内已无其他文件时一并移除（上传目录按 file_id 隔离，属本请求独有）
-        if os.path.isdir(dir_path) and not os.listdir(dir_path):
-            os.rmdir(dir_path)
-    except OSError as e:
-        logger.warning(f"[OpenAPI] 清理失败路径文件异常: {file_path}: {e}")
-
-
 @router.post(
     "/documents",
     response_model=OpenDocumentSubmitResponse,
@@ -495,8 +481,6 @@ async def open_submit_document(
     """
     开放文档异步审校：上传 → 提交 Celery 任务 → 返回 job_id
     """
-    from app.core.config import settings as app_settings
-
     user, api_key = auth
 
     parsed_check_types = _parse_form_check_types(check_types)
@@ -519,21 +503,15 @@ async def open_submit_document(
             detail={"code": "INVALID_FILE", "message": f"不支持的文件格式: {file_ext}，仅支持 .doc / .docx / .pdf / .txt"},
         )
 
-    content = await file.read()
-    file_size = len(content)
-    max_size = app_settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
-    if file_size > max_size:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "FILE_TOO_LARGE", "message": f"文件大小超过限制（最大 {app_settings.MAX_UPLOAD_SIZE_MB}MB）"},
-        )
-
-    # ---- 保存并提取文本 ----
+    # ---- 分块落盘并校验内容（不把整个文件读进内存）----
     file_id = str(uuid.uuid4())
-    file_path = safe_upload_path(file_id, filename)
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    with open(file_path, "wb") as f:
-        f.write(content)
+    try:
+        stored = await store_upload(file, file_id, filename, file_ext)
+    except UploadRejected as e:
+        raise HTTPException(status_code=400, detail={"code": e.code, "message": e.message})
+
+    file_path = stored.file_path
+    file_size = stored.file_size
 
     # 此后任何失败路径都不该在磁盘留下孤儿文件
     try:
@@ -555,10 +533,10 @@ async def open_submit_document(
         if api_key is not None:
             await charge_api_key_daily(api_key, 1)
     except HTTPException:
-        _remove_file_silently(file_path)
+        remove_upload_silently(file_path)
         raise
     except Exception:
-        _remove_file_silently(file_path)
+        remove_upload_silently(file_path)
         raise
 
     # ---- 上传记录（管理后台可见）----
@@ -576,7 +554,17 @@ async def open_submit_document(
     )
     db.add(doc_record)
     # 必须先提交再投递：否则事务回滚后 worker 仍会处理一条不存在的记录
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as e:
+        logger.error(f"[OpenAPI] 上传记录保存失败: {e}")
+        if api_key is not None:
+            await refund_api_key_daily_usage(api_key)
+        remove_upload_silently(file_path)
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "INTERNAL_ERROR", "message": "上传记录保存失败，请重新提交"},
+        )
 
     # ---- 提交异步任务 ----
     try:
@@ -597,7 +585,7 @@ async def open_submit_document(
         # 队列故障：退还密钥日配额 + 清理已落盘文件与上传记录
         if api_key is not None:
             await refund_api_key_daily_usage(api_key)
-        _remove_file_silently(file_path)
+        remove_upload_silently(file_path)
         try:
             await db.delete(doc_record)
             await db.commit()

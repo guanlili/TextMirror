@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
 from app.core.database import get_db, async_session_factory
-from app.core.config import settings
 from app.core.dependencies import get_current_user_optional
 from app.core.rate_limit import check_guest_rate_limit, check_user_quota
 from app.core.file_security import (
@@ -31,6 +30,7 @@ from app.schemas.document import (
 )
 from app.services.document import extract_text_from_file, extract_html_from_file, generate_corrected_docx, generate_corrected_txt
 from app.services.proofread import proofread_text
+from app.services.upload import UploadRejected, remove_upload_silently, store_upload
 from app.services.audit_log import record_audit_log, AuditTimer
 
 from app.tasks.proofread_task import async_proofread_document
@@ -124,36 +124,63 @@ async def upload_document(
             detail=f"不支持的文件格式: {file_ext}，仅支持 .doc / .docx / .pdf / .txt",
         )
 
-    # 读取文件内容
-    content = await file.read()
-    file_size = len(content)
-
-    # 校验文件大小
-    max_size = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
-    if file_size > max_size:
-        raise HTTPException(
-            status_code=400,
-            detail=f"文件大小超过限制（{file_size // 1024 // 1024}MB，最大{settings.MAX_UPLOAD_SIZE_MB}MB）",
-        )
-
-    # 生成文件 ID 并保存到磁盘
+    # 生成文件 ID，分块落盘并校验内容（不把整个文件读进内存）
     file_id = str(uuid.uuid4())
-    file_path = safe_upload_path(file_id, filename)
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    with open(file_path, "wb") as f:
-        f.write(content)
-
-    # 提取文本（同步解析放线程池：.doc 走 LibreOffice subprocess，最长阻塞 60s）
     try:
-        extracted_text = await asyncio.to_thread(extract_text_from_file, file_path, file_ext)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"文本提取失败: {e}")
-        raise HTTPException(status_code=500, detail="文件文本提取失败，请检查文件是否损坏")
+        stored = await store_upload(file, file_id, filename, file_ext)
+    except UploadRejected as e:
+        raise HTTPException(status_code=400, detail=e.message)
 
-    if not extracted_text.strip():
-        raise HTTPException(status_code=400, detail="文件中未提取到有效文本内容")
+    file_path = stored.file_path
+    file_size = stored.file_size
+
+    # 落盘之后的任何失败都不该在磁盘留下孤儿文件
+    try:
+        # 提取文本（同步解析放线程池：.doc 走 LibreOffice subprocess，最长阻塞 60s）
+        try:
+            extracted_text = await asyncio.to_thread(extract_text_from_file, file_path, file_ext)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"文本提取失败: {e}")
+            raise HTTPException(status_code=500, detail="文件文本提取失败，请检查文件是否损坏")
+
+        if not extracted_text.strip():
+            raise HTTPException(status_code=400, detail="文件中未提取到有效文本内容")
+
+        text_preview = extracted_text[:200] + ("..." if len(extracted_text) > 200 else "")
+
+        # 提取格式化 HTML（保留排版和字体样式）
+        extracted_html = ""
+        try:
+            extracted_html = await asyncio.to_thread(extract_html_from_file, file_path, file_ext, extracted_text)
+        except Exception as e:
+            logger.warning(f"HTML格式提取失败，将降级使用纯文本: {e}")
+
+        # 写入数据库记录：失败则整体失败，避免出现磁盘有文件而无记录可追溯的状态
+        try:
+            doc_record = UploadedDocument(
+                file_id=file_id,
+                filename=filename,
+                file_ext=file_ext,
+                file_size=file_size,
+                file_path=file_path,
+                text_length=len(extracted_text),
+                extracted_text=extracted_text,
+                user_id=current_user.id if current_user else None,
+                username=current_user.username if current_user else None,
+                status="uploaded",
+            )
+            db.add(doc_record)
+            await db.commit()
+        except Exception as e:
+            logger.error(f"保存文档上传记录失败: {e}")
+            raise HTTPException(status_code=500, detail="上传记录保存失败，请重新上传")
+    except Exception:
+        remove_upload_silently(file_path)
+        raise
 
     # 缓存提取的文本和文件信息
     _cache_put(file_id, {
@@ -165,35 +192,7 @@ async def upload_document(
         "user_id": current_user.id if current_user else None,
     })
 
-    text_preview = extracted_text[:200] + ("..." if len(extracted_text) > 200 else "")
-
-    # 提取格式化 HTML（保留排版和字体样式）
-    extracted_html = ""
-    try:
-        extracted_html = await asyncio.to_thread(extract_html_from_file, file_path, file_ext, extracted_text)
-    except Exception as e:
-        logger.warning(f"HTML格式提取失败，将降级使用纯文本: {e}")
-
     logger.info(f"文档上传成功: {filename}, 文本长度={len(extracted_text)}")
-
-    # 写入数据库记录
-    try:
-        doc_record = UploadedDocument(
-            file_id=file_id,
-            filename=filename,
-            file_ext=file_ext,
-            file_size=file_size,
-            file_path=file_path,
-            text_length=len(extracted_text),
-            extracted_text=extracted_text,
-            user_id=current_user.id if current_user else None,
-            username=current_user.username if current_user else None,
-            status="uploaded",
-        )
-        db.add(doc_record)
-        await db.commit()
-    except Exception as e:
-        logger.warning(f"保存文档上传记录失败（不影响上传功能）: {e}")
 
     # 记录审计日志（文档上传）
     if http_request:
