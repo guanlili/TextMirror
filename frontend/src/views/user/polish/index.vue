@@ -260,7 +260,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import { sanitizeMarkdownHtml } from '@/utils/sanitize'
@@ -327,6 +327,11 @@ const compareResults = ref<ModelCompareItem[]>([])
 const comparing = ref(false)
 const hasCompareResult = computed(() => compareResults.value.length > 0)
 let compareAbort: (() => void) | null = null
+
+onUnmounted(() => {
+  streamAbort?.()
+  compareAbort?.()
+})
 
 const canCompare = computed(() => {
   const len = inputText.value.trim().length
