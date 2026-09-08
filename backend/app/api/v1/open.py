@@ -534,6 +534,12 @@ async def open_submit_document(
                 and existing.error_code == "DISPATCH_FAILED"
                 and existing.started_at is None
             ):
+                await db.execute(
+                    update(ProofreadTask)
+                    .where(ProofreadTask.id == existing.id, ProofreadTask.status == "FAILURE")
+                    .values(status="PENDING", error_code=None, message="任务重新排队中...")
+                )
+                await db.commit()
                 try:
                     async_proofread_document.apply_async(
                         args=(existing.id,),
