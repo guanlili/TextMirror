@@ -404,8 +404,8 @@ async def document_proofread_async(
     current_user=Depends(get_current_user_optional),
 ):
     """
-    异步文档校对 - 提交 Celery 任务
-    返回 task_id，前端轮询 /tasks/{task_id} 获取进度和结果
+    异步文档校对 - 先写 proofread_tasks 再投递 Celery（broker 消息不含全文）。
+    返回 task_id；游客额外返回 access_token 用于后续状态查询鉴权。
     """
     async with async_session_factory() as db:
         file_info = await _load_document_info(request.file_id, db)
@@ -419,24 +419,71 @@ async def document_proofread_async(
         async with async_session_factory() as db:
             await check_user_quota(current_user, db)
 
-    # 提交异步任务
-    task = async_proofread_document.delay(
-        text=file_info["text"],
-        domain=request.domain,
-        file_id=request.file_id,
-        filename=file_info["filename"],
-        file_path=file_info["file_path"],
-        file_ext=file_info["file_ext"],
-        user_id=current_user.id if current_user else None,
-        config_id=request.config_id,
-    )
+    # ---- 构造持久任务记录 ----
+    from app.models.proofread_task import ProofreadTask
+    import hashlib
 
-    logger.info(f"异步校对任务已提交: task_id={task.id}, file={file_info['filename']}")
+    task_uuid = str(uuid.uuid4())
+    owner_kind = "user" if current_user else "guest"
+    access_token_raw = None
+    access_token_hash = None
+    if current_user is None:
+        access_token_raw = uuid.uuid4().hex
+        access_token_hash = hashlib.sha256(access_token_raw.encode()).hexdigest()
 
-    return {
-        "task_id": task.id,
+    async with async_session_factory() as db:
+        db_task = ProofreadTask(
+            task_id=task_uuid,
+            document_id=request.file_id,
+            owner_kind=owner_kind,
+            owner_user_id=current_user.id if current_user else None,
+            access_token_hash=access_token_hash,
+            status="PENDING",
+            progress=0,
+            message="任务排队中...",
+            result_json={
+                "domain": request.domain,
+                "config_id": request.config_id,
+                "check_types": request.check_types,
+            },
+        )
+        db.add(db_task)
+        await db.commit()
+        await db.refresh(db_task)
+        db_task_pk_id = db_task.id
+
+    # ---- 投递 Celery（只传 DB 主键，worker 自行加载全文） ----
+    try:
+        async_proofread_document.apply_async(
+            args=(db_task_pk_id,),
+            task_id=task_uuid,
+        )
+    except Exception as e:
+        logger.error(f"异步任务投递失败: {e}")
+        from sqlalchemy import select as sa_select
+        async with async_session_factory() as db:
+            db_task = (await db.execute(
+                sa_select(ProofreadTask).where(ProofreadTask.id == db_task_pk_id)
+            )).scalar_one_or_none()
+            if db_task:
+                db_task.status = "FAILURE"
+                db_task.error_code = "DISPATCH_FAILED"
+                db_task.message = "任务投递失败，请重试"
+                await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="任务队列暂时不可用，请稍后重试",
+        )
+
+    logger.info(f"异步校对任务已提交: task_id={task_uuid}, file={file_info['filename']}")
+
+    resp = {
+        "task_id": task_uuid,
         "message": "校对任务已提交，请通过 task_id 查询进度",
     }
+    if access_token_raw:
+        resp["access_token"] = access_token_raw
+    return resp
 
 
 @router.get("/download/{file_id}/{filename:path}", summary='签名下载：校验 HMAC 签名与有效期后返回上传目录内的文件')

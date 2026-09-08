@@ -17,6 +17,7 @@
           :auto-upload="false"
           :limit="1"
           :on-change="handleFileChange"
+          :on-remove="handleFileRemove"
           :on-exceed="() => ElMessage.warning('只能上传一个文件')"
           accept=".doc,.docx,.pdf,.txt"
         >
@@ -80,6 +81,9 @@
           <h3>{{ statusText }}</h3>
           <p class="processing-info">{{ processingInfo }}</p>
           <el-progress :percentage="progress" :stroke-width="8" style="width: 400px; max-width: 100%; margin-top: 16px;" />
+          <el-button type="danger" plain size="small" style="margin-top: 16px;" @click="handleCancel">
+            取消任务
+          </el-button>
         </div>
       </el-card>
     </div>
@@ -229,16 +233,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { sanitizeDocumentHtml } from '@/utils/sanitize'
 import {
   uploadDocumentApi,
-  documentProofreadApi,
   type DocumentUploadResponse,
   type DocumentProofreadResponse,
 } from '@/api/document'
-import { asyncDocumentProofreadApi, streamTaskStatus, type TaskStatus } from '@/api/tasks'
+import { asyncDocumentProofreadApi, streamTaskStatus, cancelTaskApi, type TaskStatus, type SubmitResponse } from '@/api/tasks'
 import { submitIssueFeedbackApi } from '@/api/proofread'
 import { getAvailableModelsApi, type AvailableModel } from '@/api/polish'
 
@@ -270,6 +273,10 @@ const uploading = ref(false)
 const proofreading = ref(false)
 const progress = ref(0)
 const processingInfo = ref('')
+const accessToken = ref('')
+const currentTaskId = ref('')
+const abortController = ref<AbortController | null>(null)
+const uploadRef = ref()
 
 // 校对模型选择（默认当前活跃模型）
 const modelOptions = ref<AvailableModel[]>([])
@@ -282,6 +289,62 @@ onMounted(async () => {
     const active = res.models.find(m => m.is_active)
     selectedModelId.value = active ? active.id : (res.models[0]?.id ?? null)
   } catch { /* 模型列表加载失败时用默认活跃模型 */ }
+
+  // 刷新恢复：如果有未完成的任务快照，继续轮询
+  const snap = loadSnapshot()
+  if (snap?.taskId) {
+    originalText.value = snap.originalText || ''
+    currentText.value = snap.originalText || ''
+    currentHtml.value = snap.currentHtml || ''
+    domain.value = snap.domain || 'general'
+    if (snap.configId) selectedModelId.value = snap.configId
+    resultFilename.value = snap.filename || ''
+    accessToken.value = snap.accessToken || ''
+    currentTaskId.value = snap.taskId
+
+    step.value = 'processing'
+    stepKey.value = 'proofread'
+    proofreading.value = true
+    progress.value = 50
+    processingInfo.value = '恢复连接中...'
+
+    abortController.value = new AbortController()
+
+    streamTaskStatus(snap.taskId, (status) => {
+      if (status.step) stepKey.value = status.step
+      if (status.progress) {
+        progress.value = Math.min(50 + Math.floor(status.progress * 0.5), 99)
+      }
+      if (status.message) processingInfo.value = status.message
+    }, {
+      accessToken: snap.accessToken,
+      signal: abortController.value?.signal,
+    }).then((taskResult) => {
+      const r = taskResult.result as any
+      if (!r || !r.issues) {
+        ElMessage.error('校对结果格式异常')
+        resetAll()
+        return
+      }
+      issues.value = r.issues.map((i: any) => ({ ...i, _accepted: false, _ignored: false }))
+      recordId.value = r.record_id ?? null
+      correctedDownloadUrl.value = r.corrected_download_url || ''
+      progress.value = 100
+      stepKey.value = 'save'
+      proofreading.value = false
+      step.value = 'result'
+      clearSnapshot()
+      ElMessage.info(`共发现 ${r.total_issues ?? r.issues.length} 个问题，请逐条审阅`)
+    }).catch((err) => {
+      if (err?.name === 'AbortError') return
+      ElMessage.error('恢复连接失败，请重试')
+      resetAll()
+    })
+  }
+})
+
+onUnmounted(() => {
+  abortController.value?.abort()
 })
 
 // 设置
@@ -400,9 +463,44 @@ function handleFileChange(file: any) {
   selectedFile.value = file.raw
 }
 
+function handleFileRemove() {
+  selectedFile.value = null
+}
+
+// sessionStorage 快照：刷新后恢复轮询
+const SESSION_KEY = 'textmirror_task_snapshot'
+
+interface TaskSnapshot {
+  taskId: string
+  fileId: string
+  filename: string
+  domain: string
+  configId?: number
+  accessToken?: string
+  originalText: string
+  currentHtml: string
+}
+
+function saveSnapshot(snap: TaskSnapshot) {
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(snap)) } catch { /* quota */ }
+}
+
+function clearSnapshot() {
+  try { sessionStorage.removeItem(SESSION_KEY) } catch { /* ignore */ }
+}
+
+function loadSnapshot(): TaskSnapshot | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+
 // 开始校对
 async function handleStartProofread() {
   if (!selectedFile.value) return
+
+  abortController.value = new AbortController()
 
   try {
     // 步骤1: 上传文件
@@ -422,42 +520,65 @@ async function handleStartProofread() {
     currentText.value = uploadRes.extracted_text
     currentHtml.value = uploadRes.extracted_html || ''
 
-    // 步骤2: 提交异步校对任务并订阅进度（SSE，失败自动回退同步接口）
+    // 步骤2: 提交异步校对任务并订阅进度（SSE，失败降级轮询）
     proofreading.value = true
     stepKey.value = 'proofread'
     progress.value = 50
 
-    let proofreadRes: DocumentProofreadResponse
+    let submitRes: SubmitResponse
     try {
-      const submitRes = await asyncDocumentProofreadApi({
+      submitRes = await asyncDocumentProofreadApi({
         file_id: uploadRes.file_id,
         domain: domain.value,
         config_id: selectedModelId.value ?? undefined,
       })
-      const taskResult: TaskStatus = await streamTaskStatus(submitRes.task_id, (status) => {
+    } catch (err: any) {
+      throw { kind: 'submit', cause: err }
+    }
+
+    accessToken.value = submitRes.access_token || ''
+    currentTaskId.value = submitRes.task_id
+
+    saveSnapshot({
+      taskId: submitRes.task_id,
+      fileId: uploadRes.file_id,
+      filename: uploadRes.filename,
+      domain: domain.value,
+      configId: selectedModelId.value ?? undefined,
+      accessToken: submitRes.access_token,
+      originalText: uploadRes.extracted_text,
+      currentHtml: uploadRes.extracted_html || '',
+    })
+
+    let taskResult: TaskStatus
+    try {
+      taskResult = await streamTaskStatus(submitRes.task_id, (status) => {
         if (status.step) stepKey.value = status.step
         if (status.progress) {
           progress.value = Math.min(50 + Math.floor(status.progress * 0.5), 99)
         }
         if (status.message) processingInfo.value = status.message
+      }, {
+        accessToken: submitRes.access_token,
+        signal: abortController.value?.signal,
       })
-      const r = taskResult.result as any
-      if (!r || !r.issues) throw new Error('task_result_invalid')
-      proofreadRes = {
-        filename: r.filename || uploadRes.filename,
-        issues: r.issues,
-        total_issues: r.total_issues ?? r.issues.length,
-        corrected_download_url: r.corrected_download_url || '',
-        record_id: r.record_id ?? undefined,
-      } as DocumentProofreadResponse
-    } catch {
-      // 异步/SSE 通道不可用时回退同步校对
-      proofreadRes = await documentProofreadApi({
-        file_id: uploadRes.file_id,
-        domain: domain.value,
-        config_id: selectedModelId.value ?? undefined,
-      })
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return
+      throw { kind: 'transport', cause: err }
     }
+
+    const r = taskResult.result as any
+    if (!r || !r.issues) {
+      throw { kind: 'invalid_result' }
+    }
+
+    const proofreadRes: DocumentProofreadResponse = {
+      filename: r.filename || uploadRes.filename,
+      issues: r.issues,
+      total_issues: r.total_issues ?? r.issues.length,
+      corrected_download_url: r.corrected_download_url || '',
+      record_id: r.record_id ?? undefined,
+    } as DocumentProofreadResponse
 
     // 保存结果
     recordId.value = proofreadRes.record_id ?? null
@@ -473,6 +594,7 @@ async function handleStartProofread() {
     stepKey.value = 'save'
     proofreading.value = false
     step.value = 'result'
+    clearSnapshot()
 
     if (proofreadRes.total_issues === 0) {
       ElMessage.success('文档没有发现任何问题')
@@ -480,11 +602,46 @@ async function handleStartProofread() {
       ElMessage.info(`共发现 ${proofreadRes.total_issues} 个问题，请逐条审阅`)
     }
   } catch (e: any) {
-    step.value = 'upload'
-    uploading.value = false
     proofreading.value = false
-    progress.value = 0
+    uploading.value = false
+
+    if (e?.kind === 'submit') {
+      processingInfo.value = '任务提交失败，请重试'
+      step.value = 'upload'
+      progress.value = 0
+    } else if (e?.kind === 'transport') {
+      processingInfo.value = '连接中断，请重试'
+      step.value = 'upload'
+      progress.value = 0
+    } else if (e?.kind === 'invalid_result') {
+      ElMessage.error('校对结果格式异常，请重试')
+      step.value = 'upload'
+      progress.value = 0
+    } else if (e?.message === '任务执行失败' || e?.cause?.message === '任务执行失败') {
+      ElMessage.error('校对任务执行失败，请重试')
+      step.value = 'upload'
+      progress.value = 0
+    } else {
+      step.value = 'upload'
+      progress.value = 0
+    }
   }
+}
+
+// 取消任务
+async function handleCancel() {
+  if (!currentTaskId.value) return
+  try {
+    await cancelTaskApi(currentTaskId.value, accessToken.value || undefined)
+    ElMessage.info('任务已取消')
+  } catch {
+    ElMessage.warning('取消请求发送失败')
+  }
+  abortController.value?.abort()
+  proofreading.value = false
+  step.value = 'upload'
+  progress.value = 0
+  clearSnapshot()
 }
 
 // 审校建议反馈上报（fire-and-forget：失败不打扰用户）
@@ -645,7 +802,9 @@ function handleExportReport() {
 
 // 重置
 function resetAll() {
+  abortController.value?.abort()
   step.value = 'upload'
+  stepKey.value = 'upload'
   selectedFile.value = null
   originalText.value = ''
   currentText.value = ''
@@ -654,7 +813,14 @@ function resetAll() {
   correctedDownloadUrl.value = ''
   issues.value = []
   progress.value = 0
+  processingInfo.value = ''
   filterType.value = ''
+  recordId.value = null
+  accessToken.value = ''
+  currentTaskId.value = ''
+  abortController.value = null
+  clearSnapshot()
+  uploadRef.value?.clearFiles()
 }
 </script>
 

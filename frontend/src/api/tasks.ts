@@ -1,5 +1,8 @@
 /**
  * TextMirror 异步任务 API
+ *
+ * 轮询：递归 setTimeout 单飞 + 指数退避 + AbortSignal + 总 deadline
+ * SSE：fetch + ReadableStream，支持 Authorization 头 + access_token 查询参数
  */
 import request from '@/utils/request'
 
@@ -13,9 +16,17 @@ export interface TaskStatus {
   error?: string
 }
 
-/** 查询任务状态 */
-export function getTaskStatusApi(taskId: string): Promise<TaskStatus> {
-  return request.get(`/tasks/${taskId}`)
+export interface SubmitResponse {
+  task_id: string
+  message: string
+  access_token?: string
+}
+
+/** 查询任务状态（支持游客 access_token） */
+export function getTaskStatusApi(taskId: string, accessToken?: string): Promise<TaskStatus> {
+  const params: Record<string, string> = {}
+  if (accessToken) params.access_token = accessToken
+  return request.get(`/tasks/${taskId}`, { params })
 }
 
 /** 提交异步文档校对 */
@@ -24,73 +35,171 @@ export function asyncDocumentProofreadApi(data: {
   check_types?: string[]
   domain?: string
   config_id?: number
-}): Promise<{ task_id: string; message: string }> {
+}): Promise<SubmitResponse> {
   return request.post('/document/proofread/async', data)
 }
 
+/** 取消任务 */
+export function cancelTaskApi(taskId: string, accessToken?: string): Promise<void> {
+  const params: Record<string, string> = {}
+  if (accessToken) params.access_token = accessToken
+  return request.post(`/tasks/${taskId}/cancel`, null, { params })
+}
+
+const TERMINAL_STATUSES = new Set(['SUCCESS', 'FAILURE', 'REVOKED', 'CANCELLED'])
+
 /**
- * 轮询任务状态，直到完成或失败
- * @param taskId 任务ID
- * @param onProgress 进度回调
- * @param interval 轮询间隔（毫秒）
+ * 轮询任务状态（递归 setTimeout，单飞 + 指数退避）
  */
 export function pollTaskStatus(
   taskId: string,
   onProgress?: (status: TaskStatus) => void,
-  interval = 2000,
+  options: {
+    accessToken?: string
+    signal?: AbortSignal
+    initialInterval?: number
+    maxInterval?: number
+    deadline?: number
+  } = {},
 ): Promise<TaskStatus> {
+  const {
+    accessToken,
+    signal,
+    initialInterval = 1000,
+    maxInterval = 5000,
+    deadline = 30 * 60 * 1000,
+  } = options
+
   return new Promise((resolve, reject) => {
-    const timer = setInterval(async () => {
-      try {
-        const status = await getTaskStatusApi(taskId)
+    const startTime = Date.now()
+    let interval = initialInterval
+    let inFlight = false
+
+    function tick() {
+      if (signal?.aborted) {
+        reject(new DOMException('Aborted', 'AbortError'))
+        return
+      }
+      if (Date.now() - startTime > deadline) {
+        reject(new Error('任务轮询超时'))
+        return
+      }
+      if (inFlight) {
+        setTimeout(tick, 200)
+        return
+      }
+
+      inFlight = true
+      getTaskStatusApi(taskId, accessToken).then((status) => {
+        inFlight = false
         onProgress?.(status)
 
-        if (status.status === 'SUCCESS') {
-          clearInterval(timer)
-          resolve(status)
-        } else if (status.status === 'FAILURE') {
-          clearInterval(timer)
-          reject(new Error(status.error || '任务执行失败'))
+        if (TERMINAL_STATUSES.has(status.status)) {
+          if (status.status === 'SUCCESS') {
+            resolve(status)
+          } else {
+            reject(new Error(status.error || '任务执行失败'))
+          }
+          return
         }
-      } catch (err) {
-        clearInterval(timer)
-        reject(err)
-      }
-    }, interval)
+
+        interval = Math.min(interval * 1.5, maxInterval)
+        setTimeout(tick, interval)
+      }).catch((err) => {
+        inFlight = false
+        if (err?.name === 'AbortError') {
+          reject(err)
+          return
+        }
+        interval = Math.min(interval * 2, maxInterval)
+        setTimeout(tick, interval)
+      })
+    }
+
+    tick()
   })
 }
 
 /**
- * SSE 订阅任务状态，直到完成或失败
+ * SSE 订阅任务状态（fetch + ReadableStream）
  * 连接失败时自动降级为轮询
  */
 export function streamTaskStatus(
   taskId: string,
   onProgress?: (status: TaskStatus) => void,
+  options: {
+    accessToken?: string
+    signal?: AbortSignal
+  } = {},
 ): Promise<TaskStatus> {
+  const { accessToken, signal } = options
+
   return new Promise((resolve, reject) => {
     const token = localStorage.getItem('access_token') || ''
-    const url = `/api/v1/tasks/${taskId}/stream${token ? `?token=${encodeURIComponent(token)}` : ''}`
-    const es = new EventSource(url)
+    const params = new URLSearchParams()
+    if (token) params.set('token', token)
+    if (accessToken) params.set('access_token', accessToken)
 
-    const cleanup = () => es.close()
-    es.onmessage = (evt) => {
-      try {
-        const status: TaskStatus = JSON.parse(evt.data)
-        onProgress?.(status)
-        if (status.status === 'SUCCESS') {
-          cleanup()
-          resolve(status)
-        } else if (status.status === 'FAILURE' || status.status === 'REVOKED') {
-          cleanup()
-          reject(new Error(status.error || '任务执行失败'))
+    const url = `/api/v1/tasks/${taskId}/stream${params.toString() ? `?${params}` : ''}`
+
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+
+    const ctrl = new AbortController()
+    const onAbort = () => ctrl.abort()
+    signal?.addEventListener('abort', onAbort)
+
+    fetch(url, { headers, signal: ctrl.signal })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`SSE 连接失败: ${response.status}`)
         }
-      } catch { /* 跳过非法事件 */ }
-    }
-    es.onerror = () => {
-      // SSE 不可用（代理不支持等）时降级为轮询
-      cleanup()
-      pollTaskStatus(taskId, onProgress).then(resolve, reject)
-    }
+        const reader = response.body?.getReader()
+        if (!reader) throw new Error('ReadableStream 不可用')
+
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (line.startsWith(': ')) continue
+            if (!line.startsWith('data: ')) continue
+            const jsonStr = line.slice(6).trim()
+            if (!jsonStr) continue
+            try {
+              const status: TaskStatus = JSON.parse(jsonStr)
+              onProgress?.(status)
+              if (TERMINAL_STATUSES.has(status.status)) {
+                reader.cancel()
+                signal?.removeEventListener('abort', onAbort)
+                if (status.status === 'SUCCESS') {
+                  resolve(status)
+                } else {
+                  reject(new Error(status.error || '任务执行失败'))
+                }
+                return
+              }
+            } catch { /* 跳过非法事件 */ }
+          }
+        }
+
+        signal?.removeEventListener('abort', onAbort)
+        reject(new Error('SSE 流意外关闭'))
+      })
+      .catch((err) => {
+        signal?.removeEventListener('abort', onAbort)
+        if (err?.name === 'AbortError') {
+          reject(err)
+          return
+        }
+        pollTaskStatus(taskId, onProgress, { accessToken, signal }).then(resolve, reject)
+      })
   })
 }
