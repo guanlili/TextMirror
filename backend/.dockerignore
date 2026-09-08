@@ -1,4 +1,6 @@
 venv/
+.venv/
+.venv-test/
 __pycache__/
 *.pyc
 *.pyo
@@ -8,9 +10,12 @@ __pycache__/
 .git/
 .gitignore
 uploads/
+tests/
 test_*.py
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
+celerybeat-schedule*
 *.md
 *.bat
 *.log
