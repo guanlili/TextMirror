@@ -16,7 +16,6 @@ import traceback
 import urllib.request
 import urllib.error
 from typing import Optional, Dict, Any
-from urllib.parse import urlparse
 from loguru import logger
 
 from app.core.config import settings

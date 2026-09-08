@@ -168,7 +168,7 @@ async def get_audit_stats(
     """
     获取审计日志统计概览
     """
-    from datetime import date, timedelta
+    from datetime import date
     today = date.today()
 
     # 今日操作总数

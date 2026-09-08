@@ -215,7 +215,6 @@ async def get_dict_suggestions(
     已存在于全局词库/放行词中的自动排除。
     """
     from app.models.issue_feedback import IssueFeedback
-    from datetime import datetime
 
     # ---- 放行词候选：高忽略 + 零接受 ----
     rows = await db.execute(

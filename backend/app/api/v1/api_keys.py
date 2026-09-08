@@ -8,7 +8,6 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from loguru import logger
 
 from app.core.config import settings
 from app.core.database import get_db

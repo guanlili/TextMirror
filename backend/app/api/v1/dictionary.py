@@ -3,10 +3,9 @@ TextMirror 自定义词库 API
 仅登录用户可使用
 """
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete
-from loguru import logger
+from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user

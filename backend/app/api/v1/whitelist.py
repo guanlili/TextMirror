@@ -3,10 +3,9 @@ TextMirror 放行词（白名单）API
 仅登录用户可使用
 """
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from loguru import logger
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user

@@ -3,7 +3,7 @@ TextMirror 站点配置服务
 使用 Redis 存储站点级配置（平台名称、副标题、图标等）
 """
 import os
-from typing import Dict, Any
+from typing import Dict
 from loguru import logger
 
 from app.core.config import settings

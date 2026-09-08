@@ -4,7 +4,7 @@ TextMirror 自定义词库与放行词模型
 from typing import Optional
 from datetime import datetime
 
-from sqlalchemy import String, Integer, Text, Boolean, ForeignKey, DateTime
+from sqlalchemy import String, Integer, Boolean, ForeignKey, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel

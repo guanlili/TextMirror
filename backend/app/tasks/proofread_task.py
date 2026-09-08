@@ -6,6 +6,7 @@ import os
 import json
 import asyncio
 import threading
+from celery import signals
 from loguru import logger
 from sqlalchemy import select, update
 
@@ -98,7 +99,7 @@ def _get_sync_engine():
     return _sync_engine
 
 
-@celery.signals.worker_shutdown.connect
+@signals.worker_shutdown.connect
 def _dispose_sync_engine(**_kwargs) -> None:
     """worker 退出时释放连接池（prefork 主/子进程均会触发，无害幂等）"""
     global _sync_engine, _sync_engine_pid

@@ -8,7 +8,7 @@ import subprocess
 import shutil
 import tempfile
 from html import escape as html_escape
-from typing import List, Tuple
+from typing import List
 from loguru import logger
 
 import fitz  # PyMuPDF
@@ -127,7 +127,7 @@ def _extract_doc(file_path: str) -> str:
                 capture_output=True, text=True, timeout=30,
             )
             if result.returncode == 0 and result.stdout.strip():
-                logger.info(f"[doc提取] 使用 antiword 成功提取文本")
+                logger.info("[doc提取] 使用 antiword 成功提取文本")
                 return result.stdout.strip()
             else:
                 logger.warning(f"[doc提取] antiword 返回码={result.returncode} stderr={result.stderr[:200]}")
@@ -148,14 +148,14 @@ def _extract_doc(file_path: str) -> str:
                 base_name = os.path.splitext(os.path.basename(file_path))[0]
                 converted_path = os.path.join(tmp_dir, f"{base_name}.docx")
                 if os.path.exists(converted_path):
-                    logger.info(f"[doc提取] 使用 LibreOffice 转换成功")
+                    logger.info("[doc提取] 使用 LibreOffice 转换成功")
                     return _extract_docx(converted_path)
         except Exception as e:
             logger.warning(f"[doc提取] LibreOffice 转换异常: {e}")
 
     # 方式3：尝试用 python-docx 直接打开（部分 .doc 文件实际是 XML 格式）
     try:
-        logger.info(f"[doc提取] 尝试使用 python-docx 兼容模式")
+        logger.info("[doc提取] 尝试使用 python-docx 兼容模式")
         return _extract_docx(file_path)
     except Exception as e:
         logger.warning(f"[doc提取] python-docx 兼容模式失败: {e}")

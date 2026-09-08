@@ -35,7 +35,6 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 
 
 async def _check_login_lock(employee_id: str, client_ip: str) -> None:
-    from app.core.redis import get_redis
 
     try:
         redis = get_redis()
@@ -52,7 +51,6 @@ async def _check_login_lock(employee_id: str, client_ip: str) -> None:
 
 
 async def _record_login_failure(employee_id: str, client_ip: str) -> None:
-    from app.core.redis import get_redis
 
     try:
         redis = get_redis()
@@ -73,7 +71,6 @@ async def _record_login_failure(employee_id: str, client_ip: str) -> None:
 
 
 async def _clear_login_failures(employee_id: str, client_ip: str) -> None:
-    from app.core.redis import get_redis
 
     try:
         redis = get_redis()
