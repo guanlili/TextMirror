@@ -15,6 +15,42 @@ import fitz  # PyMuPDF
 from docx import Document as DocxDocument
 from docx.shared import RGBColor
 
+# CSS 值白名单：DOCX 属性值会进入 HTML style 属性，直接拼接会被
+# 恶意字体名（如 `" onmouseover="alert(1)`）逃逸出属性并注入事件处理器
+_FONT_NAME_ALLOWED = re.compile(r"^[\w\u4e00-\u9fff \-\.]+$")
+_HEX_COLOR = re.compile(r"^[0-9A-Fa-f]{6}$")
+
+
+def _safe_css_font_family(name) -> str:
+    """字体名 → 安全的 font-family 值；不合白名单则丢弃该声明"""
+    if not name:
+        return ""
+    text = str(name).strip()
+    if not text or len(text) > 64 or not _FONT_NAME_ALLOWED.match(text):
+        return ""
+    return f"font-family:'{html_escape(text, quote=True)}'"
+
+
+def _safe_css_color(rgb) -> str:
+    """字体颜色 → 安全的 color 值；仅接受 6 位十六进制"""
+    if rgb is None:
+        return ""
+    text = str(rgb).strip()
+    if not _HEX_COLOR.match(text):
+        return ""
+    return f"color:#{text}"
+
+
+def _safe_css_length(prop: str, value, max_pt: float = 2000.0) -> str:
+    """长度类样式 → 安全的 pt 值；仅接受有限范围内的数值"""
+    try:
+        pt = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if pt != pt or pt <= 0 or pt > max_pt:  # NaN 或超范围
+        return ""
+    return f"{prop}:{pt:.1f}pt"
+
 
 def extract_text_from_file(file_path: str, file_ext: str) -> str:
     """
@@ -244,7 +280,9 @@ def _para_to_html(para) -> str:
     try:
         pf = para.paragraph_format
         if pf.first_line_indent and pf.first_line_indent.pt > 0:
-            styles.append(f'text-indent:{pf.first_line_indent.pt:.1f}pt')
+            decl = _safe_css_length('text-indent', pf.first_line_indent.pt)
+            if decl:
+                styles.append(decl)
     except Exception:
         pass
 
@@ -252,7 +290,9 @@ def _para_to_html(para) -> str:
     try:
         pf = para.paragraph_format
         if pf.left_indent and pf.left_indent.pt > 0:
-            styles.append(f'padding-left:{pf.left_indent.pt:.1f}pt')
+            decl = _safe_css_length('padding-left', pf.left_indent.pt)
+            if decl:
+                styles.append(decl)
     except Exception:
         pass
 
@@ -260,9 +300,13 @@ def _para_to_html(para) -> str:
     try:
         pf = para.paragraph_format
         if pf.space_before and pf.space_before.pt:
-            styles.append(f'margin-top:{pf.space_before.pt:.1f}pt')
+            decl = _safe_css_length('margin-top', pf.space_before.pt)
+            if decl:
+                styles.append(decl)
         if pf.space_after and pf.space_after.pt:
-            styles.append(f'margin-bottom:{pf.space_after.pt:.1f}pt')
+            decl = _safe_css_length('margin-bottom', pf.space_after.pt)
+            if decl:
+                styles.append(decl)
     except Exception:
         pass
 
@@ -271,9 +315,13 @@ def _para_to_html(para) -> str:
         pf = para.paragraph_format
         if pf.line_spacing is not None:
             if isinstance(pf.line_spacing, (int, float)):
-                styles.append(f'line-height:{pf.line_spacing}')
+                spacing = float(pf.line_spacing)
+                if 0 < spacing <= 10:
+                    styles.append(f'line-height:{spacing:.2f}')
             elif hasattr(pf.line_spacing, 'pt') and pf.line_spacing.pt:
-                styles.append(f'line-height:{pf.line_spacing.pt:.1f}pt')
+                decl = _safe_css_length('line-height', pf.line_spacing.pt)
+                if decl:
+                    styles.append(decl)
     except Exception:
         pass
 
@@ -282,7 +330,7 @@ def _para_to_html(para) -> str:
     if not inline_html:
         inline_html = html_escape(para.text)
 
-    style_attr = f' style="{";".join(styles)}"' if styles else ''
+    style_attr = f' style="{html_escape(";".join(styles), quote=True)}"' if styles else ''
     return f'<{tag}{style_attr}>{inline_html}</{tag}>'
 
 
@@ -297,27 +345,32 @@ def _runs_to_html(runs) -> str:
         # HTML 转义
         text = html_escape(text)
 
-        # 收集行内样式
+        # 收集行内样式（值一律走白名单，防止逃逸 style 属性注入事件处理器）
         run_styles = []
 
         # 字体名称
         try:
-            if run.font.name:
-                run_styles.append(f'font-family:"{run.font.name}"')
+            decl = _safe_css_font_family(run.font.name)
+            if decl:
+                run_styles.append(decl)
         except Exception:
             pass
 
         # 字号
         try:
             if run.font.size and run.font.size.pt:
-                run_styles.append(f'font-size:{run.font.size.pt:.1f}pt')
+                decl = _safe_css_length("font-size", run.font.size.pt, max_pt=200.0)
+                if decl:
+                    run_styles.append(decl)
         except Exception:
             pass
 
         # 字体颜色
         try:
             if run.font.color and run.font.color.rgb:
-                run_styles.append(f'color:#{run.font.color.rgb}')
+                decl = _safe_css_color(run.font.color.rgb)
+                if decl:
+                    run_styles.append(decl)
         except Exception:
             pass
 
@@ -351,7 +404,7 @@ def _runs_to_html(runs) -> str:
 
         # 包裹行内样式
         if run_styles:
-            style_str = ';'.join(run_styles)
+            style_str = html_escape(';'.join(run_styles), quote=True)
             text = f'<span style="{style_str}">{text}</span>'
 
         parts.append(text)

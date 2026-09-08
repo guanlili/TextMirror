@@ -451,6 +451,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { sanitizeDocumentHtml } from '@/utils/sanitize'
 import { textProofreadApi, proofreadCompareApi, submitIssueFeedbackApi, type ProofreadIssue, type ProofreadCompareResponse } from '@/api/proofread'
 import { getAvailableModelsApi, type AvailableModel } from '@/api/polish'
 
@@ -769,7 +770,7 @@ const highlightedText = computed(() => {
     const mark = `<mark data-issue-idx="${globalIdx}" style="background:${color};padding:2px 3px;border-radius:3px;cursor:pointer;transition:all .2s;${border}" title="[${typeLabel(issue.type)}] ${escapeHtml(issue.suggestion)}">${escaped}</mark>`
     text = text.replace(escaped, mark)
   }
-  return text.replace(/\n/g, '<br/>')
+  return sanitizeDocumentHtml(text.replace(/\n/g, '<br/>'))
 })
 
 function severityHighlight(severity: string): string {

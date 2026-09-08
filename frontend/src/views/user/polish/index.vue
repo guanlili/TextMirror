@@ -263,6 +263,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
+import { sanitizeMarkdownHtml } from '@/utils/sanitize'
 import {
   getPolishStylesApi,
   getAvailableModelsApi,
@@ -473,7 +474,7 @@ async function handleCompare() {
 /** Markdown 渲染 */
 function renderMarkdown(content: string): string {
   if (!content) return ''
-  return marked.parse(content) as string
+  return sanitizeMarkdownHtml(marked.parse(content) as string)
 }
 
 /** 流式润色核心：返回是否成功 */
