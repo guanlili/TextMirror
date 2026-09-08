@@ -85,6 +85,16 @@ async def get_current_user(
             detail="用户已被禁用",
         )
 
+    role_code = payload.get("role_code")
+    if not role_code and user.role_id is not None:
+        from app.models.role import Role
+        role_result = await db.execute(select(Role).where(Role.id == user.role_id))
+        role = role_result.scalar_one_or_none()
+        if role is not None:
+            role_code = role.code
+    if role_code:
+        setattr(user, "role_code", role_code)
+
     return user
 
 

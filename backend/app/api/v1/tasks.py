@@ -17,7 +17,12 @@ from app.core.dependencies import get_current_user_optional
 router = APIRouter(prefix="/tasks", tags=["异步任务"])
 
 
-async def _load_task_with_auth(task_id: str, current_user, access_token: str = None):
+async def _load_task_with_auth(
+    task_id: str,
+    current_user,
+    access_token: str = None,
+    is_super_admin: bool = False,
+):
     """
     加载 proofread_tasks 记录并校验归属。
     支持三种认证：登录用户（JWT）、游客（access_token SHA-256）、超管。
@@ -35,10 +40,12 @@ async def _load_task_with_auth(task_id: str, current_user, access_token: str = N
 
         # 超管直通
         if current_user is not None:
-            from app.models.role import Role
-            role_result = await db.execute(select(Role).where(Role.id == current_user.role_id))
-            role = role_result.scalar_one_or_none()
-            if role and role.code == "super_admin":
+            if not is_super_admin:
+                from app.models.role import Role
+                role_result = await db.execute(select(Role).where(Role.id == current_user.role_id))
+                role = role_result.scalar_one_or_none()
+                is_super_admin = bool(role and role.code == "super_admin")
+            if is_super_admin:
                 return db_task
 
     # 按 owner_kind 校验
@@ -107,7 +114,13 @@ async def get_task_status(
     查询异步任务状态（DB 驱动）。
     登录用户通过 JWT 认证，游客通过 access_token 认证。
     """
-    db_task = await _load_task_with_auth(task_id, current_user, access_token)
+    is_super_admin = bool(current_user and getattr(current_user, "role_code", None) == "super_admin")
+    db_task = await _load_task_with_auth(
+        task_id,
+        current_user,
+        access_token,
+        is_super_admin=is_super_admin,
+    )
     if db_task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
 
@@ -130,19 +143,31 @@ async def stream_task_status(
     - 登录用户：Authorization header 或 ?token=
     - 游客：?access_token=
     """
+    role_code = None
     if current_user is None and token:
         from app.core.security import decode_token
         from app.models.user import User
         try:
             payload = decode_token(token)
             if payload and payload.get("type") == "access":
-                async with async_session_factory() as db:
-                    res = await db.execute(select(User).where(User.id == int(payload.get("sub"))))
-                    current_user = res.scalar_one_or_none()
+                role_code = payload.get("role_code")
+                if current_user is None:
+                    async with async_session_factory() as db:
+                        res = await db.execute(select(User).where(User.id == int(payload.get("sub"))))
+                        current_user = res.scalar_one_or_none()
         except Exception:
             current_user = None
 
-    db_task = await _load_task_with_auth(task_id, current_user, access_token)
+    if current_user is not None and role_code is None:
+        role_code = getattr(current_user, "role_code", None)
+    is_super_admin = role_code == "super_admin"
+
+    db_task = await _load_task_with_auth(
+        task_id,
+        current_user,
+        access_token,
+        is_super_admin=is_super_admin,
+    )
     if db_task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
 
@@ -153,36 +178,37 @@ async def stream_task_status(
         idle_seconds = 0.0
         heartbeat_seconds = 0.0
         interval = 1.0
-        while idle_seconds < 600:
-            if await http_request.is_disconnected():
-                return
+        async with async_session_factory() as db:
+            while idle_seconds < 600:
+                if await http_request.is_disconnected():
+                    return
 
-            async with async_session_factory() as db:
+                db.expire_all()
                 result = await db.execute(
                     select(ProofreadTask).where(ProofreadTask.task_id == task_id)
                 )
                 fresh_task = result.scalar_one_or_none()
 
-            payload = _build_status_payload(task_id, fresh_task)
-            changed = payload != last_payload
-            if changed:
-                last_payload = payload
-                idle_seconds = 0.0
-                heartbeat_seconds = 0.0
-                interval = 1.0
-                yield f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
-                if payload["status"] in ("SUCCESS", "FAILURE", "REVOKED", "CANCELLED"):
-                    return
-            else:
-                idle_seconds += interval
-                heartbeat_seconds += interval
-                if heartbeat_seconds >= 15:
+                payload = _build_status_payload(task_id, fresh_task)
+                changed = payload != last_payload
+                if changed:
+                    last_payload = payload
+                    idle_seconds = 0.0
                     heartbeat_seconds = 0.0
-                    yield ": heartbeat\n\n"
+                    interval = 1.0
+                    yield f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+                    if payload["status"] in ("SUCCESS", "FAILURE", "REVOKED", "CANCELLED"):
+                        return
+                else:
+                    idle_seconds += interval
+                    heartbeat_seconds += interval
+                    if heartbeat_seconds >= 15:
+                        heartbeat_seconds = 0.0
+                        yield ": heartbeat\n\n"
 
-            await asyncio.sleep(interval)
-            if not changed:
-                interval = min(interval + 1.0, 5.0)
+                await asyncio.sleep(interval)
+                if not changed:
+                    interval = min(interval + 1.0, 5.0)
 
     return StreamingResponse(
         event_stream(),
@@ -206,7 +232,13 @@ async def cancel_task(
     from app.models.proofread_task import ProofreadTask
     from datetime import datetime, timezone
 
-    db_task = await _load_task_with_auth(task_id, current_user, access_token)
+    is_super_admin = bool(current_user and getattr(current_user, "role_code", None) == "super_admin")
+    db_task = await _load_task_with_auth(
+        task_id,
+        current_user,
+        access_token,
+        is_super_admin=is_super_admin,
+    )
     if db_task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
 

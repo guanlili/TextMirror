@@ -139,7 +139,16 @@ async def login(request: LoginRequest, http_request: Request, db: AsyncSession =
         )
 
     # 生成 Token
-    access_token = create_access_token(subject=user.id)
+    role_code = None
+    if user.role_id is not None:
+        result = await db.execute(select(Role).where(Role.id == user.role_id))
+        role = result.scalar_one_or_none()
+        if role is not None:
+            role_code = role.code
+    access_token = create_access_token(
+        subject=user.id,
+        extra_data={"role_code": role_code} if role_code else None,
+    )
     refresh_token = create_refresh_token(subject=user.id)
 
     # 登录成功，清除失败计数
@@ -257,7 +266,16 @@ async def refresh_token(
             detail="用户不存在或已被禁用",
         )
 
-    access_token = create_access_token(subject=user.id)
+    role_code = None
+    if user.role_id is not None:
+        result = await db.execute(select(Role).where(Role.id == user.role_id))
+        role = result.scalar_one_or_none()
+        if role is not None:
+            role_code = role.code
+    access_token = create_access_token(
+        subject=user.id,
+        extra_data={"role_code": role_code} if role_code else None,
+    )
     refresh_token = create_refresh_token(subject=user.id)
 
     return LoginResponse(

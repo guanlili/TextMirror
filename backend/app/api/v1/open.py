@@ -529,6 +529,18 @@ async def open_submit_document(
             select(ProofreadTask).where(ProofreadTask.idempotency_key == scoped_idempotency_key)
         )).scalar_one_or_none()
         if existing:
+            if (
+                existing.status == "FAILURE"
+                and existing.error_code == "DISPATCH_FAILED"
+                and existing.started_at is None
+            ):
+                try:
+                    async_proofread_document.apply_async(
+                        args=(existing.id,),
+                        task_id=existing.task_id,
+                    )
+                except Exception as e:
+                    logger.warning(f"[OpenAPI] 幂等重试投递失败: {e}")
             return await _existing_submit_response(db, existing)
 
     parsed_check_types = _parse_form_check_types(check_types)

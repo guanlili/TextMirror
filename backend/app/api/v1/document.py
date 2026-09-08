@@ -453,6 +453,18 @@ async def document_proofread_async(
                 select(ProofreadTask).where(ProofreadTask.idempotency_key == scoped_idempotency_key)
             )).scalar_one_or_none()
             if existing:
+                if (
+                    existing.status == "FAILURE"
+                    and existing.error_code == "DISPATCH_FAILED"
+                    and existing.started_at is None
+                ):
+                    try:
+                        async_proofread_document.apply_async(
+                            args=(existing.id,),
+                            task_id=existing.task_id,
+                        )
+                    except Exception as e:
+                        logger.warning(f"幂等重试投递失败: {e}")
                 return _build_async_task_response(existing)
 
     if current_user is None:
