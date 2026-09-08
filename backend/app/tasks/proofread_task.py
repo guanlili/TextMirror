@@ -148,6 +148,7 @@ class ProofreadDocumentTask(celery_app.Task):
         用户取消、集成方指定无效配置等不重试场景也不退款。
         """
         from sqlalchemy.orm import Session
+
         from app.models.proofread_task import ProofreadTask
 
         if not args:
