@@ -2,7 +2,7 @@
 # starlette 显式 pin：原先仅由 fastapi 间接约束，重建镜像可能解析到不同版本
 fastapi==0.141.1
 starlette==1.6.0
-uvicorn[standard]==0.34.0
+uvicorn[standard]==0.52.4
 # 0.0.18 存在 multipart DoS 与 Content-Disposition 参数走私
 python-multipart==0.0.32
 
@@ -23,7 +23,7 @@ redis[hiredis]==5.2.1
 PyJWT==2.13.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
-cryptography==50.0.0
+cryptography==50.0.1
 
 # Logging
 loguru==0.7.3
@@ -36,5 +36,5 @@ python-docx==1.1.2
 PyMuPDF==1.25.1
 
 # Async Tasks
-celery[redis]==5.4.0
+celery[redis]==5.6.3
 psycopg2-binary==2.9.12
