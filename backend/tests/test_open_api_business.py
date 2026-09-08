@@ -72,7 +72,7 @@ async def api_key(db, user):
 async def llm_config(db):
     # 全局只能有一个活跃配置，先关闭历史测试留下的活跃配置
     from sqlalchemy import update
-    await db.execute(update(LLMConfig).where(LLMConfig.is_active == True).values(is_active=False))
+    await db.execute(update(LLMConfig).where(LLMConfig.is_active.is_(True)).values(is_active=False))
     config = LLMConfig(
         name=f"test-config-{_uuid.uuid4().hex[:8]}",
         provider="openai",

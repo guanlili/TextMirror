@@ -14,6 +14,7 @@ os.environ["DEBUG"] = "true"
 os.environ["UPLOAD_DIR"] = f"{_TMP_DIR}/uploads"
 
 import asyncio  # noqa: E402
+
 import fakeredis.aioredis  # noqa: E402
 import httpx  # noqa: E402
 import pytest  # noqa: E402
@@ -81,6 +82,7 @@ def _disable_audit_log_background_writes(monkeypatch):
 def _patch_run_async_for_eager_celery(monkeypatch):
     """Celery eager 模式下测试已在事件循环中，_run_async 需在新线程运行协程。"""
     import threading
+
     from app.tasks import proofread_task as task_module
 
     def _run_in_thread(coro):
