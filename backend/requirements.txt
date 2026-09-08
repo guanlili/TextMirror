@@ -1,7 +1,10 @@
 # Web Framework
-fastapi==0.115.6
+# starlette 显式 pin：原先仅由 fastapi 间接约束，重建镜像可能解析到不同版本
+fastapi==0.141.1
+starlette==1.6.0
 uvicorn[standard]==0.34.0
-python-multipart==0.0.18
+# 0.0.18 存在 multipart DoS 与 Content-Disposition 参数走私
+python-multipart==0.0.32
 
 # Database ORM
 sqlalchemy[asyncio]==2.0.36
@@ -16,10 +19,11 @@ pydantic-settings==2.7.1
 redis[hiredis]==5.2.1
 
 # Auth & Security
-python-jose[cryptography]==3.3.0
+# 由 python-jose 换为 PyJWT：前者依赖链中的 ecdsa 漏洞无可用修复版本
+PyJWT==2.13.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
-cryptography==44.0.0
+cryptography==50.0.0
 
 # Logging
 loguru==0.7.3

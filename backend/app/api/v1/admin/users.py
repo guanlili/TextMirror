@@ -246,9 +246,12 @@ async def delete_user(
         await db.execute(
             sql_delete(WhitelistWord).where(WhitelistWord.user_id == user_id)
         )
-        # 5. 上传文档记录：user_id 置 NULL（保留文档记录）
+        # 5. 上传文档记录：user_id 置 NULL 并标记 owner_kind=legacy
+        #    （只置 NULL 会被归属校验当成游客文档放行，等于删号后文档对所有人开放）
         await db.execute(
-            sql_update(UploadedDocument).where(UploadedDocument.user_id == user_id).values(user_id=None)
+            sql_update(UploadedDocument)
+            .where(UploadedDocument.user_id == user_id)
+            .values(user_id=None, owner_kind="legacy")
         )
 
         # 先 flush 关联清理结果，后续用原生 SQL 删除用户避免触发 ORM 关系自动加载

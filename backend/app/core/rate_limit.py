@@ -147,6 +147,37 @@ def _api_key_daily_redis_key(api_key) -> str:
     return f"textmirror:apikey_daily:{api_key.id}:{today}"
 
 
+async def check_upload_rate_limit(request: Request, user=None) -> None:
+    """
+    上传频率限制（固定分钟窗口）。
+    上传本身此前不受任何限制，可反复上传只触发解析与落盘，从而绕开按校对次数
+    计费的配额，并放大磁盘与 CPU 消耗。登录用户按 id 计，游客按 IP 计。
+    Redis 异常不阻塞请求（与游客限流一致的降级策略）。
+    """
+    limit = settings.UPLOAD_MAX_PER_MINUTE
+    if limit <= 0:
+        return
+
+    subject = f"user:{user.id}" if user is not None else f"ip:{_get_client_ip(request)}"
+    try:
+        redis = get_redis()
+        minute = datetime.now().strftime("%Y%m%d%H%M")
+        key = f"textmirror:upload_rpm:{subject}:{minute}"
+        count = await redis.incr(key)
+        if count == 1:
+            await redis.expire(key, 120)
+        if count > limit:
+            logger.warning(f"上传频率超限: {subject}, count={count}")
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"上传过于频繁：每分钟最多 {limit} 次，请稍后重试",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"上传限流 Redis 异常: {e}")
+
+
 async def check_api_key_rpm(api_key) -> None:
     """
     API Key 维度 RPM 限流（固定分钟窗口，settings.API_KEY_RPM_LIMIT）

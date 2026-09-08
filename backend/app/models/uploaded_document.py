@@ -3,8 +3,9 @@ TextMirror 上传文档记录模型
 记录用户上传的所有文档，供后台管理查询和下载
 """
 from typing import Optional
+from datetime import datetime
 
-from sqlalchemy import String, Integer, Text, ForeignKey
+from sqlalchemy import String, Integer, Text, ForeignKey, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
@@ -35,6 +36,10 @@ class UploadedDocument(BaseModel):
     user_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=True, comment="上传者用户ID(游客为null)"
     )
+    owner_kind: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="user", index=True,
+        comment="归属类型: user=登录用户 / guest=游客 / legacy=上传者已删号或来源不可考（拒绝访问）"
+    )
     username: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, comment="上传者姓名(冗余存储便于查询)"
     )
@@ -43,6 +48,9 @@ class UploadedDocument(BaseModel):
     )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="uploaded", comment="状态: uploaded/proofread/deleted"
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="删除时间(软删除标记时间)"
     )
 
     def __repr__(self):

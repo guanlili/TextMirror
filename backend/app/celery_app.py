@@ -35,6 +35,11 @@ celery_app.conf.update(
             "schedule": crontab(hour=3, minute=30),  # Asia/Shanghai 每日 03:30
             "args": (90,),
         },
+        # 上传目录存储回收：已删记录残留、孤儿目录、过期游客文件
+        "clean-uploaded-documents-daily": {
+            "task": "maintenance.clean_uploaded_documents",
+            "schedule": crontab(hour=4, minute=0),  # 错开审计清理，避免同时占用连接
+        },
     },
 )
 

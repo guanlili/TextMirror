@@ -231,6 +231,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { sanitizeDocumentHtml } from '@/utils/sanitize'
 import {
   uploadDocumentApi,
   documentProofreadApi,
@@ -327,7 +328,7 @@ const highlightedText = computed(() => {
     const markHtml = `<mark class="highlight-mark" style="background:${color};${border}padding:1px 3px;border-radius:2px;cursor:pointer;" title="[${typeLabel(issue.type)}] ${escapeHtml(issue.suggestion)}">${escapeHtml(issue.original)}</mark>`
     html = replaceTextInHtml(html, issue.original, markHtml)
   }
-  return html
+  return sanitizeDocumentHtml(html)
 })
 
 // HTML 工具函数：仅在文本节点中替换，跳过 HTML 标签

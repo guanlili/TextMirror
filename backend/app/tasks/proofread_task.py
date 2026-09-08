@@ -173,6 +173,105 @@ def async_proofread_document(
     }
 
 
+@celery_app.task(name="maintenance.clean_uploaded_documents")
+def clean_uploaded_documents():
+    """
+    定时回收上传目录的存储泄漏（由 celery beat 每日触发）。
+    处理三类：
+      1) 已软删除记录的残留目录（删除接口已即时清理，此处兜底历史数据与失败情形）
+      2) 无数据库记录的孤儿目录（超过 ORPHAN_DIR_MIN_AGE_HOURS，避免误删进行中的上传）
+      3) 超过 GUEST_FILE_RETENTION_DAYS 的游客文件（游客无历史入口，过期即可回收）
+    登录用户的文件不自动删除——保留策略属产品决策，此处仅统计磁盘缺失的记录数。
+    """
+    import os
+    import time
+    from sqlalchemy import create_engine, text as sa_text
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.upload import remove_upload_dir
+
+    upload_dir = os.path.abspath(settings.UPLOAD_DIR)
+    if not os.path.isdir(upload_dir):
+        logger.info("[定时清理] 上传目录不存在，跳过")
+        return {"skipped": True}
+
+    sync_url = settings.DATABASE_URL.replace("postgresql+asyncpg", "postgresql+psycopg2")
+    engine = create_engine(sync_url)
+    stats = {"deleted_records": 0, "orphan_dirs": 0, "expired_guest": 0, "missing_files": 0}
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(sa_text(
+                "SELECT file_id, owner_kind, status, created_at FROM uploaded_documents"
+            )).fetchall()
+
+        known = {r[0]: {"owner_kind": r[1], "status": r[2], "created_at": r[3]} for r in rows}
+
+        # 1) 已删除记录的残留目录
+        for file_id, info in known.items():
+            if info["status"] == "deleted" and os.path.isdir(os.path.join(upload_dir, file_id)):
+                remove_upload_dir(file_id)
+                stats["deleted_records"] += 1
+
+        # 3) 过期游客文件（同时把记录标记为 deleted，避免仍出现在后台列表）
+        retention = settings.GUEST_FILE_RETENTION_DAYS
+        if retention > 0:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=retention)
+            expired = [
+                fid for fid, info in known.items()
+                if info["owner_kind"] == "guest" and info["status"] != "deleted"
+                and info["created_at"] is not None
+                and _as_utc_naive_safe(info["created_at"]) < cutoff
+            ]
+            for file_id in expired:
+                remove_upload_dir(file_id)
+                stats["expired_guest"] += 1
+            if expired:
+                with engine.connect() as conn:
+                    conn.execute(
+                        sa_text(
+                            "UPDATE uploaded_documents SET status='deleted', deleted_at=NOW(), "
+                            "extracted_text=NULL WHERE file_id = ANY(:ids)"
+                        ),
+                        {"ids": expired},
+                    )
+                    conn.commit()
+
+        # 2) 孤儿目录（无任何数据库记录）
+        min_age = settings.ORPHAN_DIR_MIN_AGE_HOURS * 3600
+        now = time.time()
+        for name in os.listdir(upload_dir):
+            path = os.path.join(upload_dir, name)
+            if not os.path.isdir(path) or name == "icons" or name in known:
+                continue
+            try:
+                if now - os.path.getmtime(path) < min_age:
+                    continue
+            except OSError:
+                continue
+            remove_upload_dir(name)
+            stats["orphan_dirs"] += 1
+
+        # 统计磁盘缺失的有效记录（只观察不处理）
+        for file_id, info in known.items():
+            if info["status"] != "deleted" and not os.path.isdir(os.path.join(upload_dir, file_id)):
+                stats["missing_files"] += 1
+
+        logger.info(
+            f"[定时清理] 上传目录清理完成: 已删记录残留={stats['deleted_records']} "
+            f"孤儿目录={stats['orphan_dirs']} 过期游客文件={stats['expired_guest']} "
+            f"磁盘缺失记录={stats['missing_files']}"
+        )
+        return stats
+    finally:
+        engine.dispose()
+
+
+def _as_utc_naive_safe(dt):
+    """兼容 naive/aware datetime 的比较（历史列可能无时区）"""
+    from datetime import timezone as _tz
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=_tz.utc)
+
+
 @celery_app.task(name="maintenance.clean_old_audit_logs")
 def clean_old_audit_logs(retention_days: int = 90):
     """
