@@ -186,9 +186,6 @@ async def text_proofread_compare(
     多模型并发校对对比
     同一段文本用多个模型并发校对，返回各模型问题列表及交叉统计（共识/独有）
     """
-    import asyncio as _asyncio
-    import time as _time
-
     if current_user is None:
         await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
@@ -213,57 +210,15 @@ async def text_proofread_compare(
     timer = AuditTimer()
     timer.start()
 
-    async def _run_one(config):
-        t0 = _time.perf_counter()
-        try:
-            r = await proofread_text(
-                text=request.text,
-                    domain=request.domain,
-                config_id=config.id,
-                user_id=current_user.id if current_user else None,
-            )
-            return ModelProofreadResult(
-                config_id=config.id,
-                config_name=config.name,
-                model=config.model,
-                issues=r["issues"],
-                total_issues=r["total_issues"],
-                success=True,
-                elapsed_ms=int((_time.perf_counter() - t0) * 1000),
-            )
-        except Exception as e:
-            # 异常原文可能含密钥片段/内部路径：详情记日志，前端只给友好提示
-            logger.error(f"[对比校对] 模型 {config.name} 失败: {e}")
-            return ModelProofreadResult(
-                config_id=config.id,
-                config_name=config.name,
-                model=config.model,
-                success=False,
-                error=f"模型 {config.name} 调用失败，请检查该配置的密钥与模型名（详情见服务端日志）",
-                elapsed_ms=int((_time.perf_counter() - t0) * 1000),
-            )
-
-    items = await _asyncio.gather(*[_run_one(c) for c in configs.values()])
-    items = sorted(items, key=lambda i: request.config_ids.index(i.config_id))
-
-    # 交叉统计：按 original 文本对齐（成功模型 ≥2 才有意义）
-    ok_results = [i for i in items if i.success and i.issues]
-    consensus: List[str] = []
-    only_in: Dict[int, List[str]] = {}
-    if len([i for i in items if i.success]) >= 2:
-        # 每个 original 出现在哪些模型
-        owner_map: Dict[str, List[int]] = {}
-        for i in ok_results:
-            for iss in i.issues:
-                orig = (iss.original or "").strip()
-                if orig:
-                    owner_map.setdefault(orig, []).append(i.config_id)
-        for orig, owners in owner_map.items():
-            ok_ids = [i.config_id for i in items if i.success]
-            if len(set(owners)) == len(ok_ids):
-                consensus.append(orig)
-            elif len(set(owners)) == 1:
-                only_in.setdefault(owners[0], []).append(orig)
+    from app.services.model_compare import run_proofread_compare
+    raw_items, consensus, only_in = await run_proofread_compare(
+        text=request.text,
+        domain=request.domain,
+        config_ids=request.config_ids,
+        configs=configs,
+        user_id=current_user.id if current_user else None,
+    )
+    items = [ModelProofreadResult(**i) for i in raw_items]
 
     record_audit_log(
         http_request, "proofread_compare", user=current_user,

@@ -6,9 +6,8 @@ TextMirror 开放 API（对外稳定契约）
 import asyncio
 import json
 import os
-import time
 import uuid
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile, status
 from fastapi.exceptions import RequestValidationError
@@ -407,62 +406,22 @@ async def open_proofread_compare(
     if api_key is not None:
         audit_extra["api_key_id"] = api_key.id
 
-    async def _run_one(config):
-        t0 = time.perf_counter()
-        try:
-            r = await proofread_text(
-                text=request.text,
-                    domain=request.domain,
-                config_id=config.id,
-                user_id=user.id,
-            )
-            return OpenCompareModelResult(
-                config_id=config.id,
-                config_name=config.name,
-                model=config.model,
-                issues=r["issues"],
-                total_issues=r["total_issues"],
-                success=True,
-                elapsed_ms=int((time.perf_counter() - t0) * 1000),
-            )
-        except Exception as e:
-            # 异常原文可能含密钥片段/内部路径：详情记日志，调用方只给友好提示
-            logger.error(f"[OpenAPI对比] 模型 {config.name} 失败: {e}")
-            return OpenCompareModelResult(
-                config_id=config.id,
-                config_name=config.name,
-                model=config.model,
-                success=False,
-                error=f"模型 {config.name} 调用失败，请检查该配置的密钥与模型名（详情见服务端日志）",
-                elapsed_ms=int((time.perf_counter() - t0) * 1000),
-            )
-
-    items = await asyncio.gather(*[_run_one(c) for c in configs.values()])
-    items = sorted(items, key=lambda i: request.config_ids.index(i.config_id))
+    from app.services.model_compare import run_proofread_compare
+    raw_items, consensus, only_in = await run_proofread_compare(
+        text=request.text,
+        domain=request.domain,
+        config_ids=request.config_ids,
+        configs=configs,
+        user_id=user.id,
+        log_tag="OpenAPI对比",
+    )
+    items = [OpenCompareModelResult(**i) for i in raw_items]
 
     # 部分模型失败：失败模型退还密钥日配额（按成功数结算，失败的不计费）
     if api_key is not None:
         failed = sum(1 for i in items if not i.success)
         if failed > 0:
             await refund_api_key_daily_usage(api_key, failed)
-
-    # 交叉统计：按 original 文本对齐（成功模型 ≥2 才有意义）
-    ok_results = [i for i in items if i.success and i.issues]
-    consensus: List[str] = []
-    only_in: Dict[int, List[str]] = {}
-    if len([i for i in items if i.success]) >= 2:
-        owner_map: Dict[str, List[int]] = {}
-        for i in ok_results:
-            for iss in i.issues:
-                orig = (iss.original or "").strip()
-                if orig:
-                    owner_map.setdefault(orig, []).append(i.config_id)
-        for orig, owners in owner_map.items():
-            ok_ids = [i.config_id for i in items if i.success]
-            if len(set(owners)) == len(ok_ids):
-                consensus.append(orig)
-            elif len(set(owners)) == 1:
-                only_in.setdefault(owners[0], []).append(orig)
 
     record_audit_log(
         http_request, "api_proofread_compare", user=user,

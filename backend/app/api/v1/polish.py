@@ -79,11 +79,7 @@ async def text_polish(
         await check_user_quota(current_user, db)
 
     # 校验风格参数
-    if request.style not in POLISH_STYLES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的润色风格: {request.style}，可选: {', '.join(POLISH_STYLES.keys())}",
-        )
+    _require_style(request.style)
 
     timer = AuditTimer()
     timer.start()
@@ -192,17 +188,13 @@ async def text_polish_stream(
         async with async_session_factory() as db:
             await check_user_quota(current_user, db)
 
-    if request.style not in POLISH_STYLES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的润色风格: {request.style}",
-        )
+    style_config = _require_style(request.style)
 
     timer = AuditTimer()
     timer.start()
     user_id = current_user.id if current_user else None
     style = request.style
-    style_name = POLISH_STYLES[style]["name"]
+    style_name = style_config["name"]
 
     async def event_stream():
         # 流式无法拿到 token 用量（stream 不返回 usage），统计留空
@@ -305,54 +297,107 @@ def _build_compare_provider(config):
     )
 
 
+def _require_style(style: str) -> dict:
+    if style not in POLISH_STYLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"不支持的润色风格: {style}，可选: {', '.join(POLISH_STYLES.keys())}",
+        )
+    return POLISH_STYLES[style]
+
+
+async def _check_compare_quota(http_request: Request, current_user, n: int) -> None:
+    """对比模式并发调用 N 个模型，消耗 N 倍额度：按模型数预检配额"""
+    if current_user is None:
+        await reject_guest_if_disabled(http_request)
+        await check_guest_rate_limit(http_request)
+    else:
+        from app.core.rate_limit import check_user_quota_n_times
+        async with async_session_factory() as db:
+            await check_user_quota_n_times(current_user, db, n)
+
+
+async def _load_compare_configs(config_ids: List[int]) -> dict:
+    """加载选中的模型配置（仅启用的可参与对比），不足 2 个直接 400"""
+    from sqlalchemy import select as _select
+    from app.models.llm_config import LLMConfig
+    async with async_session_factory() as db:
+        result = await db.execute(
+            _select(LLMConfig).where(
+                LLMConfig.id.in_(config_ids),
+                LLMConfig.is_enabled == True,
+            )
+        )
+        configs = {c.id: c for c in result.scalars().all()}
+    if len(configs) < 2:
+        raise HTTPException(status_code=400, detail="所选模型配置不足 2 个有效项（已停用的配置不可用）")
+    return configs
+
+
+def _build_compare_messages(style: str, text: str):
+    """构造「标准润色」对比的 messages 与 max_tokens 上限"""
+    system_prompt = build_polish_prompt(style, "standard")
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": text},
+    ]
+    estimated_tokens = len(text) * 2 + 512
+    return messages, max(4096, min(estimated_tokens, 16384))
+
+
+async def _save_compare_record(user_id, text: str, style: str, style_name: str,
+                               model_names: List[str], results: List[dict]) -> None:
+    """
+    对比结果落库（type=polish，versions 各项 label 带模型名）。
+    :param results: 成功项列表 [{config_name, content}]；游客或全失败直接跳过
+    """
+    if not (user_id and results):
+        return
+    try:
+        versions = [
+            {"label": f"{r['config_name']} · 标准润色", "level": "compare", "content": r["content"]}
+            for r in results
+        ]
+        modified_text = "\n\n---\n\n".join(f"【{v['label']}】\n{v['content']}" for v in versions)
+        async with async_session_factory() as db:
+            record = ProofreadRecord(
+                user_id=user_id,
+                type="polish",
+                original_text=text,
+                check_types=json.dumps([style]),
+                domain=style,
+                result={
+                    "versions": versions, "style": style, "style_name": style_name,
+                    "compare": True, "models": model_names,
+                },
+                modified_text=modified_text,
+                total_issues=0,
+                token_usage=estimate_tokens_by_chars(
+                    len(text) + sum(len(r["content"]) for r in results)
+                ),
+            )
+            db.add(record)
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"对比结果落库失败: {e}")
+
+
 @router.post("/compare", response_model=PolishCompareResponse, summary='多模型对比润色：同一段文本用多个已配置模型并发执行「标准润色」')
 async def text_polish_compare(
     request: PolishCompareRequest,
     http_request: Request,
-    db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user_optional),
 ):
     """
     多模型对比润色：同一段文本用多个已配置模型并发执行「标准润色」
     供用户横向对比不同模型的输出效果
     """
-    if current_user is None:
-        await reject_guest_if_disabled(http_request)
-        await check_guest_rate_limit(http_request)
-    else:
-        # 对比模式并发调用 N 个模型，消耗 N 倍额度：按模型数预检配额
-        from app.core.rate_limit import check_user_quota_n_times
-        await check_user_quota_n_times(current_user, db, len(request.config_ids))
-
-    if request.style not in POLISH_STYLES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的润色风格: {request.style}",
-        )
+    await _check_compare_quota(http_request, current_user, len(request.config_ids))
+    style_config = _require_style(request.style)
+    configs = await _load_compare_configs(request.config_ids)
+    messages, max_tokens = _build_compare_messages(request.style, request.text)
 
     import time as _time
-
-    # 加载选中的模型配置（仅启用的可参与对比）
-    from sqlalchemy import select as _select
-    from app.models.llm_config import LLMConfig
-    result = await db.execute(
-        _select(LLMConfig).where(
-            LLMConfig.id.in_(request.config_ids),
-            LLMConfig.is_enabled == True,
-        )
-    )
-    configs = {c.id: c for c in result.scalars().all()}
-    if len(configs) < 2:
-        raise HTTPException(status_code=400, detail="所选模型配置不足 2 个有效项（已停用的配置不可用）")
-
-    style_config = POLISH_STYLES[request.style]
-    system_prompt = build_polish_prompt(request.style, "standard")
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": request.text},
-    ]
-    estimated_tokens = len(request.text) * 2 + 512
-    max_tokens = max(4096, min(estimated_tokens, 16384))
 
     async def _run_one(config):
         t0 = _time.perf_counter()
@@ -387,43 +432,14 @@ async def text_polish_compare(
     items = await _asyncio.gather(*[_run_one(c) for c in configs.values()])
     items = sorted(items, key=lambda i: request.config_ids.index(i.config_id))
 
-    # 保存到校对历史（已登录用户）：type=polish，versions 各项 label 带模型名
-    if current_user and any(i.success for i in items):
-        try:
-            versions = [
-                {
-                    "label": f"{i.config_name} · 标准润色",
-                    "level": "compare",
-                    "content": i.content,
-                }
-                for i in items if i.success
-            ]
-            modified_text = "\n\n---\n\n".join(
-                f"【{v['label']}】\n{v['content']}" for v in versions
-            )
-            record = ProofreadRecord(
-                user_id=current_user.id,
-                type="polish",
-                original_text=request.text,
-                check_types=json.dumps([request.style]),
-                domain=request.style,
-                result={
-                    "versions": versions,
-                    "style": request.style,
-                    "style_name": style_config["name"],
-                    "compare": True,
-                    "models": [i.config_name for i in items],
-                },
-                modified_text=modified_text,
-                total_issues=0,
-                token_usage=estimate_tokens_by_chars(
-                    len(request.text) + sum(len(i.content) for i in items if i.success)
-                ),
-            )
-            db.add(record)
-            await db.commit()
-        except Exception as e:
-            logger.warning(f"对比结果落库失败: {e}")
+    await _save_compare_record(
+        user_id=current_user.id if current_user else None,
+        text=request.text,
+        style=request.style,
+        style_name=style_config["name"],
+        model_names=[i.config_name for i in items],
+        results=[{"config_name": i.config_name, "content": i.content} for i in items if i.success],
+    )
 
     record_audit_log(
         http_request, "polish_compare", user=current_user,
@@ -450,44 +466,12 @@ async def text_polish_compare_stream(
     多模型对比润色（流式 SSE）：各模型并发流式执行，逐模型推送增量
     事件流：meta → delta/done/error（带 config_id，各模型交错）→ end
     """
-    if current_user is None:
-        await reject_guest_if_disabled(http_request)
-        await check_guest_rate_limit(http_request)
-    else:
-        # 对比模式并发调用 N 个模型，消耗 N 倍额度：按模型数预检配额
-        from app.core.rate_limit import check_user_quota_n_times
-        async with async_session_factory() as db:
-            await check_user_quota_n_times(current_user, db, len(request.config_ids))
-
-    if request.style not in POLISH_STYLES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的润色风格: {request.style}",
-        )
+    await _check_compare_quota(http_request, current_user, len(request.config_ids))
+    style_config = _require_style(request.style)
+    configs = await _load_compare_configs(request.config_ids)
+    messages, max_tokens = _build_compare_messages(request.style, request.text)
 
     import asyncio as _asyncio
-    from sqlalchemy import select as _select
-    from app.models.llm_config import LLMConfig
-
-    async with async_session_factory() as db:
-        result = await db.execute(
-            _select(LLMConfig).where(
-                LLMConfig.id.in_(request.config_ids),
-                LLMConfig.is_enabled == True,
-            )
-        )
-        configs = {c.id: c for c in result.scalars().all()}
-    if len(configs) < 2:
-        raise HTTPException(status_code=400, detail="所选模型配置不足 2 个有效项（已停用的配置不可用）")
-
-    style_config = POLISH_STYLES[request.style]
-    system_prompt = build_polish_prompt(request.style, "standard")
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": request.text},
-    ]
-    estimated_tokens = len(request.text) * 2 + 512
-    max_tokens = max(4096, min(estimated_tokens, 16384))
 
     user_id = current_user.id if current_user else None
     style = request.style
@@ -561,39 +545,18 @@ async def text_polish_compare_stream(
 
             # 落库 + 审计（与同步对比接口同构）
             try:
-                results = []
-                for cid in configs:
-                    if cid in contents and contents[cid]:
-                        results.append({
-                            "config_id": cid,
-                            "config_name": configs[cid].name,
-                            "content": _clean_version_content("".join(contents[cid])),
-                            "success": True,
-                        })
-                if user_id and results:
-                    versions = [
-                        {"label": f"{r['config_name']} · 标准润色", "level": "compare", "content": r["content"]}
-                        for r in results
-                    ]
-                    async with async_session_factory() as db:
-                        record = ProofreadRecord(
-                            user_id=user_id,
-                            type="polish",
-                            original_text=request.text,
-                            check_types=json.dumps([style]),
-                            domain=style,
-                            result={
-                                "versions": versions, "style": style, "style_name": style_name,
-                                "compare": True, "models": [c.name for c in configs.values()],
-                            },
-                            modified_text="\n\n---\n\n".join(f"【{v['label']}】\n{v['content']}" for v in versions),
-                            total_issues=0,
-                            token_usage=estimate_tokens_by_chars(
-                                len(request.text) + sum(len(r["content"]) for r in results)
-                            ),
-                        )
-                        db.add(record)
-                        await db.commit()
+                results = [
+                    {"config_name": configs[cid].name, "content": _clean_version_content("".join(contents[cid]))}
+                    for cid in configs if contents.get(cid)
+                ]
+                await _save_compare_record(
+                    user_id=user_id,
+                    text=request.text,
+                    style=style,
+                    style_name=style_name,
+                    model_names=[c.name for c in configs.values()],
+                    results=results,
+                )
                 record_audit_log(
                     http_request, "polish_compare", user=current_user,
                     input_text=request.text,
