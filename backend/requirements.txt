@@ -2,7 +2,7 @@
 # starlette 显式 pin：原先仅由 fastapi 间接约束，重建镜像可能解析到不同版本
 fastapi==0.141.1
 starlette==1.6.0
-uvicorn[standard]==0.34.0
+uvicorn[standard]==0.52.4
 # 0.0.18 存在 multipart DoS 与 Content-Disposition 参数走私
 python-multipart==0.0.32
 
