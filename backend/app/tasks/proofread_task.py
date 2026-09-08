@@ -6,6 +6,7 @@ import os
 import json
 import asyncio
 from loguru import logger
+from sqlalchemy import select, update
 
 from app.celery_app import celery_app
 from app.core.config import settings
@@ -61,116 +62,205 @@ def _refund_key_daily_quota(api_key_id: int) -> None:
         logger.warning(f"[退款] 密钥日配额退还失败 key_id={api_key_id}: {e}")
 
 
+def _get_sync_engine():
+    """创建同步数据库引擎（Celery worker 是同步上下文）"""
+    from sqlalchemy import create_engine
+    sync_url = settings.DATABASE_URL.replace("postgresql+asyncpg", "postgresql+psycopg2")
+    return create_engine(sync_url)
+
+
+def _update_task_progress(session, db_task, phase: str, progress: int, message: str, status: str = None):
+    """更新 DB 任务进度（同时更新 Celery meta 以保持兼容）"""
+    db_task.phase = phase
+    db_task.progress = progress
+    db_task.message = message
+    if status:
+        db_task.status = status
+    session.commit()
+
+
+class _CancelledError(Exception):
+    """worker 内部信号：用户已取消"""
+
+
+def _check_cancel(session, db_task, celery_task_id: str) -> None:
+    """阶段间协作退出点：刷新 DB 标志，若已取消则抛 _CancelledError"""
+    session.refresh(db_task)
+    if db_task.cancel_requested or db_task.status == "CANCELLED":
+        from datetime import datetime, timezone
+        logger.info(f"[Task {celery_task_id}] 检测到取消请求，停止执行")
+        db_task.status = "CANCELLED"
+        db_task.error_code = "USER_CANCELLED"
+        db_task.message = "任务已取消"
+        db_task.finished_at = datetime.now(timezone.utc)
+        session.commit()
+        raise _CancelledError()
+
+
 @celery_app.task(bind=True, name="proofread.async_document")
-def async_proofread_document(
-    self,
-    text: str,
-    check_types: list = None,
-    domain: str = "general",
-    file_id: str = None,
-    filename: str = None,
-    file_path: str = None,
-    file_ext: str = None,
-    user_id: int = None,
-    config_id: int = None,
-    api_key_id: int = None,
-):
+def async_proofread_document(self, db_task_id: int):
     """
-    异步执行文档校对任务
-
-    :param text: 提取的文本内容
-    :param check_types: 校对类型
-    :param domain: 领域
-    :param file_id: 文件ID
-    :param filename: 原始文件名
-    :param file_path: 文件路径
-    :param file_ext: 文件扩展名
-    :param user_id: 用户ID
-    :param config_id: 指定模型配置ID（None 用当前活跃模型）
-    :param api_key_id: 开放API密钥ID（用于失败时退还密钥日配额；Web端调用不传）
+    异步执行文档校对任务（DB 驱动）。
+    只接收 proofread_tasks.id，所有数据从数据库加载——
+    Redis broker 消息体不再包含文档全文。
     """
-    task_id = self.request.id
-    logger.info(f"[Task {task_id}] 开始异步校对: file={filename}, text_len={len(text)}")
+    from sqlalchemy.orm import Session
+    from app.models.proofread_task import ProofreadTask
+    from app.models.uploaded_document import UploadedDocument
 
-    # 更新进度（meta 带 user_id，供任务状态查询做归属校验）
-    self.update_state(state="PROGRESS", meta={"step": "proofread", "progress": 10, "message": "正在调用AI模型校对...", "user_id": user_id})
+    celery_task_id = self.request.id
+    sync_engine = _get_sync_engine()
 
     try:
-        # 调用校对服务（异步转同步）
-        from app.services.proofread import proofread_text
-        result = _run_async(proofread_text(text=text, domain=domain, config_id=config_id, user_id=user_id))
-    except Exception as e:
-        logger.error(f"[Task {task_id}] 校对失败: {e}")
-        # 开放API提交的任务：退还密钥日配额（服务端失败不该消耗额度）
-        if api_key_id:
-            _refund_key_daily_quota(api_key_id)
-        # 不能手动写 FAILURE state（Celery 仅允许 raise 触发），
-        # meta 带错误信息供状态查询展示
-        self.update_state(state="PROGRESS", meta={"step": "failed", "progress": 0, "message": f"校对失败: {e}", "user_id": user_id})
-        raise
+        with Session(sync_engine) as session:
+            from datetime import datetime, timezone
 
-    self.update_state(state="PROGRESS", meta={"step": "generate", "progress": 80, "message": "正在生成修订文档...", "user_id": user_id})
+            claim = session.execute(
+                update(ProofreadTask)
+                .where(ProofreadTask.id == db_task_id, ProofreadTask.status == "PENDING")
+                .values(status="STARTED", started_at=datetime.now(timezone.utc))
+            )
+            if claim.rowcount != 1:
+                session.rollback()
+                logger.info(f"[Task {celery_task_id}] 任务非 PENDING，跳过重复消息")
+                return {"skipped": True, "task_id": celery_task_id}
+            session.commit()
 
-    # 生成修订文档
-    corrected_url = None
-    try:
-        if file_path and file_ext and file_ext in (".docx", ".txt"):
-            from app.services.document import generate_corrected_docx, generate_corrected_txt
-            corrected_filename = sanitize_filename(f"校对修订_{filename}")
-            corrected_path = safe_upload_path(file_id, corrected_filename)
-            if file_ext == ".docx":
-                generate_corrected_docx(file_path, result["issues"], corrected_path)
+            db_task = session.get(ProofreadTask, db_task_id)
+            if db_task is None:
+                logger.error(f"[Task {celery_task_id}] proofread_tasks id={db_task_id} 不存在")
+                raise ValueError(f"Task record {db_task_id} not found")
+
+            if db_task.document_id:
+                doc_record = session.execute(
+                    select(UploadedDocument).where(UploadedDocument.file_id == db_task.document_id)
+                ).scalar_one_or_none()
             else:
-                generate_corrected_txt(text, result["issues"], corrected_path)
-            corrected_url = build_download_url(file_id, corrected_filename)
-    except Exception as e:
-        logger.warning(f"[Task {task_id}] 生成修订文档失败: {e}")
-
-    self.update_state(state="PROGRESS", meta={"step": "save", "progress": 95, "message": "正在保存记录...", "user_id": user_id})
-
-    # 保存校对记录到数据库
-    record_id = None
-    if user_id:
-        try:
-            from sqlalchemy import create_engine
-            from sqlalchemy.orm import Session
-            from app.models.proofread import ProofreadRecord
-
-            sync_url = settings.DATABASE_URL.replace("postgresql+asyncpg", "postgresql+psycopg2")
-            sync_engine = create_engine(sync_url)
-            with Session(sync_engine) as session:
-                record = ProofreadRecord(
-                    user_id=user_id,
-                    type="document",
-                    original_text=text[:10000],
-                    check_types=json.dumps(check_types or []),
-                    domain=domain,
-                    result=result,
-                    total_issues=result["total_issues"],
-                    token_usage=result["usage"],
-                    source_filename=filename,
-                )
-                session.add(record)
+                doc_record = None
+            if doc_record is None:
+                db_task.status = "FAILURE"
+                db_task.error_code = "DOCUMENT_MISSING"
+                db_task.message = "文档记录不存在或已被清理"
                 session.commit()
-                record_id = record.id
-            sync_engine.dispose()
-        except Exception as e:
-            logger.warning(f"[Task {task_id}] 保存记录失败: {e}")
+                raise ValueError(f"Document {db_task.document_id} not found")
 
-    logger.info(f"[Task {task_id}] 异步校对完成: issues={result['total_issues']}")
+            text = doc_record.extracted_text
+            if not text:
+                db_task.status = "FAILURE"
+                db_task.error_code = "TEXT_EMPTY"
+                db_task.message = "文档文本为空"
+                session.commit()
+                raise ValueError("Document text is empty")
 
-    return {
-        "file_id": file_id,
-        "filename": filename,
-        "user_id": user_id,
-        "issues": result["issues"],
-        "total_issues": result["total_issues"],
-        "chunks_count": result["chunks_count"],
-        "usage": result["usage"],
-        "domain": result["domain"],
-        "record_id": record_id,
-        "corrected_download_url": corrected_url,
-    }
+            params = db_task.params_json or {}
+            domain = params.get("domain", "general")
+            config_id = params.get("config_id")
+            user_id = db_task.owner_user_id
+            api_key_id = db_task.owner_api_key_id
+            file_id = doc_record.file_id
+            filename = doc_record.filename
+            file_path = doc_record.file_path
+            file_ext = doc_record.file_ext
+            check_types = params.get("check_types")
+
+            logger.info(
+                f"[Task {celery_task_id}] 开始异步校对: db_task_id={db_task_id} "
+                f"file={filename}, text_len={len(text)}"
+            )
+
+            _check_cancel(session, db_task, celery_task_id)
+            _update_task_progress(session, db_task, "proofread", 10, "正在调用AI模型校对...")
+
+            try:
+                from app.services.proofread import proofread_text
+                result = _run_async(proofread_text(
+                    text=text, domain=domain, config_id=config_id, user_id=user_id,
+                ))
+            except Exception as e:
+                logger.error(f"[Task {celery_task_id}] 校对失败: {e}")
+                if api_key_id:
+                    _refund_key_daily_quota(api_key_id)
+                db_task.status = "FAILURE"
+                db_task.error_code = "PROOFREAD_FAILED"
+                db_task.message = f"校对失败: {e}"
+                from datetime import datetime, timezone
+                db_task.finished_at = datetime.now(timezone.utc)
+                session.commit()
+                raise
+
+            _check_cancel(session, db_task, celery_task_id)
+            _update_task_progress(session, db_task, "generate", 80, "正在生成修订文档...")
+
+            corrected_url = None
+            try:
+                if file_path and file_ext and file_ext in (".docx", ".txt"):
+                    from app.services.document import generate_corrected_docx, generate_corrected_txt
+                    corrected_filename = sanitize_filename(f"校对修订_{filename}")
+                    corrected_path = safe_upload_path(file_id, corrected_filename)
+                    if file_ext == ".docx":
+                        generate_corrected_docx(file_path, result["issues"], corrected_path)
+                    else:
+                        generate_corrected_txt(text, result["issues"], corrected_path)
+                    corrected_url = build_download_url(file_id, corrected_filename)
+                    db_task.output_path = corrected_path
+                    session.commit()
+            except Exception as e:
+                logger.warning(f"[Task {celery_task_id}] 生成修订文档失败: {e}")
+
+            _check_cancel(session, db_task, celery_task_id)
+            _update_task_progress(session, db_task, "save", 95, "正在保存记录...")
+
+            record_id = None
+            if user_id:
+                try:
+                    from app.models.proofread import ProofreadRecord
+                    record = ProofreadRecord(
+                        user_id=user_id,
+                        type="document",
+                        original_text=text[:10000],
+                        check_types=json.dumps(check_types or []),
+                        domain=domain,
+                        result=result,
+                        total_issues=result["total_issues"],
+                        token_usage=result["usage"],
+                        source_filename=filename,
+                    )
+                    session.add(record)
+                    session.flush()
+                    record_id = record.id
+                except Exception as e:
+                    logger.warning(f"[Task {celery_task_id}] 保存记录失败: {e}")
+
+            result_payload = {
+                "file_id": file_id,
+                "filename": filename,
+                "user_id": user_id,
+                "issues": result["issues"],
+                "total_issues": result["total_issues"],
+                "chunks_count": result["chunks_count"],
+                "usage": result["usage"],
+                "domain": result["domain"],
+                "record_id": record_id,
+                "corrected_download_url": corrected_url,
+            }
+
+            from datetime import datetime, timezone
+            db_task.status = "SUCCESS"
+            db_task.progress = 100
+            db_task.phase = "done"
+            db_task.message = "校对完成"
+            db_task.result_json = result_payload
+            db_task.finished_at = datetime.now(timezone.utc)
+            session.commit()
+
+            logger.info(f"[Task {celery_task_id}] 异步校对完成: issues={result['total_issues']}")
+            return result_payload
+
+    except _CancelledError:
+        logger.info(f"[Task {celery_task_id}] 任务已被用户取消")
+        return {"cancelled": True, "task_id": celery_task_id}
+    finally:
+        sync_engine.dispose()
 
 
 @celery_app.task(name="maintenance.clean_uploaded_documents")

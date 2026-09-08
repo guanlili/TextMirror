@@ -10,17 +10,17 @@ import time
 import uuid
 from typing import Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from celery.result import AsyncResult
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
-from app.celery_app import celery_app
 from app.core.database import get_db
 from app.core.dependencies import get_current_user_or_apikey
+from app.core.security import hash_scoped_idempotency_key
 from app.core.file_security import sanitize_filename
 from app.core.rate_limit import (
     charge_api_key_daily,
@@ -56,6 +56,37 @@ from app.services.audit_log import record_audit_log, AuditTimer
 from app.tasks.proofread_task import async_proofread_document
 
 router = APIRouter(tags=["开放API"])
+
+
+def _normalize_idempotency_key(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    value = value.strip()
+    if not value or len(value) > 128:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_IDEMPOTENCY_KEY", "message": "Idempotency-Key 必须为 1-128 个非空字符"},
+        )
+    return value
+
+
+async def _existing_submit_response(db: AsyncSession, db_task) -> OpenDocumentSubmitResponse:
+    doc_record = (await db.execute(
+        select(UploadedDocument).where(UploadedDocument.file_id == db_task.document_id)
+    )).scalar_one_or_none()
+    if doc_record is None:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "IDEMPOTENCY_CONFLICT", "message": "已有任务的文档记录不可用"},
+        )
+    return OpenDocumentSubmitResponse(
+        job_id=db_task.task_id,
+        filename=doc_record.filename,
+        text_length=doc_record.text_length,
+        status="queued",
+        status_url=f"/api/v1/open/jobs/{db_task.task_id}",
+    )
+
 
 # 错误响应示例（对外契约的一部分，写进 OpenAPI 文档）
 def _error_example(code: str, msg: str) -> dict:
@@ -476,6 +507,7 @@ async def open_submit_document(
     check_types: Optional[str] = Form(None, deprecated=True, description="（已废弃，传入无效果）历史参数：校对类型"),
     domain: str = Form("general", description="文本领域"),
     config_id: Optional[int] = Form(None, description="指定模型配置ID（可选）"),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_db),
     auth: Tuple[User, Optional[ApiKey]] = Depends(get_current_user_or_apikey),
 ):
@@ -483,6 +515,21 @@ async def open_submit_document(
     开放文档异步审校：上传 → 提交 Celery 任务 → 返回 job_id
     """
     user, api_key = auth
+    raw_idempotency_key = _normalize_idempotency_key(idempotency_key)
+    owner_scope = f"open:api-key:{api_key.id}" if api_key else f"open:user:{user.id}"
+    scoped_idempotency_key = (
+        hash_scoped_idempotency_key(owner_scope, raw_idempotency_key)
+        if raw_idempotency_key else None
+    )
+
+    from app.models.proofread_task import ProofreadTask
+
+    if scoped_idempotency_key:
+        existing = (await db.execute(
+            select(ProofreadTask).where(ProofreadTask.idempotency_key == scoped_idempotency_key)
+        )).scalar_one_or_none()
+        if existing:
+            return await _existing_submit_response(db, existing)
 
     parsed_check_types = _parse_form_check_types(check_types)
     parsed_domain = _validate_form_domain(domain)
@@ -543,7 +590,7 @@ async def open_submit_document(
         remove_upload_silently(file_path)
         raise
 
-    # ---- 上传记录（管理后台可见）----
+    # ---- 在同一事务中保存上传记录与持久任务 ----
     doc_record = UploadedDocument(
         file_id=file_id,
         filename=filename,
@@ -557,56 +604,75 @@ async def open_submit_document(
         owner_kind="user",
         status="uploaded",
     )
-    db.add(doc_record)
-    # 必须先提交再投递：否则事务回滚后 worker 仍会处理一条不存在的记录
+    task_uuid = str(uuid.uuid4())
+    db_task = ProofreadTask(
+        task_id=task_uuid,
+        document_id=file_id,
+        owner_kind="api_key" if api_key else "user",
+        owner_user_id=user.id,
+        owner_api_key_id=api_key.id if api_key else None,
+        idempotency_key=scoped_idempotency_key,
+        status="PENDING",
+        progress=0,
+        message="任务排队中...",
+        params_json={
+            "domain": parsed_domain,
+            "config_id": config_id,
+            "check_types": parsed_check_types,
+        },
+    )
+    db.add_all([doc_record, db_task])
     try:
+        await db.flush()
+        db_task_pk_id = db_task.id
         await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        if api_key is not None:
+            await refund_api_key_daily_usage(api_key)
+        remove_upload_silently(file_path)
+        if scoped_idempotency_key:
+            existing = (await db.execute(
+                select(ProofreadTask).where(ProofreadTask.idempotency_key == scoped_idempotency_key)
+            )).scalar_one_or_none()
+            if existing:
+                return await _existing_submit_response(db, existing)
+        logger.exception("[OpenAPI] 幂等任务记录冲突但未找到既有任务")
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "INTERNAL_ERROR", "message": "任务记录保存失败，请重新提交"},
+        )
     except Exception as e:
-        logger.error(f"[OpenAPI] 上传记录保存失败: {e}")
+        await db.rollback()
+        logger.error(f"[OpenAPI] 上传/任务记录保存失败: {e}")
         if api_key is not None:
             await refund_api_key_daily_usage(api_key)
         remove_upload_silently(file_path)
         raise HTTPException(
             status_code=500,
-            detail={"code": "INTERNAL_ERROR", "message": "上传记录保存失败，请重新提交"},
+            detail={"code": "INTERNAL_ERROR", "message": "任务记录保存失败，请重新提交"},
         )
 
-    # ---- 提交异步任务 ----
+    # ---- 投递 Celery（只传 DB 主键，worker 自行加载全文） ----
     try:
-        task = async_proofread_document.delay(
-            text=extracted_text,
-            check_types=parsed_check_types,
-            domain=parsed_domain,
-            file_id=file_id,
-            filename=filename,
-            file_path=file_path,
-            file_ext=file_ext,
-            user_id=user.id,
-            config_id=config_id,
-            api_key_id=api_key.id if api_key else None,
+        async_proofread_document.apply_async(
+            args=(db_task_pk_id,),
+            task_id=task_uuid,
         )
     except Exception as e:
         logger.error(f"[OpenAPI] 任务队列不可用: {e}")
-        # 队列故障：退还密钥日配额 + 清理已落盘文件与上传记录
+        await db.execute(
+            update(ProofreadTask)
+            .where(ProofreadTask.id == db_task_pk_id, ProofreadTask.status == "PENDING")
+            .values(status="FAILURE", error_code="DISPATCH_FAILED", message="任务投递失败，请重试")
+        )
+        await db.commit()
         if api_key is not None:
             await refund_api_key_daily_usage(api_key)
-        remove_upload_silently(file_path)
-        try:
-            await db.delete(doc_record)
-            await db.commit()
-        except Exception as cleanup_error:
-            logger.warning(f"[OpenAPI] 上传记录清理失败 file_id={file_id}: {cleanup_error}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "TASK_QUEUE_UNAVAILABLE", "message": "任务队列暂时不可用，请稍后重试"},
         )
-
-    # 归属映射：FAILURE 状态 Celery 只存异常（meta 丢失），轮询归属校验依赖此记录
-    try:
-        from app.core.redis import get_redis
-        await get_redis().set(f"textmirror:openjob:{task.id}", str(user.id), ex=172800)
-    except Exception as e:
-        logger.warning(f"[OpenAPI] 任务归属记录写入失败（轮询将降级为 meta 校验）: {e}")
 
     record_audit_log(
         http_request, "api_proofread_doc", user=user,
@@ -616,7 +682,7 @@ async def open_submit_document(
             "text_length": len(extracted_text),
             "domain": parsed_domain,
             "check_types": parsed_check_types,
-            "job_id": task.id,
+            "job_id": task_uuid,
         },
         file_id=file_id,
         file_name=filename,
@@ -625,57 +691,52 @@ async def open_submit_document(
     )
 
     return OpenDocumentSubmitResponse(
-        job_id=task.id,
+        job_id=task_uuid,
         filename=filename,
         text_length=len(extracted_text),
         status="queued",
-        status_url=f"/api/v1/open/jobs/{task.id}",
+        status_url=f"/api/v1/open/jobs/{task_uuid}",
     )
 
 
-def _task_user_id(result: AsyncResult):
-    """提取任务归属（PROGRESS meta / SUCCESS 结果中的 user_id）"""
-    if result.state == "PROGRESS" and isinstance(result.info, dict):
-        return result.info.get("user_id")
-    if result.state == "SUCCESS" and isinstance(result.result, dict):
-        return result.result.get("user_id")
-    return None
+async def _load_db_task(job_id: str, db: AsyncSession):
+    """从 proofread_tasks 加载任务记录"""
+    from app.models.proofread_task import ProofreadTask
+    result = await db.execute(
+        select(ProofreadTask).where(ProofreadTask.task_id == job_id)
+    )
+    return result.scalar_one_or_none()
 
 
-def _build_job_payload(job_id: str, result: AsyncResult) -> OpenJobStatusResponse:
-    """构造任务状态响应（任务失败体现在 payload，HTTP 错误仅用于认证/404）"""
-    payload = OpenJobStatusResponse(job_id=job_id, status=result.state, progress=0, message="")
-    if result.state == "PENDING":
-        payload.message = "任务排队中..."
-    elif result.state == "PROGRESS":
-        meta = result.info or {}
-        payload.progress = meta.get("progress", 0)
-        payload.message = meta.get("message", "处理中...")
-    elif result.state == "SUCCESS":
-        payload.progress = 100
-        payload.message = "审校完成"
-        data = dict(result.result) if isinstance(result.result, dict) else {}
+def _build_job_payload_from_db(job_id: str, db_task) -> OpenJobStatusResponse:
+    """从 proofread_tasks 记录构造任务状态响应"""
+    if db_task is None:
+        return OpenJobStatusResponse(
+            job_id=job_id, status="PENDING", progress=0, message="任务排队中...",
+        )
+    status = db_task.status
+    if status in ("STARTED", "PROGRESS"):
+        display_status = "PROGRESS"
+    elif status == "SUCCESS":
+        display_status = "SUCCESS"
+    elif status in ("FAILURE", "CANCELLED", "REVOKED"):
+        display_status = "FAILURE"
+    else:
+        display_status = status
+
+    payload = OpenJobStatusResponse(
+        job_id=job_id,
+        status=display_status,
+        progress=db_task.progress or 0,
+        message=db_task.message or "",
+    )
+    if display_status == "SUCCESS" and db_task.result_json:
+        data = dict(db_task.result_json)
         data.pop("user_id", None)
         payload.result = data or None
-    elif result.state == "FAILURE":
-        payload.message = "任务失败，请重新提交（如持续失败请联系管理员）"
-        payload.error = "TASK_FAILED"
-    else:
-        payload.progress = 5
-        payload.message = f"状态: {result.state}"
+    elif display_status == "FAILURE":
+        payload.error = db_task.error_code or "TASK_FAILED"
     return payload
-
-
-async def _job_owner(job_id: str) -> Optional[int]:
-    """任务归属：优先读提交时写入的 Redis 映射（FAILURE 状态 meta 丢失），无记录返回 None"""
-    try:
-        from app.core.redis import get_redis
-        owner = await get_redis().get(f"textmirror:openjob:{job_id}")
-        if owner is not None:
-            return int(owner)
-    except Exception as e:
-        logger.warning(f"[OpenAPI] 读取任务归属 Redis 异常: {e}")
-    return None
 
 
 @router.get(
@@ -695,35 +756,38 @@ async def _job_owner(job_id: str) -> Optional[int]:
 async def open_get_job(
     job_id: str,
     http_request: Request,
+    db: AsyncSession = Depends(get_db),
     auth: Tuple[User, Optional[ApiKey]] = Depends(get_current_user_or_apikey),
 ):
     """
-    查询异步任务状态（仅任务提交者可查看）
+    查询异步任务状态（仅任务提交者可查看，归属从 proofread_tasks 表校验）
     """
-    user, _api_key = auth
+    user, api_key = auth
 
-    result = AsyncResult(job_id, app=celery_app)
-
-    # 归属：优先 Redis 映射（覆盖所有状态含 FAILURE）
-    owner = await _job_owner(job_id)
-    if owner is not None:
-        if owner != user.id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "JOB_NOT_FOUND", "message": "任务不存在"},
-            )
-        return _build_job_payload(job_id, result)
-
-    # 无 Redis 记录（非本 API 提交 / Redis 异常 / 记录过期）：降级 meta 校验
-    if result.state == "PENDING":
-        # 无法归属的排队态：仅返回状态，不含任何数据
-        return _build_job_payload(job_id, result)
-    task_user_id = _task_user_id(result)
-    if task_user_id is None or task_user_id != user.id:
-        # FAILURE 等无法归属的任务一律 404，防止窥探他人失败任务
+    db_task = await _load_db_task(job_id, db)
+    if db_task is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "JOB_NOT_FOUND", "message": "任务不存在"},
         )
 
-    return _build_job_payload(job_id, result)
+    # 归属校验
+    if db_task.owner_kind == "api_key":
+        if api_key is None or db_task.owner_api_key_id != api_key.id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "JOB_NOT_FOUND", "message": "任务不存在"},
+            )
+    elif db_task.owner_kind == "user":
+        if user.id != db_task.owner_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "JOB_NOT_FOUND", "message": "任务不存在"},
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "JOB_NOT_FOUND", "message": "任务不存在"},
+        )
+
+    return _build_job_payload_from_db(job_id, db_task)
