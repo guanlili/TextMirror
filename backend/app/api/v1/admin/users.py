@@ -1,7 +1,7 @@
 """
 TextMirror 用户管理 API（管理后台）
 """
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -307,7 +307,7 @@ async def reset_user_password(
     await db.flush()
 
     logger.info(f"管理员重置用户密码: {user.employee_id}")
-    return {"message": f"密码已重置为默认密码"}
+    return {"message": "密码已重置为默认密码"}
 
 
 @router.put("/{user_id}/toggle-active", summary='停用/启用用户')

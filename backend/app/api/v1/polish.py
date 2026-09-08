@@ -13,7 +13,6 @@ from loguru import logger
 from app.core.database import get_db, async_session_factory
 from app.core.dependencies import get_current_user_optional
 from app.core.rate_limit import check_guest_rate_limit, check_user_quota, reject_guest_if_disabled
-from app.core.config import settings
 from app.schemas.polish import PolishRequest, PolishResponse, PolishVersion
 from app.services.polish import (
     polish_text, polish_text_stream, POLISH_STYLES,
@@ -293,7 +292,7 @@ class PolishCompareResponse(BaseModel):
     results: List[ModelCompareItem]
 
 
-def _build_compare_provider(config) -> "OpenAICompatProvider":
+def _build_compare_provider(config):
     from app.services.llm.openai_compat import OpenAICompatProvider
     from app.core.secret_crypto import decrypt_secret
     return OpenAICompatProvider(
@@ -466,7 +465,6 @@ async def text_polish_compare_stream(
             detail=f"不支持的润色风格: {request.style}",
         )
 
-    import time as _time
     import asyncio as _asyncio
     from sqlalchemy import select as _select
     from app.models.llm_config import LLMConfig
@@ -497,8 +495,8 @@ async def text_polish_compare_stream(
 
     async def event_stream():
         import time as __time
-        queues: Dict[int, _asyncio.Queue] = {cid: _asyncio.Queue() for cid in configs}
-        contents: Dict[int, list] = {cid: [] for cid in configs}
+        queues: dict[int, _asyncio.Queue] = {cid: _asyncio.Queue() for cid in configs}
+        contents: dict[int, list] = {cid: [] for cid in configs}
 
         async def _run_model(config):
             t0 = __time.perf_counter()

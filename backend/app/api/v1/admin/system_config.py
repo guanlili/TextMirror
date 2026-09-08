@@ -2,12 +2,11 @@
 TextMirror 系统配置管理 API（管理后台）
 包含：基本设置、飞书配置、安全设置、数据维护
 """
-from typing import Optional
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, cast, Date
+from sqlalchemy import delete, cast, Date
 from loguru import logger
 
 from app.core.dependencies import require_permission

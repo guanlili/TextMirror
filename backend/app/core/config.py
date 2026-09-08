@@ -3,7 +3,7 @@ TextMirror 全局配置管理
 使用 Pydantic Settings 从 .env 文件和环境变量中加载配置
 """
 import json
-from typing import List, Optional
+from typing import List
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
 

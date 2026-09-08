@@ -2,7 +2,7 @@
 TextMirror 模型基类
 提供通用字段：id、created_at、updated_at
 """
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import Integer, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column

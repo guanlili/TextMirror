@@ -12,7 +12,6 @@ from app.models.user import User
 from app.models.role import Role, Permission, RolePermission
 from app.models.global_word import GlobalWord
 from app.models.llm_config import LLMConfig
-from app.core.config import settings
 
 
 # 权限种子数据：(编码, 名称, 类型, 父编码, 路径, 图标, 排序)

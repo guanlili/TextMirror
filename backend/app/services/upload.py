@@ -6,7 +6,6 @@ magic 头与容器结构校验（扩展名可以伪造，文件头不行）、DO
 import os
 import zipfile
 from dataclasses import dataclass
-from typing import Optional
 
 from fastapi import UploadFile
 from loguru import logger

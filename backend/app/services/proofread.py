@@ -9,7 +9,6 @@ from typing import List, Optional, Dict, Any, Tuple
 from loguru import logger
 from sqlalchemy import select, func
 
-from app.core.config import settings
 from app.core.database import async_session_factory
 from app.core.secret_crypto import decrypt_secret
 from app.models.global_word import GlobalWord
@@ -252,7 +251,6 @@ async def load_user_words(user_id: Optional[int]) -> Dict[str, List[Dict]]:
         return result
     try:
         from app.models.dictionary import Dictionary, DictionaryEntry, WhitelistWord
-        from datetime import datetime, timezone
 
         async with async_session_factory() as session:
             # 启用词库的词条
@@ -753,7 +751,7 @@ def verify_llm_issues(text: str, issues: List[Dict[str, Any]]) -> List[Dict[str,
 
     if fuzzy_fixed or len(verified) != len(issues):
         dropped = len(issues) - len([i for i in issues if (i.get("original") or "").strip()])
-        logger.info(f"[自校验] 模糊对齐 {fuzzy_fixed} 条，降级 {sum(1 for i in verified if '原文定位失败' in i.get('explanation', ''))} 条")
+        logger.info(f"[自校验] 模糊对齐 {fuzzy_fixed} 条，丢弃空原文 {dropped} 条，降级 {sum(1 for i in verified if '原文定位失败' in i.get('explanation', ''))} 条")
     return verified
 
 

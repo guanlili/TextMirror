@@ -15,7 +15,6 @@ from app.schemas.role import (
     RoleCreateRequest,
     RoleUpdateRequest,
     RoleResponse,
-    RolePermissionAssignRequest,
     PermissionResponse,
 )
 

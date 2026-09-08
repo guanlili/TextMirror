@@ -5,13 +5,12 @@ TextMirror 全局依赖注入
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 
-from fastapi import Depends, HTTPException, status, Request
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database import get_db
-from app.core.redis import get_redis
 from app.core.security import decode_token, hash_api_key
 from app.core.config import settings
 

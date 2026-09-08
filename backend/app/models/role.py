@@ -3,7 +3,7 @@ TextMirror 角色与权限模型
 RBAC: Role-Based Access Control
 支持菜单级（menu）和按钮级（button）权限控制
 """
-from typing import Optional, List
+from typing import Optional
 
 from sqlalchemy import String, Integer, Boolean, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship

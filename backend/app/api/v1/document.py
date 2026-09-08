@@ -8,7 +8,7 @@ import os
 import json
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Header, Request
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Header, Request
 from fastapi.responses import FileResponse
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -35,7 +35,7 @@ from app.schemas.document import (
 from app.services.document import extract_text_from_file, extract_html_from_file, generate_corrected_docx, generate_corrected_txt
 from app.services.proofread import proofread_text
 from app.services.upload import UploadRejected, remove_upload_silently, store_upload
-from app.services.audit_log import record_audit_log, AuditTimer
+from app.services.audit_log import record_audit_log
 
 from app.tasks.proofread_task import async_proofread_document
 

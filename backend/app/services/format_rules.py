@@ -157,7 +157,7 @@ def check_sequence_style(text: str) -> List[Dict[str, Any]]:
         issues.append(_issue(
             (ar_items[0] if ar_items else "").strip() or "编号",
             (ar_items[0] if ar_items else "").strip() or "编号",
-            f"列表编号样式混用：中文编号（一、二、）与阿拉伯数字编号（1. 2.）混用，建议统一", "warning",
+            "列表编号样式混用：中文编号（一、二、）与阿拉伯数字编号（1. 2.）混用，建议统一", "warning",
         ))
     return issues
 
