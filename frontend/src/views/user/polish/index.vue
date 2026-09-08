@@ -264,6 +264,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import { sanitizeMarkdownHtml } from '@/utils/sanitize'
+import { htmlToPlainText, copyRichTextBySelection, compactRichHtml } from '@/utils/clipboard'
 import {
   getPolishStylesApi,
   getAvailableModelsApi,
@@ -620,83 +621,6 @@ async function handleCopy(content: string) {
       ElMessage.success('已复制纯文本到剪贴板')
     }
   }
-}
-
-function htmlToPlainText(html: string): string {
-  const container = document.createElement('div')
-  container.innerHTML = html
-  return compactPlainText(container.innerText)
-}
-
-function copyRichTextBySelection(html: string, plainText: string) {
-  const container = document.createElement('div')
-  container.style.position = 'fixed'
-  container.style.left = '-9999px'
-  container.style.top = '0'
-  container.style.whiteSpace = 'pre-wrap'
-  container.innerHTML = html || plainText
-  document.body.appendChild(container)
-
-  const range = document.createRange()
-  range.selectNodeContents(container)
-  const selection = window.getSelection()
-  selection?.removeAllRanges()
-  selection?.addRange(range)
-
-  const successful = document.execCommand('copy')
-  selection?.removeAllRanges()
-  document.body.removeChild(container)
-
-  if (!successful) {
-    throw new Error('复制失败')
-  }
-}
-
-function compactRichHtml(html: string): string {
-  const container = document.createElement('div')
-  container.innerHTML = html
-
-  container.querySelectorAll('p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote').forEach((el) => {
-    const node = el as HTMLElement
-    node.style.marginTop = '0'
-    node.style.marginBottom = node.tagName === 'LI' ? '0' : '6px'
-    node.style.lineHeight = '1.55'
-  })
-
-  container.querySelectorAll('li').forEach((el) => {
-    const node = el as HTMLElement
-    node.style.marginTop = '0'
-    node.style.marginBottom = '2px'
-    node.style.lineHeight = '1.55'
-  })
-
-  container.querySelectorAll('br').forEach((br) => {
-    const prev = br.previousSibling
-    const next = br.nextSibling
-    if ((!prev || !prev.textContent?.trim()) && (!next || !next.textContent?.trim())) {
-      br.remove()
-    }
-  })
-
-  container.querySelectorAll('p').forEach((p) => {
-    if (!p.textContent?.trim()) {
-      p.remove()
-    }
-  })
-
-  return container.innerHTML
-}
-
-function compactPlainText(text: string): string {
-  return text
-    .replace(/\u00a0/g, ' ')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n[ \t]+/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .split('\n')
-    .map(line => line.trimEnd())
-    .join('\n')
-    .trim()
 }
 
 /** 改动级别标签类型 */

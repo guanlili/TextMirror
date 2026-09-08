@@ -242,30 +242,24 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { sanitizeDocumentHtml } from '@/utils/sanitize'
 import {
   uploadDocumentApi,
   type DocumentProofreadResponse,
 } from '@/api/document'
 import { asyncDocumentProofreadApi, streamTaskStatus, cancelTaskApi, type TaskStatus } from '@/api/tasks'
-import { submitIssueFeedbackApi } from '@/api/proofread'
 import { getAvailableModelsApi, type AvailableModel } from '@/api/polish'
-
-const recordId = ref<number | null>(null)
-
-interface IssueWithStatus {
-  original: string
-  type: string
-  suggestion: string
-  explanation: string
-  severity: string
-  chunk_index: number
-  _accepted: boolean
-  _ignored: boolean
-  _deletedText?: string    // 删除该词操作的实际删除内容（含标点），供撤销恢复
-  _undoAnchor?: number     // 删除时的词首位置，撤销按此插回
-}
+import {
+  escapeHtml,
+  severityHighlight,
+  severityColor,
+  severityLabel,
+  typeLabel,
+  replaceTextInHtml,
+  downloadTextFile,
+} from '@/utils/proofread'
+import { useProofreadReview } from '@/composables/useProofreadReview'
 
 // 步骤状态
 const step = ref<'upload' | 'processing' | 'result'>('upload')
@@ -305,13 +299,45 @@ const domain = ref('general')
 
 // 结果数据
 const originalText = ref('')
-const currentText = ref('')
 const currentHtml = ref('')
 const resultFilename = ref('')
 const correctedDownloadUrl = ref('')
-const issues = ref<IssueWithStatus[]>([])
-const filterType = ref('')
-const activeIssueIndex = ref(-1)
+
+// 审阅共享逻辑：问题列表 / 修订文本 / 接受·忽略·删除·撤销 / 反馈上报
+// （文档校对特有差异：同步维护格式化 HTML 视图；撤销删除时锚点越界按钳位处理）
+const {
+  issues,
+  currentText,
+  filterType,
+  activeIssueIndex,
+  recordId,
+  filteredIssues,
+  acceptedCount,
+  pendingCount,
+  getGlobalIndex,
+  acceptIssue,
+  ignoreIssue,
+  deleteIssue,
+  undoIssue,
+  handleAcceptAll,
+} = useProofreadReview({
+  clampUndoAnchor: true,
+  onAcceptReplace: (original, suggestion) => {
+    if (currentHtml.value) {
+      currentHtml.value = replaceTextInHtml(currentHtml.value, original, escapeHtml(suggestion))
+    }
+  },
+  onDeleteWord: (target) => {
+    if (currentHtml.value) {
+      currentHtml.value = currentHtml.value.replace(target, '')
+    }
+  },
+  onUndoReplace: (suggestion, original) => {
+    if (currentHtml.value) {
+      currentHtml.value = replaceTextInHtml(currentHtml.value, suggestion, escapeHtml(original))
+    }
+  },
+})
 
 // 计算属性
 const statusText = computed(() => {
@@ -319,14 +345,6 @@ const statusText = computed(() => {
   if (uploading.value) return '上传中...'
   if (proofreading.value) return 'AI 校对中...'
   return '开始校对'
-})
-
-const acceptedCount = computed(() => issues.value.filter(i => i._accepted).length)
-const pendingCount = computed(() => issues.value.filter(i => !i._accepted && !i._ignored).length)
-
-const filteredIssues = computed(() => {
-  if (!filterType.value) return issues.value
-  return issues.value.filter(i => i.type === filterType.value)
 })
 
 const highlightedText = computed(() => {
@@ -348,65 +366,7 @@ const highlightedText = computed(() => {
   return sanitizeDocumentHtml(html)
 })
 
-// HTML 工具函数：仅在文本节点中替换，跳过 HTML 标签
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
-
-function replaceTextInHtml(html: string, searchPlain: string, replacementHtml: string): string {
-  const search = escapeHtml(searchPlain)
-  let replaced = false
-  return html.replace(/(<[^>]*>)|([^<]+)/g, (match: string, tag: string, text: string) => {
-    if (tag || replaced) return match
-    if (text && text.includes(search)) {
-      replaced = true
-      return text.replace(search, replacementHtml)
-    }
-    return match
-  })
-}
-
 // 辅助函数
-function getGlobalIndex(issue: IssueWithStatus): number {
-  return issues.value.indexOf(issue)
-}
-
-function severityHighlight(severity: string): string {
-  switch (severity) {
-    case 'error': return '#fee2e2'  // 柔和红
-    case 'warning': return '#fef3c7' // 柔和琥珀
-    default: return '#dbeafe'        // 柔和蓝
-  }
-}
-
-function severityColor(severity: string): 'danger' | 'warning' | 'info' {
-  switch (severity) {
-    case 'error': return 'danger'
-    case 'warning': return 'warning'
-    default: return 'info'
-  }
-}
-
-function severityLabel(severity: string): string {
-  switch (severity) {
-    case 'error': return '错误'
-    case 'warning': return '警告'
-    default: return '建议'
-  }
-}
-
-function typeLabel(type: string): string {
-  const map: Record<string, string> = {
-    typo: '错别字', grammar: '语法', punctuation: '标点',
-    style: '表达', sensitive: '敏感词', logic: '逻辑',
-  }
-  return map[type] || type
-}
-
 function formatSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
@@ -722,116 +682,6 @@ async function handleCancel() {
   }
 }
 
-// 审校建议反馈上报（fire-and-forget：失败不打扰用户）
-function reportFeedback(items: IssueWithStatus[], action: 'accept' | 'ignore') {
-  if (!items.length) return
-  submitIssueFeedbackApi({
-    record_id: recordId.value ?? undefined,
-    items: items.map(i => ({
-      original: i.original,
-      suggestion: i.suggestion || undefined,
-      issue_type: i.type || undefined,
-      action,
-    })),
-  }).catch(() => {})
-}
-
-// 接受单条修改
-function acceptIssue(issue: IssueWithStatus) {
-  if (issue.original && issue.suggestion) {
-    currentText.value = currentText.value.replace(issue.original, issue.suggestion)
-    if (currentHtml.value) {
-      currentHtml.value = replaceTextInHtml(currentHtml.value, issue.original, escapeHtml(issue.suggestion))
-    }
-  }
-  issue._accepted = true
-  reportFeedback([issue], 'accept')
-}
-
-// 忽略
-function ignoreIssue(issue: IssueWithStatus) {
-  issue._ignored = true
-  reportFeedback([issue], 'ignore')
-}
-
-// 删除敏感词（连同紧邻标点）
-function deleteIssue(issue: IssueWithStatus) {
-  const word = issue.original
-  const wordIdx = currentText.value.indexOf(word)
-  if (wordIdx < 0) return
-  const nextChar = currentText.value[wordIdx + word.length]
-  const punct = '，。！？；、,'
-  const target = nextChar && punct.includes(nextChar) ? word + nextChar : word
-  currentText.value = currentText.value.replace(target, '')
-  if (currentHtml.value) {
-    currentHtml.value = currentHtml.value.replace(target, '')
-  }
-  issue._accepted = true
-  issue._deletedText = target
-  issue._undoAnchor = wordIdx
-  reportFeedback([issue], 'accept')
-}
-
-// 撤销
-function undoIssue(issue: IssueWithStatus) {
-  if (issue._accepted && issue.original && issue.suggestion) {
-    currentText.value = currentText.value.replace(issue.suggestion, issue.original)
-    if (currentHtml.value) {
-      currentHtml.value = replaceTextInHtml(currentHtml.value, issue.suggestion, escapeHtml(issue.original))
-    }
-  } else if (issue._accepted && (issue as any)._deletedText !== undefined) {
-    const deleted = (issue as any)._deletedText as string
-    const anchor = Math.min((issue as any)._undoAnchor ?? 0, currentText.value.length)
-    currentText.value = currentText.value.slice(0, anchor) + deleted + currentText.value.slice(anchor)
-    ;(issue as any)._deletedText = undefined
-    ;(issue as any)._undoAnchor = undefined
-  }
-  issue._accepted = false
-  issue._ignored = false
-}
-
-// 一键修改全部
-async function handleAcceptAll() {
-  // 与单条操作语义一致：有建议的替换 + 敏感词删除
-  const actionable = issues.value.filter(i =>
-    !i._accepted && !i._ignored && i.original && (i.suggestion || i.type === 'sensitive')
-  )
-  try {
-    await ElMessageBox.confirm(
-      `确认接受全部 ${actionable.length} 条修改建议？`,
-      '一键修改',
-      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
-    )
-    const accepted: IssueWithStatus[] = []
-    for (const issue of actionable) {
-      if (issue.suggestion) {
-        currentText.value = currentText.value.replace(issue.original, issue.suggestion)
-        if (currentHtml.value) {
-          currentHtml.value = replaceTextInHtml(currentHtml.value, issue.original, escapeHtml(issue.suggestion))
-        }
-      } else {
-        const wordIdx = currentText.value.indexOf(issue.original)
-        if (wordIdx < 0) continue
-        const nextChar = currentText.value[wordIdx + issue.original.length]
-        const punct = '，。！？；、,'
-        const target = nextChar && punct.includes(nextChar) ? issue.original + nextChar : issue.original
-        currentText.value = currentText.value.replace(target, '')
-        if (currentHtml.value) {
-          currentHtml.value = currentHtml.value.replace(target, '')
-        }
-        issue._deletedText = target
-        issue._undoAnchor = wordIdx
-      }
-      issue._accepted = true
-      accepted.push(issue)
-    }
-    reportFeedback(accepted, 'accept')
-    ElMessage.success('已接受所有修改')
-  } catch {
-    // 取消
-  }
-}
-
 // 下载修订文档
 function downloadCorrected() {
   if (correctedDownloadUrl.value) {
@@ -841,13 +691,7 @@ function downloadCorrected() {
 
 // 导出修订文本
 function handleExportText() {
-  const blob = new Blob([currentText.value], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `修订_${resultFilename.value || 'document'}.txt`
-  a.click()
-  URL.revokeObjectURL(url)
+  downloadTextFile(currentText.value, `修订_${resultFilename.value || 'document'}.txt`)
   ElMessage.success('修订文本已导出')
 }
 
@@ -868,13 +712,7 @@ function handleExportReport() {
     if (issue.explanation) lines.push(`   说明: ${issue.explanation}`)
     lines.push('')
   })
-  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `校对报告_${resultFilename.value || 'document'}.txt`
-  a.click()
-  URL.revokeObjectURL(url)
+  downloadTextFile(lines.join('\n'), `校对报告_${resultFilename.value || 'document'}.txt`)
   ElMessage.success('报告已导出')
 }
 
