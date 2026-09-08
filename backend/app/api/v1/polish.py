@@ -4,23 +4,27 @@ TextMirror AI润色 API
 import json
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from loguru import logger
 
-from app.core.database import get_db, async_session_factory
+from app.core.database import async_session_factory, get_db
 from app.core.dependencies import get_current_user_optional
 from app.core.rate_limit import check_guest_rate_limit, check_user_quota, reject_guest_if_disabled
-from app.schemas.polish import PolishRequest, PolishResponse, PolishVersion
-from app.services.polish import (
-    polish_text, polish_text_stream, POLISH_STYLES,
-    VERSION_INSTRUCTIONS, _clean_version_content, build_polish_prompt,
-    estimate_tokens_by_chars,
-)
-from app.services.audit_log import record_audit_log, AuditTimer
 from app.models.proofread import ProofreadRecord
+from app.schemas.polish import PolishRequest, PolishResponse, PolishVersion
+from app.services.audit_log import AuditTimer, record_audit_log
+from app.services.polish import (
+    POLISH_STYLES,
+    VERSION_INSTRUCTIONS,
+    _clean_version_content,
+    build_polish_prompt,
+    estimate_tokens_by_chars,
+    polish_text,
+    polish_text_stream,
+)
 
 router = APIRouter(prefix="/polish", tags=["AI润色"])
 
@@ -46,13 +50,14 @@ async def get_available_models():
     获取可用于多模型对比/校对选择的已启用模型配置（仅 id/名称/模型名，不含密钥）
     """
     from sqlalchemy import select as _select
+
     from app.core.database import async_session_factory
     from app.models.llm_config import LLMConfig
 
     async with async_session_factory() as db:
         result = await db.execute(
             _select(LLMConfig.id, LLMConfig.name, LLMConfig.model, LLMConfig.is_active)
-            .where(LLMConfig.is_enabled == True)
+            .where(LLMConfig.is_enabled.is_(True))
             .order_by(LLMConfig.is_active.desc(), LLMConfig.id)
         )
         rows = result.all()
@@ -285,8 +290,8 @@ class PolishCompareResponse(BaseModel):
 
 
 def _build_compare_provider(config):
-    from app.services.llm.openai_compat import OpenAICompatProvider
     from app.core.secret_crypto import decrypt_secret
+    from app.services.llm.openai_compat import OpenAICompatProvider
     return OpenAICompatProvider(
         api_key=decrypt_secret(config.api_key),
         api_base=config.api_base,
@@ -320,12 +325,13 @@ async def _check_compare_quota(http_request: Request, current_user, n: int) -> N
 async def _load_compare_configs(config_ids: List[int]) -> dict:
     """加载选中的模型配置（仅启用的可参与对比），不足 2 个直接 400"""
     from sqlalchemy import select as _select
+
     from app.models.llm_config import LLMConfig
     async with async_session_factory() as db:
         result = await db.execute(
             _select(LLMConfig).where(
                 LLMConfig.id.in_(config_ids),
-                LLMConfig.is_enabled == True,
+                LLMConfig.is_enabled.is_(True),
             )
         )
         configs = {c.id: c for c in result.scalars().all()}

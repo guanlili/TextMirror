@@ -229,8 +229,9 @@ async def cancel_task(
     - 执行中（STARTED/PROGRESS）：置 cancel_requested 标志，worker 在阶段间协作退出
     - 已终态：幂等返回成功
     """
-    from app.models.proofread_task import ProofreadTask
     from datetime import datetime, timezone
+
+    from app.models.proofread_task import ProofreadTask
 
     is_super_admin = bool(current_user and getattr(current_user, "role_code", None) == "super_admin")
     db_task = await _load_task_with_auth(

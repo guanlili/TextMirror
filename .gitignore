@@ -69,3 +69,7 @@ logs/
 服务器IP封禁问题备忘.md
 飞书对接流程及配置及开发文档.md
 backend/celerybeat-schedule*
+
+# ---- Qoder 本地工作区配置 ----
+.qoder/
+

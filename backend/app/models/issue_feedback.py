@@ -4,7 +4,7 @@ TextMirror 审校建议反馈模型
 """
 from typing import Optional
 
-from sqlalchemy import String, Integer, ForeignKey, Index
+from sqlalchemy import ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel

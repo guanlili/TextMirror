@@ -4,7 +4,7 @@ TextMirror 操作审计日志模型
 """
 from typing import Optional
 
-from sqlalchemy import String, Integer, Boolean, Text, JSON, ForeignKey, Index
+from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel

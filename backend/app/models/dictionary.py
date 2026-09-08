@@ -1,10 +1,10 @@
 """
 TextMirror 自定义词库与放行词模型
 """
-from typing import Optional
 from datetime import datetime
+from typing import Optional
 
-from sqlalchemy import String, Integer, Boolean, ForeignKey, DateTime
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel

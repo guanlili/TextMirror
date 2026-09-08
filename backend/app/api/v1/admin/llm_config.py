@@ -6,18 +6,22 @@ import json
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
 from loguru import logger
+from pydantic import BaseModel, Field
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import require_permission
-from app.core.secret_crypto import encrypt_secret, decrypt_secret
+from app.core.secret_crypto import decrypt_secret, encrypt_secret
 from app.models.llm_config import LLMConfig
 from app.schemas.llm_config import (
-    LLMConfigCreate, LLMConfigUpdate, LLMConfigResponse,
-    LLMTestResult, LLMProviderOption, SUPPORTED_PROVIDERS,
+    SUPPORTED_PROVIDERS,
+    LLMConfigCreate,
+    LLMConfigResponse,
+    LLMConfigUpdate,
+    LLMProviderOption,
+    LLMTestResult,
 )
 from app.services.llm.openai_compat import OpenAICompatProvider
 
@@ -244,7 +248,7 @@ async def get_active_config(
     _user=Depends(require_permission("admin:llm:edit")),
 ):
     """获取当前活跃的大模型配置"""
-    result = await db.execute(select(LLMConfig).where(LLMConfig.is_active == True))
+    result = await db.execute(select(LLMConfig).where(LLMConfig.is_active.is_(True)))
     config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(status_code=404, detail="尚未配置活跃的大模型，请在管理后台配置")

@@ -234,7 +234,6 @@ function handleFeishuLogin() {
 // 处理飞书回调（URL中带code参数时）
 async function handleFeishuCallback() {
   const code = route.query.code as string
-  const state = route.query.state as string
 
   // 处理SSO token直接传递的情况
   const feishuToken = route.query.feishu_token as string
@@ -296,7 +295,7 @@ async function handleLogin() {
       ElMessage.success('登录成功')
       const redirect = (route.query.redirect as string) || '/polish'
       router.push(redirect)
-    } catch (e: any) {
+    } catch (_e: any) {
       // 错误已在 axios 拦截器中处理
     } finally {
       loading.value = false

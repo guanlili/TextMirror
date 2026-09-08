@@ -4,7 +4,7 @@ TextMirror 全局词库模型
 """
 from typing import Optional
 
-from sqlalchemy import String, Boolean
+from sqlalchemy import Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel

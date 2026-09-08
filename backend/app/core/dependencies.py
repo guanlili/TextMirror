@@ -6,13 +6,13 @@ from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import decode_token, hash_api_key
-from app.core.config import settings
 
 # HTTP Bearer Token 提取器
 security_scheme = HTTPBearer(auto_error=False)
@@ -129,7 +129,7 @@ def require_permission(permission_code: str):
         db: AsyncSession = Depends(get_db),
     ):
         # 延迟导入避免循环依赖
-        from app.models.role import Role, RolePermission, Permission
+        from app.models.role import Permission, Role, RolePermission
 
         # 超级管理员拥有所有权限
         result = await db.execute(

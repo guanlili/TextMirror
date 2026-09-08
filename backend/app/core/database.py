@@ -2,7 +2,7 @@
 TextMirror 数据库引擎配置
 使用 SQLAlchemy 异步引擎连接 PostgreSQL
 """
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings

@@ -3,16 +3,21 @@ TextMirror 自定义词库 API
 仅登录用户可使用
 """
 from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.dictionary import Dictionary, DictionaryEntry
 from app.schemas.dictionary import (
-    DictionaryCreate, DictionaryUpdate, DictionaryResponse,
-    EntryCreate, EntryBatchCreate, EntryResponse,
+    DictionaryCreate,
+    DictionaryResponse,
+    DictionaryUpdate,
+    EntryBatchCreate,
+    EntryCreate,
+    EntryResponse,
 )
 
 router = APIRouter(prefix="/dictionary", tags=["自定义词库"])

@@ -4,7 +4,7 @@ TextMirror 大模型配置模型
 """
 from typing import Optional
 
-from sqlalchemy import String, Integer, Boolean, Float
+from sqlalchemy import Boolean, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel

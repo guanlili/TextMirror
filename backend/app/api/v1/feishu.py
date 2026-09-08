@@ -4,19 +4,19 @@ TextMirror 飞书认证 API
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from loguru import logger
 from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.config import settings
+from app.core.database import get_db
 from app.core.security import create_access_token, create_refresh_token, hash_password
 from app.models.user import User
+from app.services.audit_log import get_client_ip, record_audit_log_sync
 from app.services.feishu import feishu_service
-from app.services.audit_log import record_audit_log_sync, get_client_ip
 
 router = APIRouter(prefix="/auth/feishu", tags=["飞书认证"])
 

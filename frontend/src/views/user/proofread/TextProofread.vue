@@ -804,7 +804,7 @@ async function handleProofread() {
     } else {
       ElMessage.info(`共发现 ${res.total_issues} 个问题`)
     }
-  } catch (e: any) {
+  } catch (_e: any) {
     // 错误已在拦截器中处理
   } finally {
     loading.value = false

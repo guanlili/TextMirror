@@ -3,17 +3,22 @@ TextMirror 全局词库管理 API（管理后台）
 仅管理员可操作
 """
 from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 from loguru import logger
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.models.global_word import GlobalWord
 from app.schemas.global_word import (
-    GlobalWordCreate, GlobalWordUpdate, GlobalWordResponse,
-    GlobalWordBatchCreate, GlobalWordStats,
+    GlobalWordBatchCreate,
+    GlobalWordCreate,
+    GlobalWordResponse,
+    GlobalWordStats,
+    GlobalWordUpdate,
 )
 
 router = APIRouter(prefix="/global-dict", tags=["全局词库管理"])
@@ -178,7 +183,6 @@ async def delete_global_word(
 # 词库优化建议（反馈数据飞轮：聚合接受/忽略行为 → 推荐词库动作）
 # ======================================================================
 
-from pydantic import BaseModel, Field
 
 class WhitelistSuggestion(BaseModel):
     """放行词候选：高忽略且零接受"""
@@ -238,7 +242,7 @@ async def get_dict_suggestions(
 
     # 排除：已在全局放行词或全局词库
     existing_words = await db.execute(
-        select(GlobalWord.word).where(GlobalWord.is_active == True, GlobalWord.type == "whitelist")
+        select(GlobalWord.word).where(GlobalWord.is_active.is_(True), GlobalWord.type == "whitelist")
     )
     existing_set = {r[0] for r in existing_words.all()}
 
@@ -271,7 +275,7 @@ async def get_dict_suggestions(
     )
     # 排除已在全局纠错词（word 相同即视为已有）
     correction_existing = await db.execute(
-        select(GlobalWord.word).where(GlobalWord.is_active == True, GlobalWord.type == "correction")
+        select(GlobalWord.word).where(GlobalWord.is_active.is_(True), GlobalWord.type == "correction")
     )
     correction_existing_set = {r[0] for r in correction_existing.all()}
 

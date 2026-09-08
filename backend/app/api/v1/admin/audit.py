@@ -2,12 +2,12 @@
 TextMirror 管理后台 - 审计日志查询接口
 管理员可查询所有用户（含游客）的操作审计日志
 """
-from typing import Optional
 from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, or_
 
 from app.core.database import get_db
 from app.core.dependencies import require_permission
@@ -41,9 +41,9 @@ async def list_audit_logs(
 
     # 用户类型筛选
     if user_type == "guest":
-        base_query = base_query.where(AuditLog.is_guest == True)
+        base_query = base_query.where(AuditLog.is_guest.is_(True))
     elif user_type == "registered":
-        base_query = base_query.where(AuditLog.is_guest == False)
+        base_query = base_query.where(AuditLog.is_guest.is_(False))
 
     # IP 筛选
     if ip:
@@ -181,7 +181,7 @@ async def get_audit_stats(
     # 今日游客操作数
     guest_count_result = await db.execute(
         select(func.count()).select_from(AuditLog)
-        .where(func.date(AuditLog.created_at) == today, AuditLog.is_guest == True)
+        .where(func.date(AuditLog.created_at) == today, AuditLog.is_guest.is_(True))
     )
     guest_count = guest_count_result.scalar() or 0
 

@@ -2,22 +2,23 @@
 TextMirror 异步文档校对任务
 通过 Celery 在后台执行耗时的大模型调用
 """
-import os
-import json
 import asyncio
+import json
+import os
 import threading
+
 from celery import signals
 from loguru import logger
 from sqlalchemy import select, update
 
-from app.celery_app import celery_app
-from app.core.config import settings
-from app.core.file_security import sanitize_filename, safe_upload_path, build_download_url
+import app.models.role  # noqa
 
 # 注册 ORM 元数据：任务内保存 ProofreadRecord 时其 user_id 外键需要解析到 users 表，
 # 且 User↔Role 相互引用需同时注册，否则 mapper 初始化失败（记录保存静默失败）
 import app.models.user  # noqa
-import app.models.role  # noqa
+from app.celery_app import celery_app
+from app.core.config import settings
+from app.core.file_security import build_download_url, safe_upload_path, sanitize_filename
 
 
 def _run_async(coro):
@@ -51,9 +52,10 @@ _sync_engine_lock = threading.Lock()
 def _refund_key_daily_quota(api_key_id: int) -> None:
     """同步 Redis 退还密钥日配额计数（失败不抛出，仅记日志）"""
     try:
-        import redis as sync_redis
         from datetime import datetime
         from zoneinfo import ZoneInfo
+
+        import redis as sync_redis
 
         r = sync_redis.Redis(
             host=settings.REDIS_HOST,
@@ -150,6 +152,7 @@ def async_proofread_document(self, db_task_id: int):
     Redis broker 消息体不再包含文档全文。
     """
     from sqlalchemy.orm import Session
+
     from app.models.proofread_task import ProofreadTask
     from app.models.uploaded_document import UploadedDocument
 
@@ -320,8 +323,10 @@ def clean_uploaded_documents():
     """
     import os
     import time
-    from sqlalchemy import create_engine, text as sa_text
     from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import create_engine
+    from sqlalchemy import text as sa_text
 
     from app.services.upload import remove_upload_dir
 
@@ -413,8 +418,10 @@ def clean_old_audit_logs(retention_days: int = 90):
     定时清理过期审计日志（默认保留 90 天，与后台手动清理同口径）。
     由 celery beat 每日 03:30 触发；audit_logs 含全文快照，只进不出会持续膨胀。
     """
-    from sqlalchemy import create_engine, text as sa_text
     from datetime import datetime, timedelta
+
+    from sqlalchemy import create_engine
+    from sqlalchemy import text as sa_text
 
     sync_url = settings.DATABASE_URL.replace("postgresql+asyncpg", "postgresql+psycopg2")
     engine = create_engine(sync_url)

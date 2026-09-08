@@ -207,7 +207,7 @@ async function saveProfile() {
       editMode.value = false
       // 刷新用户信息
       await userStore.fetchUserInfo()
-    } catch (e) {
+    } catch (_e) {
       // axios拦截器处理
     } finally {
       saving.value = false
@@ -230,7 +230,7 @@ async function handleChangePassword() {
       passwordForm.old_password = ''
       passwordForm.new_password = ''
       passwordForm.confirm_password = ''
-    } catch (e) {
+    } catch (_e) {
       // axios拦截器处理
     } finally {
       changingPwd.value = false

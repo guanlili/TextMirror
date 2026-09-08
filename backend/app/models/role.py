@@ -5,7 +5,7 @@ RBAC: Role-Based Access Control
 """
 from typing import Optional
 
-from sqlalchemy import String, Integer, Boolean, Text, ForeignKey
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel

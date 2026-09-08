@@ -4,6 +4,7 @@ TextMirror Celery 应用实例
 """
 from celery import Celery
 from celery.schedules import crontab
+
 from app.core.config import settings
 
 # 使用独立 Redis DB 避免和缓存冲突 (db=8)

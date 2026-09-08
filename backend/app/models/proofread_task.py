@@ -5,7 +5,7 @@ TextMirror 持久校对任务模型
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Integer, Boolean, JSON, DateTime, Index
+from sqlalchemy import JSON, Boolean, DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel

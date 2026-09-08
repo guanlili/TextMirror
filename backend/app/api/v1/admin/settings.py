@@ -6,14 +6,16 @@ import os
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.dependencies import require_permission
 from app.services.site_config import (
-    get_site_config, update_site_config,
-    ICON_UPLOAD_DIR, ALLOWED_ICON_EXTENSIONS,
+    ALLOWED_ICON_EXTENSIONS,
+    ICON_UPLOAD_DIR,
+    get_site_config,
+    update_site_config,
 )
 
 router = APIRouter(prefix="/settings", tags=["管理后台-系统设置"])

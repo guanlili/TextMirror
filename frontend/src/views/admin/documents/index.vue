@@ -139,7 +139,7 @@ async function handleDownload(row: AdminDocumentItem) {
     a.download = row.filename
     a.click()
     window.URL.revokeObjectURL(url)
-  } catch (e: any) {
+  } catch (_e: any) {
     ElMessage.error('下载失败')
   }
 }

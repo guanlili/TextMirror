@@ -4,16 +4,16 @@ TextMirror 文档处理服务
 """
 import os
 import re
-import subprocess
 import shutil
+import subprocess
 import tempfile
 from html import escape as html_escape
 from typing import List
-from loguru import logger
 
 import fitz  # PyMuPDF
 from docx import Document as DocxDocument
 from docx.shared import RGBColor
+from loguru import logger
 
 # CSS 值白名单：DOCX 属性值会进入 HTML style 属性，直接拼接会被
 # 恶意字体名（如 `" onmouseover="alert(1)`）逃逸出属性并注入事件处理器

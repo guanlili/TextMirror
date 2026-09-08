@@ -3,7 +3,7 @@ TextMirror 校对记录模型
 """
 from typing import Optional
 
-from sqlalchemy import String, Integer, Text, JSON, ForeignKey, Index
+from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel

@@ -3,22 +3,21 @@ TextMirror 用户管理 API（管理后台）
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
-
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.core.security import hash_password
-from app.models.user import User
 from app.models.role import Role
+from app.models.user import User
 from app.schemas.user import (
     UserCreateRequest,
-    UserUpdateRequest,
     UserResponse,
+    UserUpdateRequest,
 )
 
 router = APIRouter(prefix="/users", tags=["用户管理"])
@@ -197,11 +196,14 @@ async def delete_user(
       - 用户词库及词条、放行词：直接删除
     """
     import traceback
-    from sqlalchemy import update as sql_update, delete as sql_delete
+
+    from sqlalchemy import delete as sql_delete
+    from sqlalchemy import update as sql_update
     from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
     from app.models.audit_log import AuditLog
-    from app.models.proofread import ProofreadRecord
     from app.models.dictionary import Dictionary, DictionaryEntry, WhitelistWord
+    from app.models.proofread import ProofreadRecord
     from app.models.uploaded_document import UploadedDocument
 
     result = await db.execute(select(User).where(User.id == user_id))

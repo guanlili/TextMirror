@@ -4,22 +4,22 @@ TextMirror 文本校对 API
 import json
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from loguru import logger
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user_optional
 from app.core.rate_limit import check_guest_rate_limit, check_user_quota, reject_guest_if_disabled
 from app.models.proofread import ProofreadRecord
 from app.schemas.proofread import (
+    ProofreadIssue,
     TextProofreadRequest,
     TextProofreadResponse,
-    ProofreadIssue,
 )
+from app.services.audit_log import AuditTimer, record_audit_log
 from app.services.proofread import proofread_text
-from app.services.audit_log import record_audit_log, AuditTimer
 
 router = APIRouter(prefix="/proofread", tags=["校对"])
 
@@ -196,11 +196,12 @@ async def text_proofread_compare(
 
     # 加载模型配置（仅启用的可参与对比）
     from sqlalchemy import select as _select
+
     from app.models.llm_config import LLMConfig
     cfg_result = await db.execute(
         _select(LLMConfig).where(
             LLMConfig.id.in_(request.config_ids),
-            LLMConfig.is_enabled == True,
+            LLMConfig.is_enabled.is_(True),
         )
     )
     configs = {c.id: c for c in cfg_result.scalars().all()}

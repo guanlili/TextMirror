@@ -4,39 +4,46 @@ TextMirror 文档校对 API
 """
 import asyncio
 import hashlib
-import os
 import json
+import os
 import uuid
+from collections import OrderedDict
+from threading import Lock
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Header, Request
+
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
+from loguru import logger
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from loguru import logger
 
-from app.core.database import get_db, async_session_factory
+from app.core.database import async_session_factory, get_db
 from app.core.dependencies import get_current_user_optional
-from app.core.security import derive_guest_task_access_token, hash_scoped_idempotency_key
-from app.core.rate_limit import check_guest_rate_limit, check_upload_rate_limit, check_user_quota
 from app.core.file_security import (
-    sanitize_filename,
-    safe_upload_path,
     build_download_url,
+    safe_upload_path,
+    sanitize_filename,
     verify_download_signature,
 )
+from app.core.rate_limit import check_guest_rate_limit, check_upload_rate_limit, check_user_quota
+from app.core.security import derive_guest_task_access_token, hash_scoped_idempotency_key
 from app.models.proofread import ProofreadRecord
 from app.models.uploaded_document import UploadedDocument
 from app.schemas.document import (
-    DocumentUploadResponse,
     DocumentProofreadRequest,
     DocumentProofreadResponse,
+    DocumentUploadResponse,
 )
-from app.services.document import extract_text_from_file, extract_html_from_file, generate_corrected_docx, generate_corrected_txt
+from app.services.audit_log import record_audit_log
+from app.services.document import (
+    extract_html_from_file,
+    extract_text_from_file,
+    generate_corrected_docx,
+    generate_corrected_txt,
+)
 from app.services.proofread import proofread_text
 from app.services.upload import UploadRejected, remove_upload_silently, store_upload
-from app.services.audit_log import record_audit_log
-
 from app.tasks.proofread_task import async_proofread_document
 
 router = APIRouter(prefix="/document", tags=["文档校对"])
@@ -66,9 +73,6 @@ ALLOWED_EXTENSIONS = {".doc", ".docx", ".pdf", ".txt"}
 
 # 上传文件文本缓存：LRU 限容（entry 含全文提取文本，无淘汰会随上传量无限增长；
 # 未命中时从 uploaded_documents 表回填，容量仅影响回填频率）
-from collections import OrderedDict
-from threading import Lock
-
 _UPLOAD_CACHE_MAX = 200
 _uploaded_files_cache: OrderedDict = OrderedDict()
 _upload_cache_lock = Lock()
@@ -119,6 +123,7 @@ async def _check_document_ownership(file_info: dict, current_user, db: AsyncSess
         return
     # 非本人：仅超级管理员放行
     from sqlalchemy import select as _select
+
     from app.models.role import Role
     result = await db.execute(_select(Role).where(Role.id == current_user.role_id))
     role = result.scalar_one_or_none()

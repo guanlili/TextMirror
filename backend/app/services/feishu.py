@@ -13,9 +13,10 @@ import ssl
 import threading
 import time
 import traceback
-import urllib.request
 import urllib.error
-from typing import Optional, Dict, Any
+import urllib.request
+from typing import Any, Dict, Optional
+
 from loguru import logger
 
 from app.core.config import settings

@@ -4,18 +4,18 @@ TextMirror 角色权限管理 API（管理后台）
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
 from loguru import logger
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import require_permission
-from app.models.role import Role, Permission, RolePermission
+from app.models.role import Permission, Role, RolePermission
 from app.schemas.role import (
-    RoleCreateRequest,
-    RoleUpdateRequest,
-    RoleResponse,
     PermissionResponse,
+    RoleCreateRequest,
+    RoleResponse,
+    RoleUpdateRequest,
 )
 
 router = APIRouter(prefix="/roles", tags=["角色权限管理"])
