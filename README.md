@@ -170,21 +170,18 @@ cd ../frontend && npm run dev
 
 ## 🐳 Docker 部署
 
+服务器端构建，三步上线：
+
 ```bash
-# 1. 修改生产配置
-cp backend/.env.example backend/.env.production
-# 编辑 .env.production 填入实际的数据库、Redis、大模型 API Key 等
+# 1. 克隆代码
+git clone https://github.com/guanlili/TextMirror.git /opt/TextMirror && cd /opt/TextMirror
 
-# 2. 构建镜像（Windows 双击 build_images.bat，或任意平台执行）
-build_images.bat
-# macOS / Linux 等价命令：
-# docker build -t textmirror-backend:latest ./backend
-# docker build -t textmirror-frontend:latest ./frontend
-# mkdir -p docker-images && docker save textmirror-backend:latest -o docker-images/textmirror-backend.tar \
-#   && docker save textmirror-frontend:latest -o docker-images/textmirror-frontend.tar
+# 2. 配置环境变量
+#    根目录 .env：POSTGRES_PASSWORD / REDIS_PASSWORD（供 compose 读取）
+#    backend/.env.production：cp backend/.env.example backend/.env.production 后填入数据库、Redis、大模型 API Key 等
 
-# 3. 上传到服务器后部署
-bash deploy.sh
+# 3. 构建并启动（5 容器：前端/后端/Celery/PostgreSQL/Redis）
+docker compose up -d --build
 ```
 
 ### 启用 HTTPS（可选）
@@ -193,7 +190,7 @@ bash deploy.sh
 2. 将 `frontend/nginx.production.ssl.conf` 重命名为 `nginx.production.conf`
 3. 修改证书路径后重新构建前端镜像
 
-> 详细部署文档请参考 [部署操作指南](部署操作指南.md)
+> 首次初始化、更新、回滚、备份、故障排查等详见 [系统运维操作手册](系统运维操作手册.md)
 
 ---
 
@@ -230,11 +227,8 @@ TextMirror/
 
 | 文档 | 说明 |
 |------|------|
-| [数据库初始化说明](数据库初始化说明.md) | 数据库安装、配置、初始化、常见问题 |
-| [系统功能设计文档](系统功能设计文档.md) | 技术架构、数据模型、API 设计、开发规范 |
-| [系统运维操作手册](系统运维操作手册.md) | 本地开发、生产部署、日常运维、故障排查 |
-| [功能说明文档](智能文档审校平台功能说明.md) | 产品功能描述、用户端 / 管理后台功能清单 |
-| [部署操作指南](部署操作指南.md) | Docker 部署、日常更新、回滚操作 |
+| [系统功能设计文档](系统功能设计文档.md) | 技术架构、数据模型、API 设计、功能清单、开发规范 |
+| [系统运维操作手册](系统运维操作手册.md) | 本地开发、生产部署、数据库初始化、更新回滚、故障排查 |
 | [用户使用手册](用户使用手册.md) | 面向终端用户的操作指南 |
 
 ---
