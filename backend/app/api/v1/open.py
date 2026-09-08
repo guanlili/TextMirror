@@ -550,6 +550,7 @@ async def open_submit_document(
         extracted_text=extracted_text,
         user_id=user.id,
         username=user.username,
+        owner_kind="user",
         status="uploaded",
     )
     db.add(doc_record)

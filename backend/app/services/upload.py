@@ -57,6 +57,27 @@ def remove_upload_silently(file_path: str) -> None:
         logger.warning(f"[上传清理] 清理失败 {file_path}: {e}")
 
 
+def remove_upload_dir(file_id: str) -> None:
+    """
+    删除整个 file_id 目录（原文件 + 修订件同在该目录）。
+    remove_upload_silently 仅在目录为空时移除目录，不适用于删除场景。
+    """
+    import shutil
+
+    if not file_id:
+        return
+    upload_dir = os.path.abspath(settings.UPLOAD_DIR)
+    target = os.path.abspath(os.path.join(upload_dir, file_id))
+    # 纵深防御：只允许删除上传根目录下的子目录
+    if not target.startswith(upload_dir + os.sep) or target == upload_dir:
+        logger.warning(f"[上传清理] 拒绝删除越界路径: {target}")
+        return
+    try:
+        shutil.rmtree(target, ignore_errors=True)
+    except OSError as e:
+        logger.warning(f"[上传清理] 删除目录失败 {target}: {e}")
+
+
 async def store_upload(file: UploadFile, file_id: str, filename: str, file_ext: str) -> StoredUpload:
     """
     分块落盘并校验内容，成功后原子改名为正式文件。

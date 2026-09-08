@@ -66,13 +66,31 @@ def _cache_get(file_id: str) -> Optional[dict]:
         return info
 
 
+def invalidate_document_cache(file_id: str) -> None:
+    """清除指定文档的进程内缓存（后台删除文档时调用，避免删除后仍可凭缓存校对）"""
+    with _upload_cache_lock:
+        _uploaded_files_cache.pop(file_id, None)
+
+
 async def _check_document_ownership(file_info: dict, current_user, db: AsyncSession) -> None:
-    """校验文档归属：游客上传的文档（user_id=None）不限制；登录用户的文档仅本人及超管可访问"""
-    owner_id = file_info.get("user_id")
-    if owner_id is None:
+    """
+    校验文档归属：
+      - legacy：上传者已删号或来源不可考，一律拒绝（此前这类文档因 user_id 为空
+        被当作游客文档放行，等于删号后文档对所有人开放）
+      - guest：游客上传，file_id 本身即访问凭证
+      - user：仅本人及超管可访问
+    """
+    owner_kind = file_info.get("owner_kind") or ("user" if file_info.get("user_id") is not None else "legacy")
+    not_found = HTTPException(status_code=404, detail="文件不存在或已过期，请重新上传")
+
+    if owner_kind == "guest":
         return
-    if current_user is None:
-        raise HTTPException(status_code=404, detail="文件不存在或已过期，请重新上传")
+    if owner_kind != "user":
+        raise not_found
+
+    owner_id = file_info.get("user_id")
+    if owner_id is None or current_user is None:
+        raise not_found
     if current_user.id == owner_id:
         return
     # 非本人：仅超级管理员放行
@@ -81,7 +99,48 @@ async def _check_document_ownership(file_info: dict, current_user, db: AsyncSess
     result = await db.execute(_select(Role).where(Role.id == current_user.role_id))
     role = result.scalar_one_or_none()
     if not (role and role.code == "super_admin"):
+        raise not_found
+
+
+async def _load_document_info(file_id: str, db: AsyncSession) -> dict:
+    """
+    加载文档信息：始终先查数据库确认记录存在且未被删除，再复用内存缓存里的正文。
+    （此前缓存命中会直接跳过状态检查，导致后台软删除后仍能继续校对该文档）
+    """
+    from sqlalchemy import select
+
+    result = await db.execute(
+        select(UploadedDocument).where(UploadedDocument.file_id == file_id)
+    )
+    doc_record = result.scalar_one_or_none()
+    if doc_record is None or doc_record.status == "deleted":
         raise HTTPException(status_code=404, detail="文件不存在或已过期，请重新上传")
+
+    cached = _cache_get(file_id)
+    extracted_text = (cached or {}).get("text") or doc_record.extracted_text
+    if not extracted_text:
+        # 正文缺失：尝试从磁盘重新提取
+        if not os.path.exists(doc_record.file_path):
+            raise HTTPException(status_code=404, detail="文件已从服务器删除，请重新上传")
+        try:
+            extracted_text = await asyncio.to_thread(
+                extract_text_from_file, doc_record.file_path, doc_record.file_ext
+            )
+        except Exception as e:
+            logger.error(f"重新提取文本失败: {e}")
+            raise HTTPException(status_code=500, detail="文本提取失败，请重新上传")
+
+    file_info = {
+        "filename": doc_record.filename,
+        "file_path": doc_record.file_path,
+        "file_ext": doc_record.file_ext,
+        "file_size": doc_record.file_size,
+        "text": extracted_text,
+        "user_id": doc_record.user_id,
+        "owner_kind": doc_record.owner_kind,
+    }
+    _cache_put(file_id, file_info)
+    return file_info
 
 
 @router.post("/upload", response_model=DocumentUploadResponse, summary='上传文档并提取文本')
@@ -171,6 +230,7 @@ async def upload_document(
                 extracted_text=extracted_text,
                 user_id=current_user.id if current_user else None,
                 username=current_user.username if current_user else None,
+                owner_kind="user" if current_user else "guest",
                 status="uploaded",
             )
             db.add(doc_record)
@@ -190,6 +250,7 @@ async def upload_document(
         "file_size": file_size,
         "text": extracted_text,
         "user_id": current_user.id if current_user else None,
+        "owner_kind": "user" if current_user else "guest",
     })
 
     logger.info(f"文档上传成功: {filename}, 文本长度={len(extracted_text)}")
@@ -229,47 +290,8 @@ async def document_proofread(
     对已上传的文档执行校对
     需要先调用 /upload 获取 file_id
     """
-    # 优先从内存缓存获取，缓存未命中则从数据库查找
-    file_info = _cache_get(request.file_id)
-    if file_info is None:
-        # 从数据库查找上传记录
-        from sqlalchemy import select
-        result = await db.execute(
-            select(UploadedDocument).where(
-                UploadedDocument.file_id == request.file_id,
-                UploadedDocument.status != "deleted",
-            )
-        )
-        doc_record = result.scalar_one_or_none()
-        if doc_record is None:
-            raise HTTPException(status_code=404, detail="文件不存在或已过期，请重新上传")
-
-        # 从数据库记录还原 file_info
-        extracted_text = doc_record.extracted_text
-        if not extracted_text:
-            # extracted_text 为空，尝试从磁盘重新提取
-            if os.path.exists(doc_record.file_path):
-                try:
-                    extracted_text = await asyncio.to_thread(
-                        extract_text_from_file, doc_record.file_path, doc_record.file_ext
-                    )
-                except Exception as e:
-                    logger.error(f"重新提取文本失败: {e}")
-                    raise HTTPException(status_code=500, detail="文本提取失败，请重新上传")
-            else:
-                raise HTTPException(status_code=404, detail="文件已删除，请重新上传")
-
-        file_info = {
-            "filename": doc_record.filename,
-            "file_path": doc_record.file_path,
-            "file_ext": doc_record.file_ext,
-            "file_size": doc_record.file_size,
-            "text": extracted_text,
-            "user_id": doc_record.user_id,
-        }
-        # 回填内存缓存，加速后续请求
-        _cache_put(request.file_id, file_info)
-        logger.info(f"从数据库恢复文件信息: {doc_record.filename} (file_id={request.file_id})")
+    # 加载文档（先校验记录存在且未删除，再复用缓存正文）
+    file_info = await _load_document_info(request.file_id, db)
 
     # 游客限流
     if current_user is None:
@@ -382,48 +404,10 @@ async def document_proofread_async(
     异步文档校对 - 提交 Celery 任务
     返回 task_id，前端轮询 /tasks/{task_id} 获取进度和结果
     """
-    file_info = _cache_get(request.file_id)
-    if file_info is None:
-        # 从数据库查找上传记录
-        from sqlalchemy import select
-        async with async_session_factory() as db:
-            result = await db.execute(
-                select(UploadedDocument).where(
-                    UploadedDocument.file_id == request.file_id,
-                    UploadedDocument.status != "deleted",
-                )
-            )
-            doc_record = result.scalar_one_or_none()
-            if doc_record is None:
-                raise HTTPException(status_code=404, detail="文件不存在或已过期，请重新上传")
-
-            extracted_text = doc_record.extracted_text
-            if not extracted_text:
-                if os.path.exists(doc_record.file_path):
-                    try:
-                        extracted_text = await asyncio.to_thread(
-                            extract_text_from_file, doc_record.file_path, doc_record.file_ext
-                        )
-                    except Exception as e:
-                        logger.error(f"重新提取文本失败: {e}")
-                        raise HTTPException(status_code=500, detail="文本提取失败，请重新上传")
-                else:
-                    raise HTTPException(status_code=404, detail="文件已从服务器删除，请重新上传")
-
-            file_info = {
-                "filename": doc_record.filename,
-                "file_path": doc_record.file_path,
-                "file_ext": doc_record.file_ext,
-                "file_size": doc_record.file_size,
-                "text": extracted_text,
-                "user_id": doc_record.user_id,
-            }
-            _cache_put(request.file_id, file_info)
-
-    # 归属校验（缓存命中与查库路径统一在此校验）
-    if file_info.get("user_id") is not None:
-        async with async_session_factory() as db:
-            await _check_document_ownership(file_info, current_user, db)
+    async with async_session_factory() as db:
+        file_info = await _load_document_info(request.file_id, db)
+        # 归属校验无条件执行：此前用 user_id is not None 包裹，legacy 文档会整体跳过
+        await _check_document_ownership(file_info, current_user, db)
 
     # 游客限流
     if current_user is None:
@@ -458,6 +442,7 @@ async def download_file(
     filename: str,
     expires: int = 0,
     signature: str = "",
+    db: AsyncSession = Depends(get_db),
 ):
     """
     签名下载：校验 HMAC 签名与有效期后返回上传目录内的文件
@@ -471,6 +456,15 @@ async def download_file(
         file_path = safe_upload_path(file_id, filename)
     except ValueError:
         raise HTTPException(status_code=403, detail="下载链接无效或已过期，请重新校对生成")
+
+    # 已删除的文档不得凭旧签名继续下载（签名有效期 24h，删除后不应仍可取回）
+    from sqlalchemy import select
+    result = await db.execute(
+        select(UploadedDocument.status).where(UploadedDocument.file_id == file_id)
+    )
+    doc_status = result.scalar_one_or_none()
+    if doc_status == "deleted":
+        raise HTTPException(status_code=404, detail="文件不存在或已被清理")
 
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="文件不存在或已被清理")
