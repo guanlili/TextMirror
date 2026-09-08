@@ -18,12 +18,17 @@ nginx/
 # ---- Python ----
 backend/venv/
 .venv/
+.venv-test/
 __pycache__/
 *.py[cod]
 *.pyo
 *.egg-info/
 dist/
 *.egg
+
+# ---- 私钥/证书文件 ----
+*.pem
+*.key
 
 # ---- Node.js ----
 frontend/node_modules/

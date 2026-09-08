@@ -7,14 +7,18 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
+# SQLite（单测环境）方言默认 NullPool，不接受连接池容量参数
+_pool_kwargs = (
+    {}
+    if settings.DATABASE_URL.startswith("sqlite")
+    else {"pool_size": 20, "max_overflow": 10, "pool_pre_ping": True, "pool_recycle": 3600}
+)
+
 # 创建异步数据库引擎
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,  # 始终关闭 SQL echo（即使 DEBUG），避免日志开销影响接口耗时
-    pool_size=20,
-    max_overflow=10,
-    pool_pre_ping=True,
-    pool_recycle=3600,
+    **_pool_kwargs,
 )
 
 # 异步Session工厂
