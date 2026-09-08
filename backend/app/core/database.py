@@ -4,12 +4,13 @@ TextMirror 数据库引擎配置
 """
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
-# SQLite（单测环境）方言默认 NullPool，不接受连接池容量参数
+# SQLite（单测环境）使用 NullPool，避免文件库在多连接间产生锁等待
 _pool_kwargs = (
-    {}
+    {"poolclass": NullPool, "connect_args": {"timeout": 20}}
     if settings.DATABASE_URL.startswith("sqlite")
     else {"pool_size": 20, "max_overflow": 10, "pool_pre_ping": True, "pool_recycle": 3600}
 )
