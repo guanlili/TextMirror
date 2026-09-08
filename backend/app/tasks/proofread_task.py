@@ -86,7 +86,11 @@ def _get_sync_engine():
         with _sync_engine_lock:
             if _sync_engine is None or _sync_engine_pid != pid:
                 from sqlalchemy import create_engine
-                sync_url = settings.DATABASE_URL.replace("postgresql+asyncpg", "postgresql+psycopg2")
+                sync_url = settings.DATABASE_URL
+                if sync_url.startswith("postgresql+asyncpg"):
+                    sync_url = sync_url.replace("postgresql+asyncpg", "postgresql+psycopg2", 1)
+                elif sync_url.startswith("sqlite+aiosqlite"):
+                    sync_url = sync_url.replace("sqlite+aiosqlite", "sqlite+pysqlite", 1)
                 _sync_engine = create_engine(
                     sync_url,
                     pool_pre_ping=True,
@@ -130,6 +134,64 @@ class _CancelledError(Exception):
     """worker 内部信号：用户已取消"""
 
 
+class ProofreadRetryableError(Exception):
+    """可重试的校对失败（LLM/网络/数据库瞬态错误），触发 Celery 自动重试。"""
+
+
+class ProofreadDocumentTask(celery_app.Task):
+    """文档校对任务基类：统一处理最终失败时的配额退款。"""
+
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        """
+        任务最终失败时统一退还密钥日配额。
+        退款从任务体移到此处，保证多次重试只退一次；
+        用户取消、集成方指定无效配置等不重试场景也不退款。
+        """
+        from sqlalchemy.orm import Session
+        from app.models.proofread_task import ProofreadTask
+
+        if not args:
+            return
+        db_task_id = args[0]
+        sync_engine = _get_sync_engine()
+        try:
+            with Session(sync_engine) as session:
+                db_task = session.get(ProofreadTask, db_task_id)
+                if db_task is None:
+                    return
+                # 用户取消与集成方指定无效配置不退款；
+                # 服务端未配置活跃模型属于可退款场景。
+                if db_task.status == "CANCELLED":
+                    return
+                if db_task.error_code == "INVALID_CONFIG":
+                    return
+                # 若仍处在执行/重试状态，标记为最终失败
+                if db_task.status in ("STARTED", "RETRYING"):
+                    from datetime import datetime, timezone
+
+                    db_task.status = "FAILURE"
+                    if not db_task.error_code:
+                        db_task.error_code = "PROOFREAD_FAILED"
+                    if not db_task.message:
+                        db_task.message = "校对任务最终失败"
+                    db_task.finished_at = datetime.now(timezone.utc)
+                    session.commit()
+                if db_task.owner_api_key_id:
+                    _refund_key_daily_quota(db_task.owner_api_key_id)
+        except Exception as e:
+            logger.warning(f"[on_failure] 处理失败 task_id={task_id}: {e}")
+
+
+def _is_invalid_config_error(exc: Exception) -> bool:
+    """用户指定了无效 config_id：不重试、不退款。"""
+    return "指定的模型配置不存在或已停用" in str(exc)
+
+
+def _is_missing_model_config_error(exc: Exception) -> bool:
+    """服务端未配置活跃模型：不重试但退款（非用户责任）。"""
+    return "尚未配置可用的大模型" in str(exc)
+
+
 def _check_cancel(session, db_task, celery_task_id: str) -> None:
     """阶段间协作退出点：刷新 DB 标志，若已取消则抛 _CancelledError"""
     session.refresh(db_task)
@@ -144,7 +206,14 @@ def _check_cancel(session, db_task, celery_task_id: str) -> None:
         raise _CancelledError()
 
 
-@celery_app.task(bind=True, name="proofread.async_document")
+@celery_app.task(
+    bind=True,
+    base=ProofreadDocumentTask,
+    name="proofread.async_document",
+    autoretry_for=(ProofreadRetryableError,),
+    retry_kwargs={"max_retries": 2, "countdown": 5},
+    retry_backoff=True,
+)
 def async_proofread_document(self, db_task_id: int):
     """
     异步执行文档校对任务（DB 驱动）。
@@ -159,18 +228,22 @@ def async_proofread_document(self, db_task_id: int):
     celery_task_id = self.request.id
     sync_engine = _get_sync_engine()
 
+
+    is_retry = getattr(self.request, "retries", 0) > 0
+    expected_status = "RETRYING" if is_retry else "PENDING"
+
     try:
         with Session(sync_engine) as session:
             from datetime import datetime, timezone
 
             claim = session.execute(
                 update(ProofreadTask)
-                .where(ProofreadTask.id == db_task_id, ProofreadTask.status == "PENDING")
+                .where(ProofreadTask.id == db_task_id, ProofreadTask.status == expected_status)
                 .values(status="STARTED", started_at=datetime.now(timezone.utc))
             )
             if claim.rowcount != 1:
                 session.rollback()
-                logger.info(f"[Task {celery_task_id}] 任务非 PENDING，跳过重复消息")
+                logger.info(f"[Task {celery_task_id}] 任务非 {expected_status}，跳过")
                 return {"skipped": True, "task_id": celery_task_id}
             session.commit()
 
@@ -204,7 +277,6 @@ def async_proofread_document(self, db_task_id: int):
             domain = params.get("domain", "general")
             config_id = params.get("config_id")
             user_id = db_task.owner_user_id
-            api_key_id = db_task.owner_api_key_id
             file_id = doc_record.file_id
             filename = doc_record.filename
             file_path = doc_record.file_path
@@ -226,15 +298,29 @@ def async_proofread_document(self, db_task_id: int):
                 ))
             except Exception as e:
                 logger.error(f"[Task {celery_task_id}] 校对失败: {e}")
-                if api_key_id:
-                    _refund_key_daily_quota(api_key_id)
-                db_task.status = "FAILURE"
-                db_task.error_code = "PROOFREAD_FAILED"
-                db_task.message = f"校对失败: {e}"
-                from datetime import datetime, timezone
-                db_task.finished_at = datetime.now(timezone.utc)
+                if _is_invalid_config_error(e):
+                    db_task.status = "FAILURE"
+                    db_task.error_code = "INVALID_CONFIG"
+                    db_task.message = f"校对失败: {e}"
+                    from datetime import datetime, timezone
+                    db_task.finished_at = datetime.now(timezone.utc)
+                    session.commit()
+                    raise
+                if _is_missing_model_config_error(e):
+                    db_task.status = "FAILURE"
+                    db_task.error_code = "MODEL_NOT_CONFIGURED"
+                    db_task.message = f"校对失败: {e}"
+                    from datetime import datetime, timezone
+                    db_task.finished_at = datetime.now(timezone.utc)
+                    session.commit()
+                    raise
+                # 瞬态错误：状态置为 RETRYING，由 Celery 自动重试；
+                # 退款移到 on_failure，避免重试期间重复退还。
+                db_task.status = "RETRYING"
+                db_task.error_code = "PROOFREAD_RETRYABLE"
+                db_task.message = f"校对暂时失败，将自动重试: {e}"
                 session.commit()
-                raise
+                raise ProofreadRetryableError(f"校对服务暂时不可用: {e}") from e
 
             _check_cancel(session, db_task, celery_task_id)
             _update_task_progress(session, db_task, "generate", 80, "正在生成修订文档...")

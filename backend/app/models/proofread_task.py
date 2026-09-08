@@ -41,7 +41,7 @@ class ProofreadTask(BaseModel):
     )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="PENDING",
-        comment="PENDING/STARTED/PROGRESS/SUCCESS/FAILURE/REVOKED/CANCELLED",
+        comment="PENDING/STARTED/PROGRESS/RETRYING/SUCCESS/FAILURE/REVOKED/CANCELLED",
     )
     phase: Mapped[Optional[str]] = mapped_column(
         String(20), nullable=True, comment="upload/proofread/generate/save"
