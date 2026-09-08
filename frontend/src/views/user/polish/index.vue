@@ -326,6 +326,7 @@ const selectedModelIds = ref<number[]>([])
 const compareResults = ref<ModelCompareItem[]>([])
 const comparing = ref(false)
 const hasCompareResult = computed(() => compareResults.value.length > 0)
+let compareAbort: (() => void) | null = null
 
 onUnmounted(() => {
   streamAbort?.()
@@ -403,7 +404,7 @@ async function runCompareStream(text: string, style: string, configIds: number[]
   let gotAny = false
   let failed = false
 
-  const { promise, abort: _abort } = polishCompareStreamApi({ text, style, config_ids: configIds }, (evt) => {
+  const { promise, abort } = polishCompareStreamApi({ text, style, config_ids: configIds }, (evt) => {
     if (evt.event === 'meta' && evt.models) {
       // meta 到达即建立各模型卡片（等待态）
       compareResults.value = evt.models.map(m => ({
@@ -435,13 +436,18 @@ async function runCompareStream(text: string, style: string, configIds: number[]
       target.error = evt.message || '调用失败'
     }
   })
+  compareAbort = abort
 
   try {
     await promise
   } catch (e: any) {
-    if (e?.name !== 'AbortError' && !gotAny) {
+    // 卸载中断向上抛出，调用方吞掉并跳过同步回退
+    if (e?.name === 'AbortError') throw e
+    if (!gotAny) {
       failed = true
     }
+  } finally {
+    compareAbort = null
   }
   return !failed && gotAny
 }
