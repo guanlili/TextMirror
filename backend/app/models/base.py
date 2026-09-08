@@ -4,7 +4,7 @@ TextMirror 模型基类
 """
 from datetime import datetime
 
-from sqlalchemy import Integer, DateTime, func
+from sqlalchemy import DateTime, Integer, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base

@@ -401,14 +401,14 @@ onMounted(() => {
 async function fetchProviders() {
   try {
     providerOptions.value = await listLLMProvidersApi()
-  } catch (e) { /* 静默 */ }
+  } catch (_e) { /* 静默 */ }
 }
 
 async function fetchList() {
   loading.value = true
   try {
     configList.value = await listLLMConfigsApi()
-  } catch (e) {
+  } catch (_e) {
     ElMessage.error('加载模型配置失败')
   } finally {
     loading.value = false
@@ -545,7 +545,7 @@ async function handleTest(id: number) {
     } else {
       ElMessage.error(`连接失败: ${result.message}`)
     }
-  } catch (e: any) {
+  } catch (_e: any) {
     testResults.value[id] = { success: false, latency: '', message: '请求异常' }
     ElMessage.error('测试请求失败')
   } finally {
@@ -569,7 +569,7 @@ async function handleToggleEnabled(item: LLMConfigItem, enabled: boolean) {
     await updateLLMConfigApi(item.id, { is_enabled: enabled })
     ElMessage.success(enabled ? '已启用' : '已停用')
     fetchList()
-  } catch (e) {
+  } catch (_e) {
     ElMessage.error('操作失败')
   }
 }

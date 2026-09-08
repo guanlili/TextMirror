@@ -6,7 +6,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Any, Tuple
+from typing import Any, Optional, Tuple
 
 import jwt
 from passlib.context import CryptContext

@@ -3,16 +3,17 @@ TextMirror 系统配置管理 API（管理后台）
 包含：基本设置、飞书配置、安全设置、数据维护
 """
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete, cast, Date
-from loguru import logger
 
+from fastapi import APIRouter, Depends
+from loguru import logger
+from pydantic import BaseModel
+from sqlalchemy import Date, cast, delete
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.core.redis import get_redis
-from app.core.database import get_db
-from app.core.config import settings
 
 router = APIRouter(prefix="/system-config", tags=["系统配置管理"])
 
@@ -42,10 +43,10 @@ async def get_basic_settings(
     """获取系统基本设置"""
     redis = await get_redis()
     data = await redis.hgetall(BASIC_SETTINGS_KEY)
-    
+
     if not data:
         return BasicSettingsConfig()
-    
+
     return BasicSettingsConfig(
         version=data.get(b"version", b"1.0.0").decode(),
         debug=data.get(b"debug", b"0") == b"1",
@@ -90,10 +91,10 @@ async def get_feishu_settings(
     """获取飞书配置"""
     redis = await get_redis()
     data = await redis.hgetall(FEISHU_SETTINGS_KEY)
-    
+
     if not data:
         return FeishuSettingsConfig()
-    
+
     return FeishuSettingsConfig(
         enabled=data.get(b"enabled", b"0") == b"1",
         app_id=data.get(b"app_id", b"").decode(),
@@ -135,11 +136,11 @@ async def get_security_settings(
     """获取安全设置"""
     redis = await get_redis()
     data = await redis.hgetall(SECURITY_SETTINGS_KEY)
-    
+
     if not data:
         # 返回配置文件中的默认密码
         return SecuritySettingsConfig(default_password=settings.DEFAULT_USER_PASSWORD)
-    
+
     return SecuritySettingsConfig(
         default_password=data.get(b"default_password", settings.DEFAULT_USER_PASSWORD.encode()).decode(),
     )
@@ -156,10 +157,10 @@ async def update_security_settings(
         SECURITY_SETTINGS_KEY,
         mapping={"default_password": config.default_password}
     )
-    
+
     # 同时更新 settings 对象（运行时生效）
     settings.DEFAULT_USER_PASSWORD = config.default_password
-    
+
     logger.info("用户安全设置已更新")
     return config
 
@@ -180,14 +181,14 @@ async def clean_logs(
 ):
     """清理审计日志（默认保留90天）"""
     from app.models.audit_log import AuditLog
-    
+
     cutoff_date = datetime.utcnow().date() - timedelta(days=days)
     result = await db.execute(
         delete(AuditLog).where(cast(AuditLog.created_at, Date) < cutoff_date)
     )
     deleted = result.rowcount or 0
     await db.commit()
-    
+
     logger.info(f"清理审计日志: 删除 {deleted} 条（{days}天前）")
     return MaintenanceResult(
         success=True,
@@ -203,14 +204,14 @@ async def clean_temp_files(
     """清理临时文件"""
     import os
     import shutil
-    
+
     temp_dir = os.path.join(settings.UPLOAD_DIR, "temp")
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir)
         os.makedirs(temp_dir, exist_ok=True)
         logger.info("临时文件已清理")
         return MaintenanceResult(success=True, message="临时文件已清理")
-    
+
     return MaintenanceResult(success=True, message="无临时文件需要清理")
 
 
@@ -220,16 +221,16 @@ async def clean_cache(
 ):
     """清理 Redis 缓存（保留配置项）"""
     redis = await get_redis()
-    
+
     # 获取所有键
     keys = await redis.keys("*")
-    
+
     # 过滤出非配置项的缓存键
     cache_keys = [
         k for k in keys
         if not k.decode().startswith("system:")
     ]
-    
+
     if cache_keys:
         await redis.delete(*cache_keys)
         logger.info(f"Redis 缓存已清理: {len(cache_keys)} 个键")
@@ -238,7 +239,7 @@ async def clean_cache(
             message=f"已清理 {len(cache_keys)} 个缓存项",
             deleted_count=len(cache_keys),
         )
-    
+
     return MaintenanceResult(success=True, message="无缓存需要清理")
 
 
@@ -249,7 +250,7 @@ async def clean_expired_whitelist(
 ):
     """清理过期放行词"""
     from app.models.dictionary import WhitelistWord
-    
+
     now = datetime.utcnow()
     result = await db.execute(
         delete(WhitelistWord).where(
@@ -259,7 +260,7 @@ async def clean_expired_whitelist(
     )
     deleted = result.rowcount or 0
     await db.commit()
-    
+
     logger.info(f"清理过期放行词: 删除 {deleted} 条")
     return MaintenanceResult(
         success=True,

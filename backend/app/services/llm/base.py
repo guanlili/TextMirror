@@ -3,8 +3,8 @@ TextMirror 大模型 Provider 抽象基类
 定义统一的调用接口，支持多家模型供应商
 """
 from abc import ABC, abstractmethod
-from typing import Optional, List, Dict
 from dataclasses import dataclass
+from typing import Dict, List, Optional
 
 
 @dataclass

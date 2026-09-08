@@ -4,28 +4,28 @@ TextMirror API 路由聚合
 """
 from fastapi import APIRouter
 
-from app.api.v1.health import router as health_router
-from app.api.v1.auth import router as auth_router
-from app.api.v1.feishu import router as feishu_router
-from app.api.v1.proofread import router as proofread_router
-from app.api.v1.document import router as document_router
-from app.api.v1.dictionary import router as dictionary_router
-from app.api.v1.whitelist import router as whitelist_router
-from app.api.v1.history import router as history_router
-from app.api.v1.api_keys import router as api_keys_router
-from app.api.v1.tasks import router as tasks_router
-from app.api.v1.polish import router as polish_router
-from app.api.v1.site_info import router as site_info_router
+from app.api.v1.admin.audit import router as admin_audit_router
 from app.api.v1.admin.dashboard import router as admin_dashboard_router
-from app.api.v1.admin.roles import router as admin_roles_router
-from app.api.v1.admin.users import router as admin_users_router
+from app.api.v1.admin.documents import router as admin_documents_router
 from app.api.v1.admin.global_dict import router as admin_global_dict_router
 from app.api.v1.admin.llm_config import router as admin_llm_config_router
-from app.api.v1.admin.settings import router as admin_settings_router
-from app.api.v1.admin.audit import router as admin_audit_router
-from app.api.v1.admin.documents import router as admin_documents_router
 from app.api.v1.admin.policy import router as admin_policy_router
+from app.api.v1.admin.roles import router as admin_roles_router
+from app.api.v1.admin.settings import router as admin_settings_router
 from app.api.v1.admin.system_config import router as admin_system_config_router
+from app.api.v1.admin.users import router as admin_users_router
+from app.api.v1.api_keys import router as api_keys_router
+from app.api.v1.auth import router as auth_router
+from app.api.v1.dictionary import router as dictionary_router
+from app.api.v1.document import router as document_router
+from app.api.v1.feishu import router as feishu_router
+from app.api.v1.health import router as health_router
+from app.api.v1.history import router as history_router
+from app.api.v1.polish import router as polish_router
+from app.api.v1.proofread import router as proofread_router
+from app.api.v1.site_info import router as site_info_router
+from app.api.v1.tasks import router as tasks_router
+from app.api.v1.whitelist import router as whitelist_router
 
 # 主路由
 api_router = APIRouter()

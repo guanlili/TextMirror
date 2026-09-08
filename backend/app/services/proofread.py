@@ -5,18 +5,19 @@ TextMirror 校对服务
 import asyncio
 import json
 import re
-from typing import List, Optional, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
 from loguru import logger
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 
 from app.core.database import async_session_factory
 from app.core.secret_crypto import decrypt_secret
 from app.models.global_word import GlobalWord
 from app.models.llm_config import LLMConfig
-from app.services.llm.openai_compat import OpenAICompatProvider
 from app.services.consistency import check_consistency
 from app.services.format_rules import check_format_rules
 from app.services.llm.base import BaseLLMProvider
+from app.services.llm.openai_compat import OpenAICompatProvider
 
 # 校对类型映射
 PROOFREAD_TYPES = {
@@ -116,7 +117,7 @@ async def get_llm_provider(config_id: Optional[int] = None) -> BaseLLMProvider:
                 result = await session.execute(
                     select(LLMConfig).where(
                         LLMConfig.id == config_id,
-                        LLMConfig.is_enabled == True,
+                        LLMConfig.is_enabled.is_(True),
                     )
                 )
                 config = result.scalar_one_or_none()
@@ -125,8 +126,8 @@ async def get_llm_provider(config_id: Optional[int] = None) -> BaseLLMProvider:
             else:
                 result = await session.execute(
                     select(LLMConfig).where(
-                        LLMConfig.is_active == True,
-                        LLMConfig.is_enabled == True,
+                        LLMConfig.is_active.is_(True),
+                        LLMConfig.is_enabled.is_(True),
                     )
                 )
                 config = result.scalar_one_or_none()
@@ -227,7 +228,7 @@ async def load_global_words() -> Dict[str, List[Dict]]:
     try:
         async with async_session_factory() as session:
             rows = await session.execute(
-                select(GlobalWord).where(GlobalWord.is_active == True)
+                select(GlobalWord).where(GlobalWord.is_active.is_(True))
             )
             for word in rows.scalars().all():
                 item = {"word": word.word, "type": word.type}
@@ -257,7 +258,7 @@ async def load_user_words(user_id: Optional[int]) -> Dict[str, List[Dict]]:
             rows = await session.execute(
                 select(DictionaryEntry)
                 .join(Dictionary, Dictionary.id == DictionaryEntry.dictionary_id)
-                .where(Dictionary.user_id == user_id, Dictionary.is_active == True)
+                .where(Dictionary.user_id == user_id, Dictionary.is_active.is_(True))
             )
             for entry in rows.scalars().all():
                 if entry.wrong_word and entry.correct_word:

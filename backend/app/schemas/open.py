@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.proofread import Domain, ProofreadIssue
 
-
 # ======================================================================
 # 多模型对比
 # ======================================================================

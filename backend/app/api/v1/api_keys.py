@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -57,7 +57,7 @@ async def create_api_key(
     result = await db.execute(
         select(func.count()).select_from(ApiKey).where(
             ApiKey.user_id == current_user.id,
-            ApiKey.is_active == True,
+            ApiKey.is_active.is_(True),
         )
     )
     count = result.scalar() or 0

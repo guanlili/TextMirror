@@ -5,7 +5,7 @@ TextMirror 开放平台 API 密钥模型
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel

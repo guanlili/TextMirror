@@ -3,14 +3,15 @@ TextMirror 校对历史记录 API
 仅登录用户可查看自己的历史
 """
 from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.proofread import ProofreadRecord
-from app.schemas.history import HistoryListResponse, HistoryDetailResponse, HistoryListItem
+from app.schemas.history import HistoryDetailResponse, HistoryListItem, HistoryListResponse
 from app.services.audit_log import record_audit_log
 
 router = APIRouter(prefix="/history", tags=["校对历史"])

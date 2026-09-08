@@ -12,14 +12,13 @@ from typing import List, Optional, Tuple
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from loguru import logger
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from loguru import logger
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user_or_apikey
-from app.core.security import hash_scoped_idempotency_key
 from app.core.file_security import sanitize_filename
 from app.core.rate_limit import (
     charge_api_key_daily,
@@ -29,29 +28,30 @@ from app.core.rate_limit import (
     check_user_quota_n_times,
     refund_api_key_daily_usage,
 )
+from app.core.security import hash_scoped_idempotency_key
 from app.models.api_key import ApiKey
 from app.models.llm_config import LLMConfig
 from app.models.proofread import ProofreadRecord
 from app.models.uploaded_document import UploadedDocument
 from app.models.user import User
 from app.schemas.open import (
+    OpenCompareModelResult,
     OpenCompareRequest,
     OpenCompareResponse,
-    OpenCompareModelResult,
     OpenDocumentSubmitResponse,
     OpenJobStatusResponse,
     OpenModelsResponse,
 )
 from app.schemas.proofread import (
     Domain,
+    ProofreadIssue,
     TextProofreadRequest,
     TextProofreadResponse,
-    ProofreadIssue,
 )
+from app.services.audit_log import AuditTimer, record_audit_log
 from app.services.document import extract_text_from_file
 from app.services.proofread import proofread_text
 from app.services.upload import UploadRejected, remove_upload_silently, store_upload
-from app.services.audit_log import record_audit_log, AuditTimer
 from app.tasks.proofread_task import async_proofread_document
 
 router = APIRouter(tags=["开放API"])
@@ -122,7 +122,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     """
     errors = exc.errors()
     first = errors[0] if errors else {}
-    loc = ".".join(str(l) for l in first.get("loc", []) if l not in ("body", "form"))
+    loc = ".".join(str(part) for part in first.get("loc", []) if part not in ("body", "form"))
     msg = first.get("msg", "请求参数错误")
     message = f"参数错误：{loc} {msg}" if loc else f"参数错误：{msg}"
     return JSONResponse(
@@ -340,7 +340,7 @@ async def open_list_models(
     """可用模型列表（供集成方获取 config_id / config_ids 取值）"""
     result = await db.execute(
         select(LLMConfig.id, LLMConfig.name, LLMConfig.model, LLMConfig.is_active)
-        .where(LLMConfig.is_enabled == True)
+        .where(LLMConfig.is_enabled.is_(True))
         .order_by(LLMConfig.is_active.desc(), LLMConfig.id)
     )
     rows = result.all()
@@ -378,7 +378,7 @@ async def open_proofread_compare(
     cfg_result = await db.execute(
         select(LLMConfig).where(
             LLMConfig.id.in_(request.config_ids),
-            LLMConfig.is_enabled == True,
+            LLMConfig.is_enabled.is_(True),
         )
     )
     configs = {c.id: c for c in cfg_result.scalars().all()}

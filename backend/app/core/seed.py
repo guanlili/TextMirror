@@ -3,16 +3,16 @@ TextMirror 数据库种子数据
 初始化角色、权限、超级管理员账号
 """
 import asyncio
-from sqlalchemy import select
+
 from loguru import logger
+from sqlalchemy import select
 
 from app.core.database import async_session_factory, init_db
 from app.core.security import hash_password
-from app.models.user import User
-from app.models.role import Role, Permission, RolePermission
 from app.models.global_word import GlobalWord
 from app.models.llm_config import LLMConfig
-
+from app.models.role import Permission, Role, RolePermission
+from app.models.user import User
 
 # 权限种子数据：(编码, 名称, 类型, 父编码, 路径, 图标, 排序)
 PERMISSION_SEED = [

@@ -8,5 +8,13 @@ target-version = "py311"
 extend-exclude = ["alembic/versions"]
 
 [tool.ruff.lint]
-# 起步只开语法错误与明确缺陷类（E9/F），存量代码零改造即可通过；风格类规则后续再逐步收紧
-select = ["E9", "F"]
+# 在 E9/F 基础上纳入完整 pycodestyle（E/W）与 isort（I）
+# 后续可逐步开启 UP/B/SIM/C4 等规则
+select = ["E", "W", "F", "I"]
+ignore = ["E501", "W505"]
+
+[tool.ruff.lint.per-file-ignores]
+# 这些文件因初始化顺序/路径注入需要非顶部导入，且导入分组为可读性保留
+"alembic/env.py" = ["E402", "I001"]
+"app/db_bootstrap.py" = ["E402", "I001"]
+"eval/eval.py" = ["E402", "I001"]

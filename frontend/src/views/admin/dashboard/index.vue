@@ -72,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { reactive, onMounted } from 'vue'
 import { getDashboardStatsApi, type DashboardStats } from '@/api/admin'
 import { useSiteStore } from '@/stores/site'
 

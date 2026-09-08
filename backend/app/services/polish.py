@@ -3,7 +3,8 @@ TextMirror AI润色服务
 负责根据用户选择的风格构建Prompt、调用大模型、解析三段润色结果
 """
 import time
-from typing import Dict, Any
+from typing import Any, Dict
+
 from loguru import logger
 
 from app.services.proofread import get_llm_provider, load_global_words

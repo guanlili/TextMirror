@@ -8,21 +8,21 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from app.core.config import settings
-from app.core.database import init_db, close_db
-from app.core.redis import init_redis, close_redis
-from app.api.router import api_router
+import app.models.api_key  # noqa
+import app.models.audit_log  # noqa
+import app.models.dictionary  # noqa
+import app.models.global_word  # noqa
+import app.models.issue_feedback  # noqa
+import app.models.llm_config  # noqa
+import app.models.proofread  # noqa
+import app.models.role  # noqa
 
 # 导入所有模型确保表元数据注册（勿删除）
 import app.models.user  # noqa
-import app.models.role  # noqa
-import app.models.proofread  # noqa
-import app.models.dictionary  # noqa
-import app.models.global_word  # noqa
-import app.models.llm_config  # noqa
-import app.models.audit_log  # noqa
-import app.models.api_key  # noqa
-import app.models.issue_feedback  # noqa
+from app.api.router import api_router
+from app.core.config import settings
+from app.core.database import close_db, init_db
+from app.core.redis import close_redis, init_redis
 
 
 @asynccontextmanager
@@ -91,10 +91,11 @@ def create_app() -> FastAPI:
     # ---- 开放 API 子应用 ----
     # 独立命名空间 /api/v1/open/*，只含对外稳定契约端点；
     # 文档页常开（主应用 /docs 仅 DEBUG 开启，内部端点不对外暴露）
-    from app.api.v1.open import router as open_router
-    from app.api.v1.open import validation_exception_handler, internal_exception_handler
     from fastapi.exceptions import RequestValidationError
     from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    from app.api.v1.open import internal_exception_handler, validation_exception_handler
+    from app.api.v1.open import router as open_router
 
     open_api_app = FastAPI(
         title=f"{settings.APP_NAME} Open API",

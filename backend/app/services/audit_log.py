@@ -2,9 +2,9 @@
 TextMirror 审计日志写入服务
 提供异步写入方法，不阻塞用户请求
 """
+import asyncio
 import re
 import time
-import asyncio
 from typing import Optional
 
 from fastapi import Request

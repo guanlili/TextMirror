@@ -7,14 +7,8 @@
 """
 from pathlib import Path
 
-from alembic import command
-from alembic.config import Config
-from alembic.runtime.migration import MigrationContext
 from loguru import logger
 from sqlalchemy import create_engine
-
-from app.core.config import settings
-from app.core.database import Base
 
 # 注册全部 ORM 元数据，确保 create_all 覆盖所有表
 import app.models.api_key  # noqa: F401
@@ -27,6 +21,11 @@ import app.models.proofread  # noqa: F401
 import app.models.role  # noqa: F401
 import app.models.uploaded_document  # noqa: F401
 import app.models.user  # noqa: F401
+from alembic import command
+from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
+from app.core.config import settings
+from app.core.database import Base
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 

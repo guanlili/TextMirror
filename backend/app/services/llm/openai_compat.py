@@ -13,7 +13,7 @@ import asyncio
 import json
 import re
 import weakref
-from typing import AsyncIterator, Optional, List, Dict
+from typing import AsyncIterator, Dict, List, Optional
 
 import httpx
 from loguru import logger

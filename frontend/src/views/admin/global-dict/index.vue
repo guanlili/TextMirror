@@ -281,7 +281,7 @@ async function fetchStats() {
   try {
     const data = await getGlobalWordStatsApi()
     Object.assign(stats, data)
-  } catch (e) { /* 静默 */ }
+  } catch (_e) { /* 静默 */ }
 }
 
 async function fetchList() {
@@ -291,7 +291,7 @@ async function fetchList() {
     if (filterType.value) params.type = filterType.value
     if (keyword.value) params.keyword = keyword.value
     wordList.value = await listGlobalWordsApi(params)
-  } catch (e) {
+  } catch (_e) {
     ElMessage.error('加载词库失败')
   } finally {
     loading.value = false
@@ -345,7 +345,7 @@ async function handleDelete(id: number) {
     ElMessage.success('已删除')
     fetchStats()
     fetchList()
-  } catch (e) {
+  } catch (_e) {
     ElMessage.error('删除失败')
   }
 }
@@ -374,7 +374,7 @@ async function handleBatchImport() {
     batchText.value = ''
     fetchStats()
     fetchList()
-  } catch (e) {
+  } catch (_e) {
     ElMessage.error('批量导入失败')
   } finally {
     submitting.value = false

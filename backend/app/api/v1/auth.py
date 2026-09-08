@@ -2,34 +2,34 @@
 TextMirror 认证 API
 包含登录、获取当前用户信息、密码修改等接口
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
+from app.core.redis import get_redis
 from app.core.security import (
-    verify_password,
-    hash_password,
     create_access_token,
     create_refresh_token,
     decode_token,
+    hash_password,
+    verify_password,
 )
-from app.core.dependencies import get_current_user
-from app.core.config import settings
-from app.core.redis import get_redis
+from app.models.role import Permission, Role, RolePermission
 from app.models.user import User
-from app.models.role import Role, RolePermission, Permission
 from app.schemas.auth import (
     LoginRequest,
     LoginResponse,
-    UserInfoResponse,
     PasswordChangeRequest,
-    RefreshTokenRequest,
     ProfileUpdateRequest,
     ProfileUpdateResponse,
+    RefreshTokenRequest,
+    UserInfoResponse,
 )
-from app.services.audit_log import record_audit_log_sync, get_client_ip
+from app.services.audit_log import get_client_ip, record_audit_log_sync
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 

@@ -10,7 +10,7 @@ import re
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from app.services.site_config import get_site_config, ICON_UPLOAD_DIR, ALLOWED_ICON_EXTENSIONS
+from app.services.site_config import ALLOWED_ICON_EXTENSIONS, ICON_UPLOAD_DIR, get_site_config
 
 router = APIRouter(prefix="/site", tags=["站点信息"])
 

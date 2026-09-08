@@ -1,10 +1,10 @@
 """
 TextMirror 大模型配置 Schema
 """
-from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
+from typing import List, Optional
 
+from pydantic import BaseModel, Field, field_validator
 
 # 支持的供应商列表（models 为主流推荐，其他型号直接手输模型名即可；
 # default_base 为官方 OpenAI 兼容地址，已逐一核验，用户无需填写；
