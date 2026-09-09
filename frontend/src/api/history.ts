@@ -36,7 +36,8 @@ export interface HistoryDetail {
       explanation: string
       severity: string
     }>
-    [key: string]: any
+    versions?: Array<{ label: string; content: string }>
+    [key: string]: unknown
   }
   total_issues: number
   source_filename?: string

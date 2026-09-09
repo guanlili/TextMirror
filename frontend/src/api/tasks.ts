@@ -12,7 +12,7 @@ export interface TaskStatus {
   progress: number
   message: string
   step?: string
-  result?: any
+  result?: unknown
   error?: string
 }
 

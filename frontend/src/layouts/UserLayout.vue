@@ -40,7 +40,7 @@
     <el-container class="workspace-shell">
       <el-header class="workspace-header">
         <div class="header-left">
-          <el-button class="mobile-menu-btn" text circle @click="mobileMenuVisible = true"><el-icon><Operation /></el-icon></el-button>
+          <el-button class="mobile-menu-btn" text circle aria-label="打开导航菜单" @click="mobileMenuVisible = true"><el-icon><Operation /></el-icon></el-button>
           <div class="mobile-brand" @click="router.push('/polish')">
             <img :src="siteStore.faviconUrl" alt="" /><strong>{{ siteStore.platformName }}</strong>
           </div>

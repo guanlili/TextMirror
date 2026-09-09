@@ -67,14 +67,14 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, type TreeInstance } from 'element-plus'
 import { listRolesApi, createRoleApi, updateRoleApi, deleteRoleApi, getPermissionTreeApi, type RoleItem, type PermissionItem } from '@/api/admin'
 
 const loading = ref(false)
 const saving = ref(false)
 const roles = ref<RoleItem[]>([])
 const permissionTree = ref<PermissionItem[]>([])
-const treeRef = ref<any>(null)
+const treeRef = ref<TreeInstance | null>(null)
 
 const showCreateDialog = ref(false)
 const editingRole = ref<RoleItem | null>(null)
@@ -108,7 +108,7 @@ function resetForm() {
 
 async function handleSave() {
   if (!form.value.name) return ElMessage.warning('请填写角色名称')
-  const checkedIds = treeRef.value?.getCheckedKeys() || []
+  const checkedIds = (treeRef.value?.getCheckedKeys() || []) as number[]
   saving.value = true
   try {
     if (editingRole.value) {
