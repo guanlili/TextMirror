@@ -19,7 +19,7 @@
         </template>
       </el-alert>
 
-      <el-input v-model="keyword" placeholder="搜索放行词..." clearable style="width: 260px; margin-bottom: 12px;" @input="fetchList" />
+      <el-input v-model="keyword" placeholder="搜索放行词..." clearable style="width: 260px; margin-bottom: 12px;" @input="debouncedFetchList" />
 
       <el-table :data="list" v-loading="loading" stripe>
         <el-table-column prop="word" label="放行词" min-width="150">
@@ -106,6 +106,7 @@ import {
   listWhitelistApi, createWhitelistApi, updateWhitelistApi, deleteWhitelistApi, batchCreateWhitelistApi,
   type WhitelistItem,
 } from '@/api/whitelist'
+import { debounce } from '@/utils/debounce'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -127,6 +128,8 @@ async function fetchList() {
   }
   loading.value = false
 }
+
+const debouncedFetchList = debounce(fetchList)
 
 /** 空状态引导：预填常见示例，打开添加弹窗 */
 function fillExample() {

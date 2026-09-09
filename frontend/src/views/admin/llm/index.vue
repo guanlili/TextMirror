@@ -254,6 +254,7 @@ import {
   deleteLLMConfigApi, activateLLMConfigApi, testLLMConfigApi,
   testLLMDraftApi, importLLMConfigsApi, exportLLMConfigsApi,
 } from '@/api/admin'
+import { getErrorDetail } from '@/utils/request'
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -343,7 +344,7 @@ async function handleImportSubmit() {
     fetchList()
     fetchProviders()
   } catch (e: unknown) {
-    ElMessage.error((e as any)?.response?.data?.detail || '导入失败')
+    ElMessage.error(getErrorDetail(e) || '导入失败')
   } finally {
     importing.value = false
   }
@@ -455,7 +456,7 @@ async function handleDraftTest() {
   } catch (e: unknown) {
     draftTestResult.value = {
       success: false, model,
-      message: (e as any)?.response?.data?.detail || '测试请求失败',
+      message: getErrorDetail(e) || '测试请求失败',
       usage: {},
     }
   } finally {
@@ -517,7 +518,7 @@ async function handleSubmit() {
     showFormDialog.value = false
     fetchList()
   } catch (e: unknown) {
-    ElMessage.error((e as any)?.response?.data?.detail || '操作失败')
+    ElMessage.error(getErrorDetail(e) || '操作失败')
   } finally {
     submitting.value = false
   }
@@ -529,7 +530,7 @@ async function handleActivate(id: number) {
     ElMessage.success('已切换当前使用的模型')
     fetchList()
   } catch (e: unknown) {
-    ElMessage.error((e as any)?.response?.data?.detail || '切换失败')
+    ElMessage.error(getErrorDetail(e) || '切换失败')
   }
 }
 
@@ -564,7 +565,7 @@ async function handleDelete(id: number) {
     ElMessage.success('已删除')
     fetchList()
   } catch (e: unknown) {
-    if (e !== 'cancel') ElMessage.error((e as any)?.response?.data?.detail || '删除失败')
+    if (e !== 'cancel') ElMessage.error(getErrorDetail(e) || '删除失败')
   }
 }
 

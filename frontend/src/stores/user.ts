@@ -4,21 +4,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import request from '@/utils/request'
-
-export interface UserInfo {
-  id: number
-  employee_id: string
-  username: string
-  phone?: string
-  gender?: string
-  avatar?: string
-  department?: string
-  role_id: number
-  role_name?: string
-  role_code?: string
-  permissions: string[]
-}
+import { loginApi, getMeApi, type UserInfo } from '@/api/auth'
 
 export const useUserStore = defineStore('user', () => {
   // 状态
@@ -32,10 +18,7 @@ export const useUserStore = defineStore('user', () => {
 
   // 登录
   async function login(employeeId: string, password: string) {
-    const res: any = await request.post('/auth/login', {
-      employee_id: employeeId,
-      password: password,
-    })
+    const res = await loginApi(employeeId, password)
     token.value = res.access_token
     localStorage.setItem('access_token', res.access_token)
     if (res.refresh_token) {
@@ -48,7 +31,7 @@ export const useUserStore = defineStore('user', () => {
 
   // 获取用户信息
   async function fetchUserInfo() {
-    const res: any = await request.get('/auth/me')
+    const res = await getMeApi()
     userInfo.value = res
     permissions.value = res.permissions || []
     return res

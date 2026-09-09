@@ -29,6 +29,7 @@
 import { reactive, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { type GuestPolicyConfig, getGuestPolicyApi, updateGuestPolicyApi } from '@/api/admin'
+import { getErrorDetail } from '@/utils/request'
 
 const guestPolicy = reactive<GuestPolicyConfig>({
   daily_limit: 0,
@@ -41,7 +42,7 @@ onMounted(async () => {
   try {
     Object.assign(guestPolicy, await getGuestPolicyApi())
   } catch (e: unknown) {
-    ElMessage.error((e as any)?.response?.data?.detail || '游客策略加载失败')
+    ElMessage.error(getErrorDetail(e) || '游客策略加载失败')
   }
 })
 
@@ -51,7 +52,7 @@ async function saveGuestPolicy() {
     Object.assign(guestPolicy, await updateGuestPolicyApi(guestPolicy))
     ElMessage.success('游客策略已保存，即时生效')
   } catch (e: unknown) {
-    ElMessage.error((e as any)?.response?.data?.detail || '保存失败')
+    ElMessage.error(getErrorDetail(e) || '保存失败')
   } finally {
     saving.value = false
   }
