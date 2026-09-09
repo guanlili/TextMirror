@@ -20,7 +20,6 @@ from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.file_security import build_download_url, safe_upload_path, sanitize_filename
 
-
 _run_async_state = threading.local()
 
 
