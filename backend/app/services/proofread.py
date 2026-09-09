@@ -5,6 +5,7 @@ TextMirror 校对服务
 import asyncio
 import json
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
@@ -537,7 +538,6 @@ async def proofread_text(
     :param user_id: 归属用户ID（注入其个性化词库与放行词；游客为 None）
     :return: 校对结果
     """
-    import time
     t0 = time.perf_counter()
 
     # 领域自动识别（仅 auto 时；特征词≥2 命中才切换，保守策略）

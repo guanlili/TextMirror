@@ -163,6 +163,7 @@ import {
   listHistoryApi, getHistoryDetailApi, deleteHistoryApi,
   type HistoryItem, type HistoryDetail,
 } from '@/api/history'
+import { typeLabel, severityColor, severityLabel } from '@/utils/proofread'
 
 const router = useRouter()
 const loading = ref(false)
@@ -227,19 +228,6 @@ function domainLabel(d: string): string {
   // 保留旧领域映射：历史记录可能存在收敛前（power 等）的数据
   const m: Record<string, string> = { general: '通用', official: '公文', legal: '法律', power: '电力', new_energy: '新能源', meter: '电能表' }
   return m[d] || d
-}
-
-function typeLabel(t: string): string {
-  const m: Record<string, string> = { typo: '错别字', grammar: '语法', punctuation: '标点', style: '表达', sensitive: '敏感词', logic: '逻辑' }
-  return m[t] || t
-}
-
-function severityColor(s: string): 'danger' | 'warning' | 'info' | 'success' | 'primary' {
-  switch (s) { case 'error': return 'danger'; case 'warning': return 'warning'; default: return 'info' }
-}
-
-function severityLabel(s: string): string {
-  switch (s) { case 'error': return '错误'; case 'warning': return '警告'; default: return '建议' }
 }
 
 function recordTypeLabel(t: string): string {

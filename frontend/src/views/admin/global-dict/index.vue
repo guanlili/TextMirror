@@ -205,6 +205,7 @@ import {
   deleteGlobalWordApi, batchCreateGlobalWordsApi,
   getDictSuggestionsApi,
 } from '@/api/admin'
+import { getErrorDetail } from '@/utils/request'
 
 const typeLabelMap: Record<string, string> = { sensitive: '敏感词', banned: '禁词', correction: '纠错词条', whitelist: '放行词' }
 const typeTagMap: Record<string, '' | 'success' | 'warning' | 'info' | 'danger'> = { sensitive: 'danger', banned: 'warning', correction: '', whitelist: 'success' }
@@ -339,7 +340,7 @@ async function handleSubmit() {
     fetchStats()
     fetchList()
   } catch (e: unknown) {
-    ElMessage.error((e as any)?.response?.data?.detail || '操作失败')
+    ElMessage.error(getErrorDetail(e) || '操作失败')
   } finally {
     submitting.value = false
   }

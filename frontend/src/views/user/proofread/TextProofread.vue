@@ -490,13 +490,19 @@ const {
 
 const severityTagType = severityColor
 
-// 从校对历史「重新校对」带入的原文
-onMounted(() => {
+// 初始化：从校对历史「重新校对」带入的原文 + 加载可选模型列表
+onMounted(async () => {
   const rerunText = sessionStorage.getItem('tm_rerun_text')
   if (rerunText) {
     inputText.value = rerunText
     sessionStorage.removeItem('tm_rerun_text')
   }
+  try {
+    const res = await getAvailableModelsApi()
+    modelOptions.value = res.models
+    const active = res.models.find(m => m.is_active)
+    selectedModelId.value = active ? active.id : (res.models[0]?.id ?? null)
+  } catch { /* 模型列表加载失败时用默认活跃模型 */ }
 })
 
 // 设置
@@ -724,15 +730,6 @@ async function handleCompareAcceptAll() {
     // 取消
   }
 }
-
-onMounted(async () => {
-  try {
-    const res = await getAvailableModelsApi()
-    modelOptions.value = res.models
-    const active = res.models.find(m => m.is_active)
-    selectedModelId.value = active ? active.id : (res.models[0]?.id ?? null)
-  } catch { /* 模型列表加载失败时用默认活跃模型 */ }
-})
 
 // 领域标签
 const domainLabel = computed(() => {

@@ -20,17 +20,20 @@ from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.file_security import build_download_url, safe_upload_path, sanitize_filename
 
+_run_async_state = threading.local()
+
 
 def _run_async(coro):
-    """在同步 Celery worker 中运行异步协程"""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-    except RuntimeError:
+    """在同步 Celery worker 中运行异步协程
+
+    每线程复用已创建的 loop（避免 asyncio.run 每次关闭 loop 丢弃绑定其上的连接池），
+    并显式管理 loop 生命周期，不依赖已弃用的 get_event_loop 自动创建行为。
+    """
+    loop = getattr(_run_async_state, "loop", None)
+    if loop is None or loop.is_closed():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        _run_async_state.loop = loop
     return loop.run_until_complete(coro)
 
 
@@ -498,12 +501,12 @@ def clean_old_audit_logs(retention_days: int = 90):
     定时清理过期审计日志（默认保留 90 天，与后台手动清理同口径）。
     由 celery beat 每日 03:30 触发；audit_logs 含全文快照，只进不出会持续膨胀。
     """
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     from sqlalchemy import text as sa_text
 
     engine = _get_sync_engine()
-    cutoff = datetime.utcnow() - timedelta(days=retention_days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
     with engine.connect() as conn:
         result = conn.execute(
             sa_text("DELETE FROM audit_logs WHERE created_at < :cutoff"),

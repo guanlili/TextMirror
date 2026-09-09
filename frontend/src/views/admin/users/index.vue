@@ -9,7 +9,7 @@
       </template>
 
       <div class="filter-bar">
-        <el-input v-model="keyword" placeholder="搜索工号/姓名" clearable style="width: 200px;" @input="fetchList" />
+        <el-input v-model="keyword" placeholder="搜索工号/姓名" clearable style="width: 200px;" @input="debouncedFetchList" />
         <el-select v-model="filterActive" placeholder="全部状态" clearable style="width: 120px;" @change="fetchList">
           <el-option label="全部" value="" />
           <el-option label="启用" value="true" />
@@ -101,6 +101,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { listUsersApi, createUserApi, updateUserApi, deleteUserApi, listRolesApi, type AdminUserItem, type RoleItem } from '@/api/admin'
+import { debounce } from '@/utils/debounce'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -135,6 +136,8 @@ async function fetchList() {
   }
   loading.value = false
 }
+
+const debouncedFetchList = debounce(fetchList)
 
 function editUser(row: AdminUserItem) {
   editingUser.value = row

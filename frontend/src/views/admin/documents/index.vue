@@ -82,6 +82,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Download, Delete } from '@element-plus/icons-vue'
 import { listDocumentsApi, deleteDocumentApi, downloadDocumentApi, type AdminDocumentItem } from '@/api/admin'
+import { getErrorDetail } from '@/utils/request'
 import { formatSize } from '@/utils/format'
 
 const loading = ref(false)
@@ -109,7 +110,7 @@ async function fetchDocuments() {
     documents.value = res.items
     total.value = res.total
   } catch (e: unknown) {
-    ElMessage.error((e as any)?.message || '加载文档列表失败')
+    ElMessage.error(getErrorDetail(e) || '加载文档列表失败')
   } finally {
     loading.value = false
   }
@@ -140,7 +141,7 @@ async function handleDelete(row: AdminDocumentItem) {
     ElMessage.success('删除成功')
     fetchDocuments()
   } catch (e: unknown) {
-    ElMessage.error((e as any)?.message || '删除失败')
+    ElMessage.error(getErrorDetail(e) || '删除失败')
   }
 }
 

@@ -9,6 +9,8 @@ import 'element-plus/es/components/message-box/style/css'
 import App from './App.vue'
 import router from './router'
 import permissionDirective from './directives/permission'
+import { useSiteStore } from './stores/site'
+import { useUserStore } from './stores/user'
 import './styles/global.scss'
 
 const app = createApp(App)
@@ -23,12 +25,10 @@ app.use(router)
 app.mount('#app')
 
 // 启动时加载站点配置（平台名称、图标等）
-import { useSiteStore } from './stores/site'
 const siteStore = useSiteStore()
 siteStore.ensureLoaded()
 
 // 刷新页面后恢复登录用户信息与权限（否则管理后台入口/权限指令失效）
-import { useUserStore } from './stores/user'
 const userStore = useUserStore()
 if (userStore.isLoggedIn && !userStore.userInfo) {
   userStore.fetchUserInfo().catch(() => {

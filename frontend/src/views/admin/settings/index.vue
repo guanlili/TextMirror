@@ -163,6 +163,7 @@ import {
   getAdminSiteConfigApi, updateAdminSiteConfigApi, uploadIconApi,
 } from '@/api/site'
 import { useSiteStore } from '@/stores/site'
+import { getErrorDetail } from '@/utils/request'
 
 const siteStore = useSiteStore()
 const saving = ref(false)
@@ -302,7 +303,7 @@ async function saveBasicSettings() {
     await updateBasicSettingsApi(settings)
     ElMessage.success('基本设置已保存')
   } catch (e: unknown) {
-    ElMessage.error((e as any)?.response?.data?.detail || '保存失败')
+    ElMessage.error(getErrorDetail(e) || '保存失败')
   }
 }
 
@@ -312,7 +313,7 @@ async function saveFeishuSettings() {
     await updateFeishuSettingsApi(feishuSettings)
     ElMessage.success('飞书配置已保存')
   } catch (e: unknown) {
-    ElMessage.error((e as any)?.response?.data?.detail || '保存失败')
+    ElMessage.error(getErrorDetail(e) || '保存失败')
   }
 }
 
@@ -322,7 +323,7 @@ async function saveSecuritySettings() {
     await updateSecuritySettingsApi(securitySettings)
     ElMessage.success('用户安全设置已保存')
   } catch (e: unknown) {
-    ElMessage.error((e as any)?.response?.data?.detail || '保存失败')
+    ElMessage.error(getErrorDetail(e) || '保存失败')
   }
 }
 

@@ -159,7 +159,8 @@ const adminRoutes: RouteRecordRaw[] = [
 
 const router = createRouter({
   history: createWebHistory(),
-  routes: [...staticRoutes, ...userRoutes, ...adminRoutes],
+  // 末尾 catch-all：未匹配路径统一重定向到 404 页（/404 以 /40 开头，游客不会被守卫拦截）
+  routes: [...staticRoutes, ...userRoutes, ...adminRoutes, { path: '/:pathMatch(.*)*', redirect: '/404' }],
 })
 
 // 路由守卫

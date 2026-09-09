@@ -178,7 +178,7 @@ import { ElMessage, FormInstance } from 'element-plus'
 import { User, Lock, Connection, WarningFilled } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useSiteStore } from '@/stores/site'
-import request from '@/utils/request'
+import { getFeishuConfigApi, feishuCallbackApi } from '@/api/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -210,7 +210,7 @@ const loginRules = {
 // 加载飞书配置
 async function loadFeishuConfig() {
   try {
-    const res: any = await request.get('/auth/feishu/config')
+    const res = await getFeishuConfigApi()
     feishuConfig.app_id = res.app_id
     feishuConfig.redirect_uri = res.redirect_uri
     feishuConfig.enabled = res.enabled
@@ -254,9 +254,11 @@ async function handleFeishuCallback() {
     // 飞书授权回调：用code换token
     loading.value = true
     try {
-      const res: any = await request.post('/auth/feishu/callback', { code })
+      const res = await feishuCallbackApi(code)
       localStorage.setItem('access_token', res.access_token)
-      localStorage.setItem('refresh_token', res.refresh_token)
+      if (res.refresh_token) {
+        localStorage.setItem('refresh_token', res.refresh_token)
+      }
       userStore.token = res.access_token
       await userStore.fetchUserInfo()
       ElMessage.success(res.is_new_user ? '首次登录，已自动创建账号' : '飞书登录成功')

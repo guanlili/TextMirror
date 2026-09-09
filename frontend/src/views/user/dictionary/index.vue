@@ -64,7 +64,7 @@
       </div>
 
       <el-card>
-        <el-input v-model="entryKeyword" placeholder="搜索词条..." clearable style="width: 260px; margin-bottom: 12px;" @input="fetchEntries" />
+        <el-input v-model="entryKeyword" placeholder="搜索词条..." clearable style="width: 260px; margin-bottom: 12px;" @input="debouncedFetchEntries" />
         <el-table :data="entries" v-loading="entryLoading" stripe>
           <el-table-column prop="wrong_word" label="错误词" min-width="150">
             <template #default="{ row }">
@@ -152,6 +152,7 @@ import {
   listEntriesApi, createEntryApi, batchCreateEntriesApi, deleteEntryApi,
   type DictionaryItem, type EntryItem,
 } from '@/api/dictionary'
+import { debounce } from '@/utils/debounce'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -250,6 +251,8 @@ async function fetchEntries() {
   }
   entryLoading.value = false
 }
+
+const debouncedFetchEntries = debounce(fetchEntries)
 
 async function handleAddEntry() {
   if (!entryForm.value.wrong_word.trim() || !entryForm.value.correct_word.trim()) {

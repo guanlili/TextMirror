@@ -34,7 +34,7 @@ class UploadedDocument(BaseModel):
         Integer, nullable=False, default=0, comment="提取的文本字数"
     )
     user_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=True, comment="上传者用户ID(游客为null)"
+        Integer, ForeignKey("users.id"), nullable=True, index=True, comment="上传者用户ID(游客为null)"
     )
     owner_kind: Mapped[str] = mapped_column(
         String(10), nullable=False, default="user", index=True,

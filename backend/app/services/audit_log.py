@@ -116,13 +116,9 @@ def record_audit_log(
 
     # 异步写入，不阻塞当前请求
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(_write_audit_log(log_data))
-        else:
-            loop.run_until_complete(_write_audit_log(log_data))
+        asyncio.ensure_future(_write_audit_log(log_data))
     except RuntimeError:
-        # 无事件循环时的降级处理
+        # 无运行中事件循环时的降级处理（如线程池中的同步上下文）
         logger.warning("审计日志异步写入降级为同步日志记录")
         logger.info(f"[AUDIT] {action_type} | user={log_data.get('username')} | ip={log_data.get('client_ip')}")
 
@@ -166,11 +162,7 @@ def record_audit_log_sync(
     }
 
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(_write_audit_log(log_data))
-        else:
-            loop.run_until_complete(_write_audit_log(log_data))
+        asyncio.ensure_future(_write_audit_log(log_data))
     except RuntimeError:
         logger.info(f"[AUDIT] {action_type} | emp={employee_id_attempt} | ip={client_ip}")
 
