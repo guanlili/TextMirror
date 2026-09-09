@@ -295,10 +295,21 @@ def async_proofread_document(self, db_task_id: int):
             _check_cancel(session, db_task, celery_task_id)
             _update_task_progress(session, db_task, "proofread", 10, "正在调用AI模型校对...")
 
+            # 分片粒度进度回调：proofread_text 报 0~70/72，映射到任务条的 10~80%
+            # （80 起是修订文档生成与保存阶段）。回调在 worker 的事件循环线程池里
+            # 执行，与下面的 run_until_complete 串行——DB 写不与主流程并发。
+            def _on_proofread_progress(pct: int, message: str):
+                task_pct = 10 + int(pct * 0.7)
+                db_task.phase = "proofread"
+                db_task.progress = task_pct
+                db_task.message = message
+                session.commit()
+
             try:
                 from app.services.proofread import proofread_text
                 result = _run_async(proofread_text(
                     text=text, domain=domain, config_id=config_id, user_id=user_id,
+                    on_progress=_on_proofread_progress,
                 ))
             except Exception as e:
                 logger.error(f"[Task {celery_task_id}] 校对失败: {e}")

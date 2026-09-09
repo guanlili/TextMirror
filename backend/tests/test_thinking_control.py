@@ -152,3 +152,56 @@ async def test_standard_no_self_check_when_not_high_risk(monkeypatch):
 async def test_quick_never_calls_llm(monkeypatch):
     _, provider = await _run_proofread(monkeypatch, "quick")
     assert provider.calls == []
+
+
+# ----------------------------------------------------------------------
+# 进度回调：分片粒度上报，异常隔离
+# ----------------------------------------------------------------------
+
+def _fake_prep_result():
+    async def fake_prep(user_id, domain, config_id):
+        global_words = {"sensitive": [], "banned": [], "correction": [], "whitelist": []}
+        user_words = {"correction": [], "whitelist": []}
+        return (global_words, user_words, ""), _RecordingProvider()
+
+    return fake_prep
+
+
+async def test_progress_reported_per_chunk(monkeypatch):
+    # 多分片文本（>800 字触发分片）+ deep 档覆盖分片与自检两类上报
+    events = []
+
+    def on_progress(pct, msg):
+        events.append((pct, msg))
+
+    monkeypatch.setattr("app.services.proofread._gather_preparation", _fake_prep_result())
+
+    text = "甲方应按约定支付款项，双方权利义务明确。" * 60  # ~1020 字 → 2 片
+    result = await proofread_text(text=text, depth="deep", on_progress=on_progress)
+    assert result["chunks_count"] >= 2
+    assert any("段文本校对" in msg for _, msg in events)
+    assert any("复查" in msg for _, msg in events)
+    pcts = [p for p, _ in events]
+    assert pcts == sorted(pcts)
+
+
+async def test_progress_callback_error_isolated(monkeypatch):
+    # 回调抛异常不能影响校对结果（fire-and-forget 吞掉）
+    def bad_on_progress(pct, msg):
+        raise RuntimeError("callback boom")
+
+    monkeypatch.setattr("app.services.proofread._gather_preparation", _fake_prep_result())
+
+    result = await proofread_text(text="测试文本。" * 100, depth="deep",
+                                  on_progress=bad_on_progress)
+    assert result["total_issues"] >= 0  # 正常返回即通过
+
+
+async def test_single_chunk_no_chunk_progress(monkeypatch):
+    # 单分片不上报分片进度（快速文本不产生噪音事件）；deep 档仍报自检
+    events = []
+    monkeypatch.setattr("app.services.proofread._gather_preparation", _fake_prep_result())
+
+    await proofread_text(text="短文本一段。", depth="deep",
+                         on_progress=lambda p, m: events.append((p, m)))
+    assert events and all("段文本校对" not in m for _, m in events)

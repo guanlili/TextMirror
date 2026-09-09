@@ -6,7 +6,7 @@ import asyncio
 import json
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from loguru import logger
 from sqlalchemy import func, select
@@ -94,7 +94,11 @@ PROOFREAD_SYSTEM_PROMPT = """你是一位拥有20年经验的资深中文审校�
 3. 清晰说明：e(原因说明)用简练中文解释问题所在，不超过25个字
 4. 准确分类：t(问题类型)必须从以下枚举中选择：typo(错别字)、grammar(语法错误)、punctuation(标点符号)、style(表达优化)、sensitive(敏感词)、logic(逻辑问题)
 5. 合理定级：sv(严重度)分三级——error(明确错误,必须修改)、warning(可能有误或不规范,建议修改)、info(可优化项,酌情修改)
-6. 避免误报：对专有名词、品牌名、人名、缩写、行业惯用表达保持审慎，不确定时不报
+6. 避免误报（宁缺毋滥），以下情形一律不报：
+   a) 专有名词（机构/公司/品牌/人名/地名/产品/标准编号）即使看似不规范也不改写——你的专有名词知识不可靠，改写会引入错误
+   b) 原文语法正确时，不因"换个词更规范/庄重"报告同义词替换（如"严格执行"不必改"贯彻落实"、"召开"不必改"举行"）
+   c) 行业惯用写法按原文执行（如SF6、N-1、110kV，不按SF₆式学术排版修改）
+   d) 并列结构省略系词（"增长率2.5%，利润率3.1%"）、正文排版偏好等正常汉语表达
 7. 不重复：同一问题只报告一次，相同错误在不同位置出现时分别报告
 
 【输出格式】
@@ -436,6 +440,19 @@ async def _load_all_words(user_id: Optional[int]) -> Tuple[Dict[str, List[Dict]]
     return await asyncio.gather(load_global_words(), load_user_words(user_id))
 
 
+def _report_progress(on_progress: Optional[Callable[[int, str], None]], percent: int, message: str):
+    """进度上报：同步直达调用方，异常只记日志、绝不影响校对主流程。
+    不走线程池——Celery 场景回调写 DB session，与 run_until_complete 的挂起主流程
+    并发操作同一 session 会触发 "concurrent operations are not permitted"；
+    回调在 await 点之间同步执行，天然与主流程串行。"""
+    if on_progress is None:
+        return
+    try:
+        on_progress(percent, message)
+    except Exception as e:
+        logger.warning(f"[校对] 进度回调失败（忽略）: {e}")
+
+
 async def _gather_preparation(user_id: Optional[int], domain: str, config_id: Optional[int]):
     """审校准备阶段：词库 + 领域规则 + LLM Provider 三路并行"""
     (global_words, user_words), domain_rules, provider = await asyncio.gather(
@@ -531,6 +548,7 @@ async def proofread_text(
     user_id: Optional[int] = None,
     check_types: Optional[List[str]] = None,
     depth: str = "standard",
+    on_progress: Optional[Callable[[int, str], None]] = None,
 ) -> Dict[str, Any]:
     """
     执行文本校对（check_types 已废弃：不再影响审校范围，仅为兼容旧调用保留入参）
@@ -543,6 +561,8 @@ async def proofread_text(
     :param domain: 领域
     :param config_id: 指定模型配置ID（None 用当前活跃模型）
     :param user_id: 归属用户ID（注入其个性化词库与放行词；游客为 None）
+    :param on_progress: 进度回调 (percent, message)，长文本分片粒度上报；
+                        线程池执行、失败不影响校对；同步调用方（Web API）不传
     :return: 校对结果
     """
     t0 = time.perf_counter()
@@ -604,8 +624,13 @@ async def proofread_text(
     all_issues = []
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     semaphore = asyncio.Semaphore(min(4, len(chunks)))
+    done_chunks = 0
+    # 进度映射：分片全部完成 → 70%，留 72~95 给自检/后处理（任务侧再映射到自己的进度条）
+    _PROOFREAD_END_PCT = 70
+    _SELF_CHECK_PCT = 72
 
     async def _process_chunk(idx: int, chunk: str):
+        nonlocal done_chunks
         async with semaphore:
             cstart = time.perf_counter()
             messages = [
@@ -621,6 +646,13 @@ async def proofread_text(
             issues = parse_proofread_result(response.content)
             for issue in issues:
                 issue["chunk_index"] = idx
+            done_chunks += 1
+            if len(chunks) > 1:
+                _report_progress(
+                    on_progress,
+                    min(int(done_chunks / len(chunks) * _PROOFREAD_END_PCT), _PROOFREAD_END_PCT),
+                    f"已完成 {done_chunks}/{len(chunks)} 段文本校对",
+                )
             logger.info(f"[校对] 分片 {idx+1}/{len(chunks)} 长度={len(chunk)} "
                         f"耗时={time.perf_counter()-cstart:.2f}s tokens={response.usage}")
             return issues, response.usage
@@ -650,6 +682,9 @@ async def proofread_text(
         # 高危文本二次自检（error 级问题密集时触发；deep 模式强制）：provider 尚未关闭，
         # 把第一轮问题清单喂回 LLM 复查遗漏——尽力而为的增益层
         merged_early = merge_issues(list(all_issues), list(scanned_issues))
+        will_self_check = (depth == "deep") or _needs_self_check(merged_early)
+        if will_self_check:
+            _report_progress(on_progress, _SELF_CHECK_PCT, "正在二次复查遗漏问题...")
         self_check_extra = await self_check_pass(text, merged_early, provider, force=(depth == "deep"))
         all_issues.extend(self_check_extra)
         for key in total_usage:
