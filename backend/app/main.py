@@ -2,6 +2,7 @@
 TextMirror 智能文档审校平台 - FastAPI 应用入口
 """
 import os
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -28,6 +29,10 @@ from app.core.redis import close_redis, init_redis
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理：启动和关闭时执行"""
+    # ---- 日志配置 ----
+    logger.remove()
+    logger.add(sys.stderr, level=settings.LOG_LEVEL, rotation="50 MB", retention="7 days")
+
     # ---- 启动阶段 ----
     logger.info(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} 正在启动...")
 

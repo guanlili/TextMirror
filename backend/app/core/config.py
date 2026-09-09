@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "TextMirror"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
+    LOG_LEVEL: str = "INFO"
     SECRET_KEY: str = "please-change-this-secret-key-in-production"
     API_PREFIX: str = "/api/v1"
 
@@ -60,7 +61,7 @@ class Settings(BaseSettings):
     ORPHAN_DIR_MIN_AGE_HOURS: int = 24
 
     # ---- 游客限流配置 ----
-    GUEST_DAILY_LIMIT: int = 2000
+    GUEST_DAILY_LIMIT: int = 100
     GUEST_TEXT_MAX_LENGTH: int = 100000
 
     # ---- 开放 API 配置 ----
@@ -117,6 +118,13 @@ class Settings(BaseSettings):
                     f"{name} 仍为默认/占位值或长度不足 32 位，生产环境拒绝启动。"
                     f"请在 .env.production 中设置：{name}=$(openssl rand -hex 32)"
                 )
+
+        insecure_passwords = {"admin123", "password", "123456", "changeme"}
+        if self.DEFAULT_USER_PASSWORD in insecure_passwords or len(self.DEFAULT_USER_PASSWORD) < 8:
+            raise RuntimeError(
+                "DEFAULT_USER_PASSWORD 仍为默认/弱密码，生产环境拒绝启动。"
+                "请在 .env 中设置强密码。"
+            )
 
     model_config = {
         "env_file": ".env",
