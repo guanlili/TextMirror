@@ -245,7 +245,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type UploadFile } from 'element-plus'
 import { MoreFilled } from '@element-plus/icons-vue'
 import {
   type LLMConfigItem, type LLMProviderOption, type LLMTestResult,
@@ -302,7 +302,7 @@ async function handleExport(withKeys: boolean) {
 }
 
 /** 选择导入文件后解析预览 */
-function handleImportFileChange(file: any) {
+function handleImportFileChange(file: UploadFile) {
   const reader = new FileReader()
   reader.onload = () => {
     try {
@@ -319,6 +319,7 @@ function handleImportFileChange(file: any) {
       importPreview.value = null
     }
   }
+  if (!file.raw) return
   reader.readAsText(file.raw)
 }
 
@@ -341,8 +342,8 @@ async function handleImportSubmit() {
     importPreview.value = null
     fetchList()
     fetchProviders()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '导入失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.response?.data?.detail || '导入失败')
   } finally {
     importing.value = false
   }
@@ -451,10 +452,10 @@ async function handleDraftTest() {
     } else {
       ElMessage.error('连接失败，详见弹窗内提示')
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     draftTestResult.value = {
       success: false, model,
-      message: e?.response?.data?.detail || '测试请求失败',
+      message: (e as any)?.response?.data?.detail || '测试请求失败',
       usage: {},
     }
   } finally {
@@ -495,16 +496,19 @@ async function handleSubmit() {
 
   submitting.value = true
   try {
-    const payload: any = { ...formData }
+    const payload: {
+      name: string; provider: string; api_base: string; api_key: string; model: string;
+      temperature: number; max_tokens?: number; timeout: number; max_retries: number; remark: string
+    } = { ...formData, max_tokens: formData.max_tokens ?? undefined }
     if (!payload.name?.trim()) payload.name = p?.name || formData.provider
-    if (!payload.api_base?.trim()) payload.api_base = p?.default_base
-    if (!payload.model?.trim()) payload.model = p?.default_model
-    if (payload.max_tokens === 0) payload.max_tokens = null
-    // 编辑时如果密钥留空则不提交
-    if (editingId.value && !payload.api_key) delete payload.api_key
+    if (!payload.api_base?.trim()) payload.api_base = p?.default_base ?? ''
+    if (!payload.model?.trim()) payload.model = p?.default_model ?? ''
+    if (payload.max_tokens === 0) payload.max_tokens = undefined
 
     if (editingId.value) {
-      await updateLLMConfigApi(editingId.value, payload)
+      const updateData: Record<string, unknown> = { ...payload }
+      if (!updateData.api_key) delete updateData.api_key
+      await updateLLMConfigApi(editingId.value, updateData)
       ElMessage.success('配置已更新')
     } else {
       await createLLMConfigApi(payload)
@@ -512,8 +516,8 @@ async function handleSubmit() {
     }
     showFormDialog.value = false
     fetchList()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '操作失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.response?.data?.detail || '操作失败')
   } finally {
     submitting.value = false
   }
@@ -524,8 +528,8 @@ async function handleActivate(id: number) {
     await activateLLMConfigApi(id)
     ElMessage.success('已切换当前使用的模型')
     fetchList()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '切换失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.response?.data?.detail || '切换失败')
   }
 }
 
@@ -545,7 +549,7 @@ async function handleTest(id: number) {
     } else {
       ElMessage.error(`连接失败: ${result.message}`)
     }
-  } catch (_e: any) {
+  } catch {
     testResults.value[id] = { success: false, latency: '', message: '请求异常' }
     ElMessage.error('测试请求失败')
   } finally {
@@ -559,8 +563,8 @@ async function handleDelete(id: number) {
     await deleteLLMConfigApi(id)
     ElMessage.success('已删除')
     fetchList()
-  } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e?.response?.data?.detail || '删除失败')
+  } catch (e: unknown) {
+    if (e !== 'cancel') ElMessage.error((e as any)?.response?.data?.detail || '删除失败')
   }
 }
 

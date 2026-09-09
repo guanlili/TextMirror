@@ -293,7 +293,7 @@ async function fetchStats() {
 async function fetchList() {
   loading.value = true
   try {
-    const params: any = { page: page.value, page_size: pageSize }
+    const params: Record<string, string | number> = { page: page.value, page_size: pageSize }
     if (filterType.value) params.type = filterType.value
     if (keyword.value) params.keyword = keyword.value
     wordList.value = await listGlobalWordsApi(params)
@@ -338,8 +338,8 @@ async function handleSubmit() {
     showFormDialog.value = false
     fetchStats()
     fetchList()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '操作失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.response?.data?.detail || '操作失败')
   } finally {
     submitting.value = false
   }

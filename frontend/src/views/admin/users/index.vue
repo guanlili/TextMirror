@@ -153,11 +153,20 @@ async function handleSave() {
   saving.value = true
   try {
     if (editingUser.value) {
-      const data: Record<string, any> = { username: form.value.username, role_id: form.value.role_id, department: form.value.department, phone: form.value.phone, daily_quota: form.value.daily_quota, remark: form.value.remark }
+      const data: Record<string, string | number | null | undefined> = { username: form.value.username, role_id: form.value.role_id, department: form.value.department, phone: form.value.phone, daily_quota: form.value.daily_quota, remark: form.value.remark }
       await updateUserApi(editingUser.value.id, data)
       ElMessage.success('用户已更新')
     } else {
-      await createUserApi(form.value as any)
+      await createUserApi({
+        employee_id: form.value.employee_id,
+        username: form.value.username,
+        password: form.value.password,
+        role_id: form.value.role_id,
+        department: form.value.department,
+        phone: form.value.phone,
+        daily_quota: form.value.daily_quota ?? undefined,
+        remark: form.value.remark,
+      })
       ElMessage.success('用户已创建')
     }
     showCreateDialog.value = false

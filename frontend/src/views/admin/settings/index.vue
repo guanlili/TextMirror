@@ -301,8 +301,8 @@ async function saveBasicSettings() {
   try {
     await updateBasicSettingsApi(settings)
     ElMessage.success('基本设置已保存')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '保存失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.response?.data?.detail || '保存失败')
   }
 }
 
@@ -311,8 +311,8 @@ async function saveFeishuSettings() {
   try {
     await updateFeishuSettingsApi(feishuSettings)
     ElMessage.success('飞书配置已保存')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '保存失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.response?.data?.detail || '保存失败')
   }
 }
 
@@ -321,8 +321,8 @@ async function saveSecuritySettings() {
   try {
     await updateSecuritySettingsApi(securitySettings)
     ElMessage.success('用户安全设置已保存')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '保存失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.response?.data?.detail || '保存失败')
   }
 }
 
@@ -337,7 +337,7 @@ async function handleClean(type: string) {
     else if (type === 'expired') result = await cleanExpiredWhitelistApi()
     
     ElMessage.success(result?.message || `${labels[type]}清理完成`)
-  } catch (e: any) {
+  } catch (e: unknown) {
     if (e !== 'cancel') ElMessage.error('清理失败')
   }
 }

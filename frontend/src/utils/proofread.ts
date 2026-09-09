@@ -90,3 +90,16 @@ export function downloadTextFile(content: string, filename: string): void {
   a.click()
   URL.revokeObjectURL(url)
 }
+
+/** 校对问题（含前端 UI 状态字段，下划线前缀） */
+export interface CompareIssue {
+  original: string
+  suggestion: string
+  severity: string
+  type: string
+  explanation?: string
+  _accepted?: boolean
+  _ignored?: boolean
+  _deletedText?: string
+  _undoAnchor?: number
+}

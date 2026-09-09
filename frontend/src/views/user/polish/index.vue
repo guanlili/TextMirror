@@ -440,9 +440,9 @@ async function runCompareStream(text: string, style: string, configIds: number[]
 
   try {
     await promise
-  } catch (e: any) {
+  } catch (e: unknown) {
     // 卸载中断向上抛出，调用方吞掉并跳过同步回退
-    if (e?.name === 'AbortError') throw e
+    if ((e as Error)?.name === 'AbortError') throw e
     if (!gotAny) {
       failed = true
     }
@@ -532,14 +532,14 @@ async function runPolishStream(text: string, style: string): Promise<boolean> {
 
   try {
     await promise
-  } catch (e: any) {
-    if (e?.name === 'AbortError') {
+  } catch (e: unknown) {
+    if ((e as Error)?.name === 'AbortError') {
       streamAborted.value = true
     } else {
       // 未收到任何增量则整体失败（回退同步接口）；部分已到则保留已有内容
       if (!gotAny) {
         failed = true
-        ElMessage.error(e?.message || '润色失败，请稍后重试')
+        ElMessage.error((e as Error)?.message || '润色失败，请稍后重试')
       }
     }
   } finally {

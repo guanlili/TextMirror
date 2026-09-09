@@ -82,6 +82,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Download, Delete } from '@element-plus/icons-vue'
 import { listDocumentsApi, deleteDocumentApi, downloadDocumentApi, type AdminDocumentItem } from '@/api/admin'
+import { formatSize } from '@/utils/format'
 
 const loading = ref(false)
 const documents = ref<AdminDocumentItem[]>([])
@@ -90,12 +91,6 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const keyword = ref('')
 const filterExt = ref('')
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / 1024 / 1024).toFixed(1) + ' MB'
-}
 
 function extTagType(ext: string): 'success' | 'warning' | 'info' | 'danger' | 'primary' | undefined {
   const map: Record<string, 'success' | 'warning' | 'info' | 'danger' | 'primary'> = { '.docx': 'primary', '.doc': 'warning', '.pdf': 'danger', '.txt': 'info' }
@@ -113,8 +108,8 @@ async function fetchDocuments() {
     })
     documents.value = res.items
     total.value = res.total
-  } catch (e: any) {
-    ElMessage.error(e?.message || '加载文档列表失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.message || '加载文档列表失败')
   } finally {
     loading.value = false
   }
@@ -144,8 +139,8 @@ async function handleDelete(row: AdminDocumentItem) {
     await deleteDocumentApi(row.id)
     ElMessage.success('删除成功')
     fetchDocuments()
-  } catch (e: any) {
-    ElMessage.error(e?.message || '删除失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.message || '删除失败')
   }
 }
 

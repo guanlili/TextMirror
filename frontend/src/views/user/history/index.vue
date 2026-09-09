@@ -221,10 +221,7 @@ async function handleDelete(id: number) {
   }
 }
 
-function formatTime(t?: string): string {
-  if (!t) return '-'
-  return new Date(t).toLocaleString('zh-CN')
-}
+import { formatTime } from '@/utils/format'
 
 function domainLabel(d: string): string {
   // 保留旧领域映射：历史记录可能存在收敛前（power 等）的数据

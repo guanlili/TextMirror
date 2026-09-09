@@ -139,7 +139,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   listApiKeysApi, createApiKeyApi, revokeApiKeyApi,
-  type ApiKeyItem,
+  type ApiKeyItem, type ApiKeyCreatePayload,
 } from '@/api/apiKeys'
 
 const loading = ref(false)
@@ -183,10 +183,12 @@ function onDialogClosed() {
 async function handleCreate() {
   saving.value = true
   try {
-    const payload: any = { name: form.value.name.trim() || undefined }
-    if (form.value.daily_quota != null) payload.daily_quota = form.value.daily_quota
-    if (form.value.expires_at) payload.expires_at = form.value.expires_at
-    if (form.value.remark.trim()) payload.remark = form.value.remark.trim()
+    const payload = {
+      name: form.value.name.trim() || undefined,
+      daily_quota: form.value.daily_quota ?? undefined,
+      expires_at: form.value.expires_at || undefined,
+      remark: form.value.remark.trim() || undefined,
+    }
     const res = await createApiKeyApi(payload)
     createdKey.value = res
     copied.value = false
@@ -238,10 +240,7 @@ function statusTagType(status: string): 'success' | 'info' | 'warning' {
   return ({ active: 'success', revoked: 'info', expired: 'warning' } as const)[status] || 'info'
 }
 
-function formatTime(t?: string | null) {
-  if (!t) return '-'
-  return new Date(t).toLocaleString('zh-CN', { hour12: false })
-}
+import { formatTime } from '@/utils/format'
 </script>
 
 <style scoped lang="scss">

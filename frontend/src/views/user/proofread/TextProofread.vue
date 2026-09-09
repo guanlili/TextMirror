@@ -462,6 +462,7 @@ import {
   typeLabel,
   computeSensitiveDeletion,
   downloadTextFile,
+  type CompareIssue,
 } from '@/utils/proofread'
 import { useProofreadReview } from '@/composables/useProofreadReview'
 
@@ -522,7 +523,7 @@ const canCompare = computed(() => compareModelIds.value.length >= 2)
 const compareAllIssues = computed(() => {
   if (!compareResult.value) return []
   const seen = new Set<string>()
-  const list: any[] = []
+  const list: CompareIssue[] = []
   for (const r of compareResult.value.results) {
     if (!r.success) continue
     for (const issue of r.issues) {
@@ -540,7 +541,7 @@ const compareAllIssues = computed(() => {
 const summaryIssues = computed(() => {
   if (!compareResult.value) return []
   const okModels = compareResult.value.results.filter(r => r.success)
-  const map = new Map<string, { issue: any; models: string[]; isConsensus: boolean }>()
+  const map = new Map<string, { issue: CompareIssue; models: string[]; isConsensus: boolean }>()
   for (const r of okModels) {
     for (const issue of r.issues) {
       const key = (issue.original || '').trim()
@@ -628,12 +629,12 @@ async function handleAcceptByStrategy(level: 'consensus' | 'high' | 'all') {
 }
 const compareAcceptedCount = computed(() => compareAllIssues.value.filter(i => i._accepted).length)
 const comparePendingCount = computed(() => compareAllIssues.value.filter(i => !i._accepted && !i._ignored).length)
-function comparePendingCountOf(r: { issues: any[] }): number {
+function comparePendingCountOf(r: { issues: CompareIssue[] }): number {
   return r.issues.filter(i => !i._accepted && !i._ignored).length
 }
 
 /** 对比视图：接受单条修改（同步应用到全文预览；共识问题在其他模型页同步状态） */
-function acceptCompareIssue(issue: any) {
+function acceptCompareIssue(issue: CompareIssue) {
   if (issue.original && issue.suggestion) {
     currentText.value = currentText.value.replace(issue.original, issue.suggestion)
   }
@@ -643,14 +644,14 @@ function acceptCompareIssue(issue: any) {
 }
 
 /** 对比视图：忽略单条（同步状态到各模型页） */
-function ignoreCompareIssue(issue: any) {
+function ignoreCompareIssue(issue: CompareIssue) {
   issue._ignored = true
   syncCompareIssueState(issue)
   reportFeedback([issue], 'ignore')
 }
 
 /** 对比视图：删除敏感词（连同紧邻标点） */
-function deleteCompareIssue(issue: any) {
+function deleteCompareIssue(issue: CompareIssue) {
   const del = computeSensitiveDeletion(currentText.value, issue.original)
   if (!del) return
   currentText.value = currentText.value.replace(del.target, '')
@@ -662,7 +663,7 @@ function deleteCompareIssue(issue: any) {
 }
 
 /** 同一原文在多个模型结果里出现时，保持状态一致 */
-function syncCompareIssueState(source: any) {
+function syncCompareIssueState(source: CompareIssue) {
   if (!compareResult.value) return
   const key = (source.original || '').trim()
   for (const r of compareResult.value.results) {
@@ -676,7 +677,7 @@ function syncCompareIssueState(source: any) {
 }
 
 /** 对比视图：撤销单条 */
-function undoCompareIssue(issue: any) {
+function undoCompareIssue(issue: CompareIssue) {
   if (issue._accepted && issue.original && issue.suggestion) {
     currentText.value = currentText.value.replace(issue.suggestion, issue.original)
   } else if (issue._accepted && issue._deletedText !== undefined) {
@@ -804,7 +805,7 @@ async function handleProofread() {
     } else {
       ElMessage.info(`共发现 ${res.total_issues} 个问题`)
     }
-  } catch (_e: any) {
+  } catch {
     // 错误已在拦截器中处理
   } finally {
     loading.value = false

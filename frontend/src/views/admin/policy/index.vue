@@ -40,8 +40,8 @@ const saving = ref(false)
 onMounted(async () => {
   try {
     Object.assign(guestPolicy, await getGuestPolicyApi())
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '游客策略加载失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.response?.data?.detail || '游客策略加载失败')
   }
 })
 
@@ -50,8 +50,8 @@ async function saveGuestPolicy() {
   try {
     Object.assign(guestPolicy, await updateGuestPolicyApi(guestPolicy))
     ElMessage.success('游客策略已保存，即时生效')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '保存失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.response?.data?.detail || '保存失败')
   } finally {
     saving.value = false
   }

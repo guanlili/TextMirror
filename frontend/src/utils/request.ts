@@ -65,7 +65,7 @@ request.interceptors.response.use(
   (response: AxiosResponse) => {
     return response.data
   },
-  async (error: AxiosError) => {
+  async (error: AxiosError<{ detail?: string | Array<{ msg: string }> }>) => {
     if (error.config?.headers?.['X-Silent-Error'] === 'true') {
       return Promise.reject(error)
     }
@@ -123,13 +123,13 @@ request.interceptors.response.use(
           return Promise.reject(error)
         }
         case 403:
-          ElMessage.error((data as any)?.detail || '无权执行此操作')
+          ElMessage.error(data?.detail as string || '无权执行此操作')
           break
         case 404:
           ElMessage.error('请求的资源不存在')
           break
         case 422:
-          ElMessage.error((data as any)?.detail?.[0]?.msg || '请求参数错误')
+          ElMessage.error(Array.isArray(data?.detail) ? data.detail[0]?.msg || '请求参数错误' : '请求参数错误')
           break
         case 429:
           ElMessage.warning('请求过于频繁，请稍后再试')
@@ -138,10 +138,10 @@ request.interceptors.response.use(
           ElMessage.error('服务器内部错误，请稍后再试')
           break
         case 503:
-          ElMessage.error((data as any)?.detail || '服务暂时不可用，请稍后再试')
+          ElMessage.error(data?.detail as string || '服务暂时不可用，请稍后再试')
           break
         default:
-          ElMessage.error((data as any)?.detail || `请求失败 (${status})`)
+          ElMessage.error(data?.detail as string || `请求失败 (${status})`)
       }
     } else if (error.code === 'ECONNABORTED') {
       ElMessage.error('请求超时，请检查网络')
@@ -154,3 +154,12 @@ request.interceptors.response.use(
 )
 
 export default request
+
+/** catch 块安全访问 axios 错误响应的最小类型 */
+export type AnyErr = { response?: { data?: { detail?: string } }; message?: string; name?: string }
+
+/** 从 catch 块的 unknown error 中提取 axios 响应 detail 或 message */
+export function getErrorDetail(e: unknown): string {
+  const err = e as AnyErr
+  return err?.response?.data?.detail || err?.message || ''
+}

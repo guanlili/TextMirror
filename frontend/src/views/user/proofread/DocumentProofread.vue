@@ -242,7 +242,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, type UploadFile } from 'element-plus'
 import { sanitizeDocumentHtml } from '@/utils/sanitize'
 import {
   uploadDocumentApi,
@@ -258,6 +258,7 @@ import {
   typeLabel,
   replaceTextInHtml,
   downloadTextFile,
+  type CompareIssue,
 } from '@/utils/proofread'
 import { useProofreadReview } from '@/composables/useProofreadReview'
 
@@ -367,14 +368,10 @@ const highlightedText = computed(() => {
 })
 
 // 辅助函数
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / 1024 / 1024).toFixed(1) + ' MB'
-}
+import { formatSize } from '@/utils/format'
 
-function handleFileChange(file: any) {
-  selectedFile.value = file.raw
+function handleFileChange(file: UploadFile) {
+  if (file.raw) selectedFile.value = file.raw
 }
 
 function handleFileRemove() {
@@ -428,8 +425,8 @@ function isCurrentRun(runId: number): boolean {
   return runId === activeRunId
 }
 
-function isAbortError(error: any): boolean {
-  return error?.name === 'AbortError' || error?.code === 'ERR_CANCELED'
+function isAbortError(error: unknown): boolean {
+  return (error as { name?: string })?.name === 'AbortError' || (error as { code?: string })?.code === 'ERR_CANCELED'
 }
 
 function createIdempotencyKey(): string {
@@ -483,7 +480,10 @@ function completeTask(taskResult: TaskStatus, fallbackFilename: string, runId: n
     return
   }
 
-  const result = taskResult.result as any
+  const result = taskResult.result as {
+    filename?: string; issues?: CompareIssue[]; total_issues?: number;
+    corrected_download_url?: string; record_id?: number | null
+  }
   if (!result || !result.issues) {
     step.value = 'upload'
     stepKey.value = 'upload'
@@ -505,7 +505,7 @@ function completeTask(taskResult: TaskStatus, fallbackFilename: string, runId: n
   recordId.value = proofreadRes.record_id ?? null
   resultFilename.value = proofreadRes.filename
   correctedDownloadUrl.value = proofreadRes.corrected_download_url || ''
-  issues.value = proofreadRes.issues.map((issue: any) => ({
+  issues.value = proofreadRes.issues.map((issue) => ({
     ...issue,
     _accepted: false,
     _ignored: false,
@@ -533,7 +533,7 @@ async function trackTask(snapshot: TaskSnapshot, runId: number) {
       signal: abortController.value?.signal,
     })
     completeTask(taskResult, snapshot.filename, runId)
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (!isCurrentRun(runId) || isAbortError(error)) return
     uploading.value = false
     proofreading.value = true
@@ -594,7 +594,7 @@ async function restoreTaskSnapshot() {
   processingInfo.value = '正在恢复任务提交...'
   try {
     await submitTaskSnapshot(snapshot, runId)
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (!isCurrentRun(runId) || isAbortError(error)) return
     processingInfo.value = '任务提交状态暂未确认，刷新页面后将自动重试'
     ElMessage.warning('任务提交状态暂未确认，请稍后刷新页面继续恢复')
@@ -639,7 +639,7 @@ async function handleStartProofread() {
     }
     saveSnapshot(snapshot)
     await submitTaskSnapshot(snapshot, runId)
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (!isCurrentRun(runId) || isAbortError(error)) return
     uploading.value = false
     if (snapshot) {
