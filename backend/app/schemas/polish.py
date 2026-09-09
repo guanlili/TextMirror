@@ -1,7 +1,7 @@
 """
 TextMirror AI润色相关 Schema
 """
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -9,9 +9,9 @@ from pydantic import BaseModel, Field
 class PolishRequest(BaseModel):
     """AI润色请求"""
     text: str = Field(..., min_length=10, max_length=5000, description="待润色原文（10-5000字）")
-    style: str = Field(
+    style: Literal["formal", "friendly", "plain", "concise", "evidence", "strategic", "practical", "firm", "gentle", "action"] = Field(
         default="formal",
-        description="润色风格: formal/friendly/plain/concise/evidence/strategic/practical/firm/gentle/action"
+        description="润色风格"
     )
 
 
