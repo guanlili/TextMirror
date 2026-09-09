@@ -23,7 +23,9 @@ class Settings(BaseSettings):
     # ---- JWT 配置 ----
     JWT_SECRET_KEY: str = "please-change-this-jwt-secret-key"
     JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080  # 7天
+    # Access Token 短时效 + 前端 401 自动 refresh（并发去重）+ Refresh 30 天：
+    # 泄露的 Access Token 暴露窗口从 7 天压到 1 小时
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60  # 1小时
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30  # 30天免登录
 
     # ---- PostgreSQL 数据库配置 ----

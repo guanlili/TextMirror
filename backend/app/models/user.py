@@ -1,10 +1,10 @@
 """
 TextMirror 用户模型
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
@@ -22,6 +22,15 @@ class User(BaseModel):
     )
     password_hash: Mapped[str] = mapped_column(
         String(255), nullable=False, comment="密码哈希"
+    )
+    # 密码设定/变更时间：晚于此时间签发的 JWT（含 Refresh）才有效，
+    # 使改密/管理员重置后旧 Token 立即失效；INSERT 时由默认值填充
+    password_changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        comment="密码设定/变更时间（早于此时间签发的Token失效）",
     )
     phone: Mapped[Optional[str]] = mapped_column(
         String(20), nullable=True, comment="手机号"

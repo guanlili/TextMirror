@@ -2,6 +2,8 @@
 TextMirror 认证 API
 包含登录、获取当前用户信息、密码修改等接口
 """
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
 from sqlalchemy import select
@@ -16,6 +18,7 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     hash_password,
+    is_token_revoked_by_password_change,
     verify_password,
 )
 from app.models.role import Permission, Role, RolePermission
@@ -226,8 +229,9 @@ async def change_password(
             detail="旧密码错误",
         )
 
-    # 更新密码
+    # 更新密码（变更时间戳使所有旧 Token 失效）
     current_user.password_hash = hash_password(request.new_password)
+    current_user.password_changed_at = datetime.now(timezone.utc)
     db.add(current_user)
     await db.flush()
 
@@ -256,6 +260,13 @@ async def refresh_token(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户不存在或已被禁用",
+        )
+
+    # 密码变更后，变更前签发的 Refresh Token 同样失效（防止旧会话自续命）
+    if is_token_revoked_by_password_change(payload, user.password_changed_at):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="密码已变更，请重新登录",
         )
 
     role_code = None

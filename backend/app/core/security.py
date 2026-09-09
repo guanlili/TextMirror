@@ -116,3 +116,22 @@ def decode_token(token: str) -> Optional[dict]:
         return payload
     except jwt.PyJWTError:
         return None
+
+
+def is_token_revoked_by_password_change(payload: dict, password_changed_at: Optional[datetime]) -> bool:
+    """
+    密码变更后，变更前签发的 Token（Access 与 Refresh 同口径）一律失效。
+    :param payload: decode_token 的载荷（含 iat）
+    :param password_changed_at: users.password_changed_at；None（历史遗留行）不限制
+    """
+    if password_changed_at is None:
+        return False
+    # SQLite 单测往返会丢失 tzinfo，naive 一律按 UTC 解释（列语义即 UTC）
+    changed = password_changed_at if password_changed_at.tzinfo else password_changed_at.replace(tzinfo=timezone.utc)
+    iat = payload.get("iat")
+    if iat is None:
+        return False
+    # JWT iat 为整秒而 DB 时间含微秒：按秒粒度比较。副作用是变更同秒内签发的
+    # Token 存活（1 秒窗口可忽略）——不这样会让建号后同秒登录的 Token 直接死掉
+    # （如飞书自动建号→立即发 Token）。
+    return int(changed.timestamp()) > int(float(iat))
