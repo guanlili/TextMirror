@@ -271,18 +271,18 @@ async def delete_user(
         logger.error(f"删除用户失败(外键约束): id={user_id}, error={e.orig}")
         raise HTTPException(
             status_code=500,
-            detail=f"删除失败：该用户存在未清理的关联数据 ({e.orig})",
+            detail="删除失败：存在关联数据，请稍后重试",
         )
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
         await db.rollback()
         logger.error(f"删除用户失败(数据库错误): id={user_id}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"数据库错误：{str(e)}")
+        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         await db.rollback()
         logger.error(f"删除用户失败(未知错误): id={user_id}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"删除失败：{str(e)}")
+        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
 
 
 @router.post("/{user_id}/reset-password", summary='重置用户密码')
