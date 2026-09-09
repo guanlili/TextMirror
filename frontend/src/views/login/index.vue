@@ -178,7 +178,7 @@ import { ElMessage, FormInstance } from 'element-plus'
 import { User, Lock, Connection, WarningFilled } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useSiteStore } from '@/stores/site'
-import request, { type AnyErr } from '@/utils/request'
+import request from '@/utils/request'
 
 const router = useRouter()
 const route = useRoute()

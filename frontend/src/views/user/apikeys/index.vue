@@ -139,7 +139,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   listApiKeysApi, createApiKeyApi, revokeApiKeyApi,
-  type ApiKeyItem, type ApiKeyCreatePayload,
+  type ApiKeyItem,
 } from '@/api/apiKeys'
 
 const loading = ref(false)
