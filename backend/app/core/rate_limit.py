@@ -3,7 +3,6 @@ TextMirror 限流与配额
 游客：基于 IP + Redis 的每日计数器
 登录用户：基于 ProofreadRecord 当日记录数的每日配额
 """
-import ipaddress
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -15,28 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.redis import get_redis
 from app.models.proofread import ProofreadRecord
-
-
-def _is_trusted_proxy(host: str) -> bool:
-    """直连客户端是否为本机/内网（即我们自己的 Nginx 反向代理）"""
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return ip.is_loopback or ip.is_private
-
-
-def _get_client_ip(request: Request) -> str:
-    """
-    获取真实客户端 IP
-    仅当直连方是可信代理（本机/内网 Nginx）时才信任 X-Forwarded-For，
-    避免直连场景下伪造 XFF 头绕过限流
-    """
-    direct = request.client.host if request.client else "unknown"
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for and _is_trusted_proxy(direct):
-        return forwarded_for.split(",")[0].strip()
-    return direct
+from app.utils.ip import get_client_ip
 
 
 async def check_guest_rate_limit(request: Request, daily_limit: int | None = None):
@@ -50,7 +28,7 @@ async def check_guest_rate_limit(request: Request, daily_limit: int | None = Non
     """
     from app.services.guest_policy import get_guest_policy
 
-    client_ip = _get_client_ip(request)
+    client_ip = get_client_ip(request)
     if daily_limit is None:
         daily_limit = (await get_guest_policy())["daily_limit"]
 
@@ -158,7 +136,7 @@ async def check_upload_rate_limit(request: Request, user=None) -> None:
     if limit <= 0:
         return
 
-    subject = f"user:{user.id}" if user is not None else f"ip:{_get_client_ip(request)}"
+    subject = f"user:{user.id}" if user is not None else f"ip:{get_client_ip(request)}"
     try:
         redis = get_redis()
         minute = datetime.now().strftime("%Y%m%d%H%M")

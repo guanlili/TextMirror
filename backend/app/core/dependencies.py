@@ -9,6 +9,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -69,7 +70,9 @@ async def get_current_user(
     # 延迟导入避免循环依赖
     from app.models.user import User
 
-    result = await db.execute(select(User).where(User.id == int(user_id)))
+    result = await db.execute(
+        select(User).options(selectinload(User.role)).where(User.id == int(user_id))
+    )
     user = result.scalar_one_or_none()
 
     if user is None:

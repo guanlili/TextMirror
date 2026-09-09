@@ -149,7 +149,9 @@ async def update_user(
     _user=Depends(require_permission("admin:users:edit")),
 ):
     """更新用户信息"""
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(
+        select(User).options(selectinload(User.role)).where(User.id == user_id)
+    )
     user = result.scalar_one_or_none()
 
     if user is None:
@@ -271,18 +273,18 @@ async def delete_user(
         logger.error(f"删除用户失败(外键约束): id={user_id}, error={e.orig}")
         raise HTTPException(
             status_code=500,
-            detail=f"删除失败：该用户存在未清理的关联数据 ({e.orig})",
+            detail="删除失败：存在关联数据，请稍后重试",
         )
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
         await db.rollback()
         logger.error(f"删除用户失败(数据库错误): id={user_id}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"数据库错误：{str(e)}")
+        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         await db.rollback()
         logger.error(f"删除用户失败(未知错误): id={user_id}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"删除失败：{str(e)}")
+        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
 
 
 @router.post("/{user_id}/reset-password", summary='重置用户密码')
@@ -322,7 +324,9 @@ async def toggle_user_active(
     停用/启用用户
     用于处理员工离职等场景，停用后用户无法登录
     """
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(
+        select(User).options(selectinload(User.role)).where(User.id == user_id)
+    )
     user = result.scalar_one_or_none()
 
     if user is None:

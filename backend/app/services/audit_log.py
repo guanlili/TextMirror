@@ -12,25 +12,7 @@ from loguru import logger
 
 from app.core.database import async_session_factory
 from app.models.audit_log import AuditLog
-
-
-def get_client_ip(request: Request) -> str:
-    """
-    从请求中提取客户端真实 IP
-    优先级：X-Forwarded-For > X-Real-IP > request.client.host
-    """
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip.strip()
-
-    if request.client:
-        return request.client.host
-
-    return "unknown"
+from app.utils.ip import get_client_ip
 
 
 def detect_device_type(user_agent: str) -> str:

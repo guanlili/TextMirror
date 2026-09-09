@@ -5,7 +5,9 @@ TextMirror 自定义词库 API
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from loguru import logger
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -62,8 +64,17 @@ async def create_dictionary(
         description=data.description,
     )
     db.add(dictionary)
-    await db.flush()
-    await db.refresh(dictionary)
+    try:
+        await db.flush()
+        await db.refresh(dictionary)
+    except IntegrityError:
+        await db.rollback()
+        logger.warning(f"创建词库冲突: user_id={current_user.id}, name={data.name}")
+        raise HTTPException(status_code=409, detail="已存在同名词库")
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.error(f"创建词库数据库错误: user_id={current_user.id}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
     return dictionary
 
 
@@ -92,8 +103,17 @@ async def update_dictionary(
     if data.is_active is not None:
         dictionary.is_active = data.is_active
 
-    await db.flush()
-    await db.refresh(dictionary)
+    try:
+        await db.flush()
+        await db.refresh(dictionary)
+    except IntegrityError:
+        await db.rollback()
+        logger.warning(f"更新词库冲突: dict_id={dict_id}, user_id={current_user.id}")
+        raise HTTPException(status_code=409, detail="已存在同名词库")
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.error(f"更新词库数据库错误: dict_id={dict_id}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
     return dictionary
 
 
@@ -114,7 +134,12 @@ async def delete_dictionary(
     if not dictionary:
         raise HTTPException(status_code=404, detail="词库不存在")
 
-    await db.delete(dictionary)
+    try:
+        await db.delete(dictionary)
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.error(f"删除词库数据库错误: dict_id={dict_id}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
 
 
 # ========== 词条 CRUD ==========
@@ -178,8 +203,13 @@ async def create_entry(
     )
     db.add(entry)
     dictionary.entry_count += 1
-    await db.flush()
-    await db.refresh(entry)
+    try:
+        await db.flush()
+        await db.refresh(entry)
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.error(f"添加词条数据库错误: dict_id={dict_id}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
     return entry
 
 
@@ -212,7 +242,12 @@ async def batch_create_entries(
     ]
     db.add_all(entries)
     dictionary.entry_count += len(entries)
-    await db.flush()
+    try:
+        await db.flush()
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.error(f"批量添加词条数据库错误: dict_id={dict_id}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
 
     return {"message": f"成功添加 {len(entries)} 条词条", "count": len(entries)}
 
@@ -245,5 +280,10 @@ async def delete_entry(
     if not entry:
         raise HTTPException(status_code=404, detail="词条不存在")
 
-    await db.delete(entry)
-    dictionary.entry_count = max(0, dictionary.entry_count - 1)
+    try:
+        await db.delete(entry)
+        dictionary.entry_count = max(0, dictionary.entry_count - 1)
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.error(f"删除词条数据库错误: dict_id={dict_id}, entry_id={entry_id}", exc_info=True)
+        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
