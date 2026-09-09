@@ -252,27 +252,25 @@ const securitySettings = reactive<SecuritySettingsConfig>({
 })
 
 onMounted(async () => {
-  try {
-    const config = await getAdminSiteConfigApi()
-    Object.assign(siteConfig, config)
-    originalSiteConfig = { ...config }
-  } catch {}
-  
-  try {
-    const basic = await getBasicSettingsApi()
-    Object.assign(settings, basic)
-  } catch {}
-  
-  try {
-    const feishu = await getFeishuSettingsApi()
-    Object.assign(feishuSettings, feishu)
-  } catch {}
-  
-  try {
-    const security = await getSecuritySettingsApi()
-    Object.assign(securitySettings, security)
-  } catch {}
-
+  const [siteRes, basicRes, feishuRes, securityRes] = await Promise.allSettled([
+    getAdminSiteConfigApi(),
+    getBasicSettingsApi(),
+    getFeishuSettingsApi(),
+    getSecuritySettingsApi(),
+  ])
+  if (siteRes.status === 'fulfilled') {
+    Object.assign(siteConfig, siteRes.value)
+    originalSiteConfig = { ...siteRes.value }
+  }
+  if (basicRes.status === 'fulfilled') {
+    Object.assign(settings, basicRes.value)
+  }
+  if (feishuRes.status === 'fulfilled') {
+    Object.assign(feishuSettings, feishuRes.value)
+  }
+  if (securityRes.status === 'fulfilled') {
+    Object.assign(securitySettings, securityRes.value)
+  }
 })
 
 /** 保存品牌设置 */
@@ -303,8 +301,8 @@ async function saveBasicSettings() {
   try {
     await updateBasicSettingsApi(settings)
     ElMessage.success('基本设置已保存')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '保存失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.response?.data?.detail || '保存失败')
   }
 }
 
@@ -313,8 +311,8 @@ async function saveFeishuSettings() {
   try {
     await updateFeishuSettingsApi(feishuSettings)
     ElMessage.success('飞书配置已保存')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '保存失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.response?.data?.detail || '保存失败')
   }
 }
 
@@ -323,8 +321,8 @@ async function saveSecuritySettings() {
   try {
     await updateSecuritySettingsApi(securitySettings)
     ElMessage.success('用户安全设置已保存')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '保存失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.response?.data?.detail || '保存失败')
   }
 }
 
@@ -339,7 +337,7 @@ async function handleClean(type: string) {
     else if (type === 'expired') result = await cleanExpiredWhitelistApi()
     
     ElMessage.success(result?.message || `${labels[type]}清理完成`)
-  } catch (e: any) {
+  } catch (e: unknown) {
     if (e !== 'cancel') ElMessage.error('清理失败')
   }
 }

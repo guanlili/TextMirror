@@ -181,7 +181,9 @@ onMounted(() => fetchDictionaries())
 
 async function fetchDictionaries() {
   loading.value = true
-  try { dictionaries.value = await listDictionariesApi() } catch {}
+  try { dictionaries.value = await listDictionariesApi() } catch {
+    // 拦截器已处理
+  }
   loading.value = false
 }
 
@@ -199,7 +201,9 @@ async function handleSaveDict() {
     showCreateDialog.value = false
     resetDictForm()
     await fetchDictionaries()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   saving.value = false
 }
 
@@ -223,7 +227,9 @@ async function handleDeleteDict(id: number) {
     await deleteDictionaryApi(id)
     ElMessage.success('词库已删除')
     await fetchDictionaries()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
 }
 
 async function openDict(row: DictionaryItem) {
@@ -239,7 +245,9 @@ async function fetchEntries() {
       keyword: entryKeyword.value || undefined,
       page_size: 200,
     })
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   entryLoading.value = false
 }
 
@@ -255,7 +263,9 @@ async function handleAddEntry() {
     resetEntryForm()
     await fetchEntries()
     currentDict.value!.entry_count++
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   saving.value = false
 }
 
@@ -269,7 +279,9 @@ async function handleDeleteEntry(entryId: number) {
     ElMessage.success('词条已删除')
     await fetchEntries()
     currentDict.value!.entry_count = Math.max(0, currentDict.value!.entry_count - 1)
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
 }
 
 async function handleBatchImport() {
@@ -291,7 +303,9 @@ async function handleBatchImport() {
     batchText.value = ''
     await fetchEntries()
     await fetchDictionaries()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   saving.value = false
 }
 

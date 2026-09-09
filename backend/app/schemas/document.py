@@ -1,7 +1,7 @@
 """
 TextMirror 文档校对相关 Schema
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,7 @@ class DocumentProofreadRequest(BaseModel):
         None,
         description="校对类型"
     )
-    domain: str = Field(default="general", description="领域")
+    domain: Literal["auto", "general", "official", "legal"] = Field(default="general", description="领域")
     config_id: Optional[int] = Field(
         None,
         description="指定模型配置ID（不填用管理后台设的当前模型）"

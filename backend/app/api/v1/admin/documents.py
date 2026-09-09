@@ -34,9 +34,10 @@ async def list_documents(
 
     # 条件筛选
     if keyword:
+        escaped = keyword.replace("%", "\\%").replace("_", "\\_")
         query = query.where(
-            (UploadedDocument.filename.ilike(f"%{keyword}%")) |
-            (UploadedDocument.username.ilike(f"%{keyword}%"))
+            (UploadedDocument.filename.ilike(f"%{escaped}%", escape="\\")) |
+            (UploadedDocument.username.ilike(f"%{escaped}%", escape="\\"))
         )
     if file_ext:
         query = query.where(UploadedDocument.file_ext == file_ext)

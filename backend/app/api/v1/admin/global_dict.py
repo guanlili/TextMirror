@@ -30,26 +30,19 @@ async def get_stats(
     _user=Depends(require_permission("admin:global_dict:edit")),
 ):
     """获取全局词库统计"""
-    total = (await db.execute(select(func.count(GlobalWord.id)))).scalar() or 0
-    sensitive = (await db.execute(
-        select(func.count(GlobalWord.id)).where(GlobalWord.type == "sensitive")
-    )).scalar() or 0
-    banned = (await db.execute(
-        select(func.count(GlobalWord.id)).where(GlobalWord.type == "banned")
-    )).scalar() or 0
-    whitelist = (await db.execute(
-        select(func.count(GlobalWord.id)).where(GlobalWord.type == "whitelist")
-    )).scalar() or 0
-    correction = (await db.execute(
-        select(func.count(GlobalWord.id)).where(GlobalWord.type == "correction")
-    )).scalar() or 0
+    result = await db.execute(
+        select(GlobalWord.type, func.count(GlobalWord.id))
+        .group_by(GlobalWord.type)
+    )
+    counts = {row[0]: row[1] for row in result.fetchall()}
+    total = sum(counts.values())
 
     return GlobalWordStats(
         total=total,
-        sensitive_count=sensitive,
-        banned_count=banned,
-        whitelist_count=whitelist,
-        correction_count=correction,
+        sensitive_count=counts.get("sensitive", 0),
+        banned_count=counts.get("banned", 0),
+        whitelist_count=counts.get("whitelist", 0),
+        correction_count=counts.get("correction", 0),
     )
 
 

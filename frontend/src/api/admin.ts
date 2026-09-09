@@ -261,6 +261,10 @@ export function deleteDocumentApi(id: number): Promise<void> {
   return request.delete(`/admin/documents/${id}`)
 }
 
+export function downloadDocumentApi(fileId: string): Promise<Blob> {
+  return request.get(`/admin/documents/${fileId}/download`, { responseType: 'blob' })
+}
+
 // ========== 策略管理 ==========
 export interface GuestPolicyConfig {
   daily_limit: number

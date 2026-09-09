@@ -38,9 +38,10 @@ async def list_users(
 
     # 条件筛选
     if keyword:
+        escaped = keyword.replace("%", "\\%").replace("_", "\\_")
         query = query.where(
-            (User.employee_id.ilike(f"%{keyword}%")) |
-            (User.username.ilike(f"%{keyword}%"))
+            (User.employee_id.ilike(f"%{escaped}%", escape="\\")) |
+            (User.username.ilike(f"%{escaped}%", escape="\\"))
         )
     if role_id is not None:
         query = query.where(User.role_id == role_id)

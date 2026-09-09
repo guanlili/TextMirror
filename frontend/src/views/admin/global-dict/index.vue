@@ -240,7 +240,9 @@ async function fetchSuggestions() {
     const res = await getDictSuggestionsApi()
     suggestions.whitelist = res.whitelist
     suggestions.correction = res.correction
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   suggestionsLoading.value = false
 }
 
@@ -256,7 +258,9 @@ async function adoptWhitelist(word: string) {
     suggestions.whitelist = suggestions.whitelist.filter(s => s.word !== word)
     ElMessage.success(`已将「${word}」加入放行词`)
     fetchStats()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   adopting.value = ''
 }
 
@@ -267,7 +271,9 @@ async function adoptCorrection(word: string, suggestion: string) {
     suggestions.correction = suggestions.correction.filter(s => s.word !== word)
     ElMessage.success(`已将「${word}→${suggestion}」加入纠错词条`)
     fetchStats()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   adopting.value = ''
 }
 
@@ -287,7 +293,7 @@ async function fetchStats() {
 async function fetchList() {
   loading.value = true
   try {
-    const params: any = { page: page.value, page_size: pageSize }
+    const params: Record<string, string | number> = { page: page.value, page_size: pageSize }
     if (filterType.value) params.type = filterType.value
     if (keyword.value) params.keyword = keyword.value
     wordList.value = await listGlobalWordsApi(params)
@@ -332,8 +338,8 @@ async function handleSubmit() {
     showFormDialog.value = false
     fetchStats()
     fetchList()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '操作失败')
+  } catch (e: unknown) {
+    ElMessage.error((e as any)?.response?.data?.detail || '操作失败')
   } finally {
     submitting.value = false
   }

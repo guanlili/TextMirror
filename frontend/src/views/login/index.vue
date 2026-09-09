@@ -261,9 +261,9 @@ async function handleFeishuCallback() {
       await userStore.fetchUserInfo()
       ElMessage.success(res.is_new_user ? '首次登录，已自动创建账号' : '飞书登录成功')
       router.replace('/polish')
-    } catch (e: any) {
+    } catch (e: unknown) {
       // 错误已在 axios 拦截器中统一处理和提示
-      console.error('[飞书callback失败]', e?.response?.data || e)
+      console.error('[飞书callback失败]', e)
     } finally {
       loading.value = false
     }
@@ -295,7 +295,7 @@ async function handleLogin() {
       ElMessage.success('登录成功')
       const redirect = (route.query.redirect as string) || '/polish'
       router.push(redirect)
-    } catch (_e: any) {
+    } catch {
       // 错误已在 axios 拦截器中处理
     } finally {
       loading.value = false

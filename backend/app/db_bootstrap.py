@@ -18,6 +18,7 @@ import app.models.global_word  # noqa: F401
 import app.models.issue_feedback  # noqa: F401
 import app.models.llm_config  # noqa: F401
 import app.models.proofread  # noqa: F401
+import app.models.proofread_task  # noqa: F401
 import app.models.role  # noqa: F401
 import app.models.uploaded_document  # noqa: F401
 import app.models.user  # noqa: F401

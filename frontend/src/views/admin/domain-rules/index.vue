@@ -85,7 +85,9 @@ onMounted(async () => {
     const [current, def] = await Promise.all([getDomainPromptsApi(), getDomainPromptsDefaultsApi()])
     Object.assign(prompts, current)
     Object.assign(defaults, def)
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
 })
 
 /** 把内置默认填进编辑框作为起点（可再改） */
@@ -110,7 +112,9 @@ async function saveRules() {
   try {
     await updateDomainPromptsApi({ ...prompts })
     ElMessage.success('审校规则已保存，下一次审校即时生效')
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   saving.value = false
 }
 </script>

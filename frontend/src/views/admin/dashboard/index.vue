@@ -98,7 +98,9 @@ onMounted(async () => {
   try {
     const data = await getDashboardStatsApi()
     Object.assign(stats, data)
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
 })
 </script>
 

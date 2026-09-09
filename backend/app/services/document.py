@@ -259,8 +259,8 @@ def _para_to_html(para) -> str:
             if f'Heading {i}' in style_name or style_name == f'Heading{i}':
                 tag = f'h{i}'
                 break
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[docx html] 标题检测异常: {e}")
 
     # 收集段落样式
     styles = ['margin:0.3em 0']
@@ -273,8 +273,8 @@ def _para_to_html(para) -> str:
             align = align_map.get(align_val, '')
             if align:
                 styles.append(f'text-align:{align}')
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[docx html] 对齐方式读取异常: {e}")
 
     # 首行缩进
     try:
@@ -283,8 +283,8 @@ def _para_to_html(para) -> str:
             decl = _safe_css_length('text-indent', pf.first_line_indent.pt)
             if decl:
                 styles.append(decl)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[docx html] 首行缩进读取异常: {e}")
 
     # 左缩进
     try:
@@ -293,8 +293,8 @@ def _para_to_html(para) -> str:
             decl = _safe_css_length('padding-left', pf.left_indent.pt)
             if decl:
                 styles.append(decl)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[docx html] 左缩进读取异常: {e}")
 
     # 段前段后间距
     try:
@@ -307,8 +307,8 @@ def _para_to_html(para) -> str:
             decl = _safe_css_length('margin-bottom', pf.space_after.pt)
             if decl:
                 styles.append(decl)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[docx html] 段间距读取异常: {e}")
 
     # 行间距
     try:
@@ -322,8 +322,8 @@ def _para_to_html(para) -> str:
                 decl = _safe_css_length('line-height', pf.line_spacing.pt)
                 if decl:
                     styles.append(decl)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[docx html] 行间距读取异常: {e}")
 
     # 构建行内 HTML（保留字体样式）
     inline_html = _runs_to_html(para.runs)
@@ -353,8 +353,8 @@ def _runs_to_html(runs) -> str:
             decl = _safe_css_font_family(run.font.name)
             if decl:
                 run_styles.append(decl)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[docx html] 字体名称读取异常: {e}")
 
         # 字号
         try:
@@ -362,8 +362,8 @@ def _runs_to_html(runs) -> str:
                 decl = _safe_css_length("font-size", run.font.size.pt, max_pt=200.0)
                 if decl:
                     run_styles.append(decl)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[docx html] 字号读取异常: {e}")
 
         # 字体颜色
         try:
@@ -371,36 +371,36 @@ def _runs_to_html(runs) -> str:
                 decl = _safe_css_color(run.font.color.rgb)
                 if decl:
                     run_styles.append(decl)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[docx html] 字体颜色读取异常: {e}")
 
         # 加粗
         try:
             if run.bold:
                 text = f'<strong>{text}</strong>'
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[docx html] 加粗检测异常: {e}")
 
         # 斜体
         try:
             if run.italic:
                 text = f'<em>{text}</em>'
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[docx html] 斜体检测异常: {e}")
 
         # 下划线
         try:
             if run.underline:
                 text = f'<u>{text}</u>'
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[docx html] 下划线检测异常: {e}")
 
         # 删除线
         try:
             if run.font.strike:
                 text = f'<s>{text}</s>'
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[docx html] 删除线检测异常: {e}")
 
         # 包裹行内样式
         if run_styles:

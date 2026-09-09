@@ -30,14 +30,14 @@ async def list_roles(
     result = await db.execute(select(Role).order_by(Role.sort_order))
     roles = result.scalars().all()
 
+    # 一次查询所有角色的权限映射，避免 N+1
+    perm_result = await db.execute(select(RolePermission.role_id, RolePermission.permission_id))
+    perm_map: dict[int, list[int]] = {}
+    for role_id, permission_id in perm_result.fetchall():
+        perm_map.setdefault(role_id, []).append(permission_id)
+
     response = []
     for role in roles:
-        # 获取角色关联的权限ID
-        perm_result = await db.execute(
-            select(RolePermission.permission_id).where(RolePermission.role_id == role.id)
-        )
-        permission_ids = [row[0] for row in perm_result.fetchall()]
-
         response.append(RoleResponse(
             id=role.id,
             name=role.name,
@@ -46,7 +46,7 @@ async def list_roles(
             is_system=role.is_system,
             is_active=role.is_active,
             sort_order=role.sort_order,
-            permission_ids=permission_ids,
+            permission_ids=perm_map.get(role.id, []),
         ))
 
     return response

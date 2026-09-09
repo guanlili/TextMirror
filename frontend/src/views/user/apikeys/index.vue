@@ -164,7 +164,9 @@ function openCreateDialog() {
 
 async function fetchList() {
   loading.value = true
-  try { list.value = (await listApiKeysApi()).items } catch {}
+  try { list.value = (await listApiKeysApi()).items } catch {
+    // 拦截器已处理
+  }
   loading.value = false
 }
 
@@ -181,15 +183,19 @@ function onDialogClosed() {
 async function handleCreate() {
   saving.value = true
   try {
-    const payload: any = { name: form.value.name.trim() || undefined }
-    if (form.value.daily_quota != null) payload.daily_quota = form.value.daily_quota
-    if (form.value.expires_at) payload.expires_at = form.value.expires_at
-    if (form.value.remark.trim()) payload.remark = form.value.remark.trim()
+    const payload = {
+      name: form.value.name.trim() || undefined,
+      daily_quota: form.value.daily_quota ?? undefined,
+      expires_at: form.value.expires_at || undefined,
+      remark: form.value.remark.trim() || undefined,
+    }
     const res = await createApiKeyApi(payload)
     createdKey.value = res
     copied.value = false
     await fetchList()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   saving.value = false
 }
 
@@ -198,7 +204,9 @@ async function handleRevoke(id: number) {
     await revokeApiKeyApi(id)
     ElMessage.success('密钥已吊销')
     await fetchList()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
 }
 
 async function copyKey() {
@@ -232,10 +240,7 @@ function statusTagType(status: string): 'success' | 'info' | 'warning' {
   return ({ active: 'success', revoked: 'info', expired: 'warning' } as const)[status] || 'info'
 }
 
-function formatTime(t?: string | null) {
-  if (!t) return '-'
-  return new Date(t).toLocaleString('zh-CN', { hour12: false })
-}
+import { formatTime } from '@/utils/format'
 </script>
 
 <style scoped lang="scss">

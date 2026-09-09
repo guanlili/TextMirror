@@ -198,16 +198,16 @@ export async function streamTaskStatus(
             await reader.cancel()
             return status
           }
-        } catch (err: any) {
-          if (err?.name === 'AbortError') throw err
+        } catch (err: unknown) {
+          if ((err as { name?: string })?.name === 'AbortError') throw err
         }
       }
     }
 
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     return await pollTaskStatus(taskId, onProgress, { accessToken, signal })
-  } catch (err: any) {
-    if (signal?.aborted || err?.name === 'AbortError') {
+  } catch (err: unknown) {
+    if (signal?.aborted || (err as { name?: string })?.name === 'AbortError') {
       throw new DOMException('Aborted', 'AbortError')
     }
     return await pollTaskStatus(taskId, onProgress, { accessToken, signal })

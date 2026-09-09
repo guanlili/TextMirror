@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import require_permission
 from app.core.redis import get_redis
+from app.core.secret_crypto import decrypt_secret, encrypt_secret
 
 router = APIRouter(prefix="/system-config", tags=["系统配置管理"])
 
@@ -98,7 +99,7 @@ async def get_feishu_settings(
     return FeishuSettingsConfig(
         enabled=data.get(b"enabled", b"0") == b"1",
         app_id=data.get(b"app_id", b"").decode(),
-        app_secret=data.get(b"app_secret", b"").decode(),
+        app_secret=decrypt_secret(data.get(b"app_secret", b"").decode()),
         redirect_uri=data.get(b"redirect_uri", b"").decode(),
     )
 
@@ -115,7 +116,7 @@ async def update_feishu_settings(
         mapping={
             "enabled": "1" if config.enabled else "0",
             "app_id": config.app_id,
-            "app_secret": config.app_secret,
+            "app_secret": encrypt_secret(config.app_secret),
             "redirect_uri": config.redirect_uri,
         }
     )
@@ -142,7 +143,7 @@ async def get_security_settings(
         return SecuritySettingsConfig(default_password=settings.DEFAULT_USER_PASSWORD)
 
     return SecuritySettingsConfig(
-        default_password=data.get(b"default_password", settings.DEFAULT_USER_PASSWORD.encode()).decode(),
+        default_password=decrypt_secret(data.get(b"default_password", settings.DEFAULT_USER_PASSWORD.encode()).decode()),
     )
 
 
@@ -155,7 +156,7 @@ async def update_security_settings(
     redis = await get_redis()
     await redis.hset(
         SECURITY_SETTINGS_KEY,
-        mapping={"default_password": config.default_password}
+        mapping={"default_password": encrypt_secret(config.default_password)}
     )
 
     # 同时更新 settings 对象（运行时生效）

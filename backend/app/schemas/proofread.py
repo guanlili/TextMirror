@@ -2,7 +2,7 @@
 TextMirror 校对相关 Schema
 """
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -68,7 +68,7 @@ class TextProofreadRequest(BaseModel):
         description="指定模型配置ID（可选，不填=系统当前默认模型；普通集成方无需关心）",
         examples=[None],
     )
-    depth: str = Field(
+    depth: Literal["quick", "standard", "deep"] = Field(
         default="standard",
         description="审校深度：quick 仅词库/一致性/格式规则（零LLM成本秒回，批量初筛）；standard 全流程（默认）；deep 全流程+强制二次复查",
         examples=["standard"],

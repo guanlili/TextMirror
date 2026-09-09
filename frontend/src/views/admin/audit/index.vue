@@ -232,6 +232,7 @@ import {
   type AuditLogDetail,
   type AuditStats,
 } from '@/api/audit'
+import { formatTime, formatSize } from '@/utils/format'
 
 const loading = ref(false)
 const logs = ref<AuditLogItem[]>([])
@@ -277,7 +278,7 @@ onMounted(() => {
 async function fetchLogs() {
   loading.value = true
   try {
-    const params: Record<string, any> = {
+    const params: Record<string, string | number> = {
       page: page.value,
       page_size: pageSize.value,
     }
@@ -304,7 +305,9 @@ async function fetchLogs() {
 async function fetchStats() {
   try {
     stats.value = await getAuditStatsApi()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
 }
 
 function handleSearch() {
@@ -326,7 +329,9 @@ async function showDetail(id: number) {
   try {
     detail.value = await getAuditLogDetailApi(id)
     detailVisible.value = true
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
 }
 
 // 工具函数
@@ -379,17 +384,6 @@ function deviceLabel(type: string | null): string {
   }
 }
 
-function formatTime(iso: string): string {
-  if (!iso) return '-'
-  const d = new Date(iso)
-  return d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / 1024 / 1024).toFixed(1) + ' MB'
-}
 </script>
 
 <style scoped lang="scss">
