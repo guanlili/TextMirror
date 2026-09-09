@@ -174,32 +174,27 @@ async def get_me(
     获取当前登录用户信息
     包含角色名称和权限编码列表
     """
-    # 获取角色信息
+    # 获取角色信息（role 已由 get_current_user 的 selectinload 预加载）
     role_name = None
     role_code = None
     permissions = []
 
-    if current_user.role_id:
-        result = await db.execute(
-            select(Role).where(Role.id == current_user.role_id)
-        )
-        role = result.scalar_one_or_none()
-        if role:
-            role_name = role.name
-            role_code = role.code
+    if current_user.role_id and current_user.role:
+        role_name = current_user.role.name
+        role_code = current_user.role.code
 
-            # 超级管理员拥有所有权限
-            if role.code == "super_admin":
-                perm_result = await db.execute(select(Permission.code))
-                permissions = [row[0] for row in perm_result.fetchall()]
-            else:
-                # 查询角色关联的权限
-                perm_result = await db.execute(
-                    select(Permission.code)
-                    .join(RolePermission, RolePermission.permission_id == Permission.id)
-                    .where(RolePermission.role_id == current_user.role_id)
-                )
-                permissions = [row[0] for row in perm_result.fetchall()]
+        # 超级管理员拥有所有权限
+        if role_code == "super_admin":
+            perm_result = await db.execute(select(Permission.code))
+            permissions = [row[0] for row in perm_result.fetchall()]
+        else:
+            # 查询角色关联的权限
+            perm_result = await db.execute(
+                select(Permission.code)
+                .join(RolePermission, RolePermission.permission_id == Permission.id)
+                .where(RolePermission.role_id == current_user.role_id)
+            )
+            permissions = [row[0] for row in perm_result.fetchall()]
 
     return UserInfoResponse(
         id=current_user.id,

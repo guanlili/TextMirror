@@ -149,7 +149,9 @@ async def update_user(
     _user=Depends(require_permission("admin:users:edit")),
 ):
     """更新用户信息"""
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(
+        select(User).options(selectinload(User.role)).where(User.id == user_id)
+    )
     user = result.scalar_one_or_none()
 
     if user is None:
@@ -322,7 +324,9 @@ async def toggle_user_active(
     停用/启用用户
     用于处理员工离职等场景，停用后用户无法登录
     """
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(
+        select(User).options(selectinload(User.role)).where(User.id == user_id)
+    )
     user = result.scalar_one_or_none()
 
     if user is None:
