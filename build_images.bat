@@ -64,7 +64,7 @@ echo.
 REM ---- Build frontend image ----
 echo ============================================================
 echo [2/4] Building frontend image: textmirror-frontend:latest
-echo       (First build downloads node:18-alpine, ~3-5 min)
+echo       (First build downloads node:22-alpine, ~3-5 min)
 echo ============================================================
 docker build %BUILD_PLATFORM% -t textmirror-frontend:latest -f frontend\Dockerfile frontend\
 if %errorlevel% neq 0 (

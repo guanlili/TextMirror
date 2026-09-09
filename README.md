@@ -110,7 +110,7 @@
 ### 环境要求
 
 - Python 3.10+
-- Node.js 18+
+- Node.js 22+（vite 7 要求 20.19+，推荐 22 LTS）
 - PostgreSQL 14+
 - Redis 6+
 
