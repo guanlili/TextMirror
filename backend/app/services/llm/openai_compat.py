@@ -32,6 +32,21 @@ _client_pools: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, Dict[tuple,
 # Web/Celery 各进程持有独立副本，最坏情况是重复探测一次。
 _verified_endpoints: Dict[str, str] = {}
 
+# 思考模式开关的供应商方言（仅收录已知支持该参数的供应商）：
+# 火山方舟 thinking.type / 阿里百炼 enable_thinking。
+# 未收录的供应商不注入任何参数——不认识该字段的网关会直接 400，
+# 此类供应商按模型自身默认行为执行。
+_THINKING_DIALECTS: Dict[str, Dict[bool, dict]] = {
+    "volcengine": {
+        True: {"thinking": {"type": "enabled"}},
+        False: {"thinking": {"type": "disabled"}},
+    },
+    "qwen": {
+        True: {"enable_thinking": True},
+        False: {"enable_thinking": False},
+    },
+}
+
 
 class OpenAICompatProvider(BaseLLMProvider):
     """
@@ -47,9 +62,12 @@ class OpenAICompatProvider(BaseLLMProvider):
         timeout: int = 60,
         max_retries: int = 3,
         provider_name: str = "OpenAI-Compatible",
+        provider_slug: Optional[str] = None,
     ):
         super().__init__(api_key, api_base, model, timeout, max_retries)
         self.provider_name = provider_name
+        # 供应商标识（llm_configs.provider），用于思考模式方言映射；未传则不支持
+        self.provider_slug = provider_slug
 
         # 规范化 api_base：去掉末尾斜杠
         self.api_base = api_base.rstrip("/")
@@ -109,8 +127,16 @@ class OpenAICompatProvider(BaseLLMProvider):
         messages: List[Dict[str, str]],
         temperature: float = 0.3,
         max_tokens: Optional[int] = None,
+        thinking: Optional[bool] = None,
+        timeout: Optional[float] = None,
     ) -> LLMResponse:
-        """调用 Chat Completions API"""
+        """调用 Chat Completions API
+
+        :param thinking: 思考模式开关。None=不干预（模型默认）；True/False 显式开关，
+                         仅对已知方言的供应商生效（见 _THINKING_DIALECTS）
+        :param timeout: 本次请求的读写超时覆盖（秒），None 用 client 配置值；
+                         供思考模式等长耗时场景按请求放宽，不影响共享连接池
+        """
         payload = {
             "model": self.model,
             "messages": messages,
@@ -119,6 +145,14 @@ class OpenAICompatProvider(BaseLLMProvider):
         }
         if max_tokens:
             payload["max_tokens"] = max_tokens
+        if thinking is not None:
+            dialect = _THINKING_DIALECTS.get(self.provider_slug or "")
+            if dialect is None:
+                logger.debug(
+                    f"[{self.provider_name}] 供应商 {self.provider_slug} 不支持思考模式参数，按模型默认执行"
+                )
+            else:
+                payload.update(dialect[thinking])
 
         # 若已验证过 endpoint，则直接复用，避免每次都试探
         endpoints = (
@@ -129,7 +163,10 @@ class OpenAICompatProvider(BaseLLMProvider):
         for attempt in range(1, self.max_retries + 1):
             for endpoint in endpoints:
                 try:
-                    response = await self.client.post(endpoint, json=payload)
+                    request_kwargs: Dict[str, object] = {"json": payload}
+                    if timeout is not None:
+                        request_kwargs["timeout"] = httpx.Timeout(timeout, connect=15)
+                    response = await self.client.post(endpoint, **request_kwargs)
                     response.raise_for_status()
                     data = response.json()
 

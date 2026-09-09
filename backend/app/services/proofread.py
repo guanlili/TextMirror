@@ -37,6 +37,10 @@ DOMAIN_MAP = {
     "legal": "法律",
 }
 
+# deep 档（思考模式开启）单分片超时下限（秒）：推理 token 拉长生成时间，
+# 800 字分片实测可超 60s 常见配置值，低于此值会先超时再重试，纯放大延迟
+_DEEP_CHUNK_TIMEOUT_S = 180
+
 # 领域专业化提示词
 DOMAIN_PROMPTS = {
     "general": (
@@ -148,6 +152,7 @@ async def get_llm_provider(config_id: Optional[int] = None) -> BaseLLMProvider:
         timeout=config.timeout,
         max_retries=config.max_retries,
         provider_name=config.name,
+        provider_slug=config.provider,
     )
     # 尊重后台配置的温度值（校对场景默认 0.2，取两者较低保证确定性）
     provider.default_temperature = min(config.temperature, 0.2)
@@ -531,7 +536,9 @@ async def proofread_text(
     执行文本校对（check_types 已废弃：不再影响审校范围，仅为兼容旧调用保留入参）
 
     :param depth: 审校深度——quick 仅确定性层（零 LLM 成本秒回，适合批量初筛）；
-                  standard 全流程（默认）；deep 标准+强制二次自检（不限高危阈值）
+                  standard 全流程+LLM 关思考模式（默认，秒级响应，思考在干净文本上
+                  反而制造大量误报）；deep LLM 开思考+强制二次自检（质量档，误报抑制
+                  更强但耗时数倍，实测 32 样本集零误报 7/9 vs 关思考 2/9）
     :param text: 待校对文本
     :param domain: 领域
     :param config_id: 指定模型配置ID（None 用当前活跃模型）
@@ -588,6 +595,12 @@ async def proofread_text(
         }
 
     # 调用大模型（并发校对所有分片，加速整体响应）
+    # 思考模式按档位注入：standard 关（快，干净文本误报少），deep 开（质量档）。
+    # 供应商不支持思考参数时 provider.chat 静默忽略，按模型默认执行。
+    deep = depth == "deep"
+    # 思考模式下生成 token 数倍增（推理 token 以 ~110/s 吐出），800 字分片实测
+    # 可超 60s 配置值，先超时再重试只会放大延迟——deep 档放宽到不低于 180s
+    chunk_timeout = max(provider.timeout, _DEEP_CHUNK_TIMEOUT_S) if deep else None
     all_issues = []
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     semaphore = asyncio.Semaphore(min(4, len(chunks)))
@@ -599,7 +612,12 @@ async def proofread_text(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": PROOFREAD_USER_PROMPT.format(text=chunk)},
             ]
-            response = await provider.chat(messages, temperature=provider.default_temperature)
+            response = await provider.chat(
+                messages,
+                temperature=provider.default_temperature,
+                thinking=deep,
+                timeout=chunk_timeout,
+            )
             issues = parse_proofread_result(response.content)
             for issue in issues:
                 issue["chunk_index"] = idx
@@ -818,6 +836,9 @@ async def self_check_pass(
         response = await provider.chat(
             [{"role": "user", "content": prompt}],
             temperature=provider.default_temperature,
+            # 自检是「对照清单复查遗漏」，不需要深度推理；恒关思考——
+            # 开思考时 3000 字 prompt 必超 60s 配置值，实测 3 次重试全超时后失败
+            thinking=False,
         )
         extra = parse_proofread_result(response.content)
         # 只取 review=new 的项（LLM 复核意见不覆盖第一轮结果）
