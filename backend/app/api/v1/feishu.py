@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.api.v1.admin.system_config import get_current_default_password
 from app.core.database import get_db
 from app.core.security import create_access_token, create_refresh_token, hash_password
 from app.models.user import User
@@ -187,7 +188,7 @@ async def feishu_callback(
         user = User(
             employee_id=new_employee_id,
             username=name,
-            password_hash=hash_password(settings.DEFAULT_USER_PASSWORD),
+            password_hash=hash_password(await get_current_default_password()),
             phone=mobile or None,
             avatar=avatar_url or None,
             department=None,
@@ -377,7 +378,7 @@ async def feishu_sso(
         user = User(
             employee_id=new_employee_id,
             username=name,
-            password_hash=hash_password(settings.DEFAULT_USER_PASSWORD),
+            password_hash=hash_password(await get_current_default_password()),
             phone=mobile or None,
             avatar=avatar_url or None,
             role_id=default_role.id,

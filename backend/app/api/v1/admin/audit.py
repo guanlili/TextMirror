@@ -45,9 +45,10 @@ async def list_audit_logs(
     elif user_type == "registered":
         base_query = base_query.where(AuditLog.is_guest.is_(False))
 
-    # IP 筛选
+    # IP 筛选（转义 LIKE 通配符，防止用户输入 %/_ 注入）
     if ip:
-        base_query = base_query.where(AuditLog.client_ip.like(f"{ip}%"))
+        escaped_ip = ip.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        base_query = base_query.where(AuditLog.client_ip.like(f"{escaped_ip}%", escape="\\"))
 
     # 操作状态
     if status:
@@ -67,15 +68,15 @@ async def list_audit_logs(
         except ValueError:
             pass
 
-    # 关键词搜索（用户名/工号/输入输出内容）
+    # 关键词搜索（用户名/工号/输入输出内容，转义 LIKE 通配符）
     if keyword:
-        kw = f"%{keyword}%"
+        escaped_kw = f"%{keyword.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')}%"
         base_query = base_query.where(
             or_(
-                AuditLog.username.ilike(kw),
-                AuditLog.employee_id.ilike(kw),
-                AuditLog.input_text.ilike(kw),
-                AuditLog.output_text.ilike(kw),
+                AuditLog.username.ilike(escaped_kw, escape="\\"),
+                AuditLog.employee_id.ilike(escaped_kw, escape="\\"),
+                AuditLog.input_text.ilike(escaped_kw, escape="\\"),
+                AuditLog.output_text.ilike(escaped_kw, escape="\\"),
             )
         )
 

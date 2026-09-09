@@ -298,7 +298,7 @@ async def reset_user_password(
     重置用户密码
     将用户密码重置为系统全局默认密码（管理员在系统设置中配置）
     """
-    from app.core.config import settings
+    from app.api.v1.admin.system_config import get_current_default_password
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -307,7 +307,7 @@ async def reset_user_password(
         raise HTTPException(status_code=404, detail="用户不存在")
 
     # 重置为系统默认密码
-    user.password_hash = hash_password(settings.DEFAULT_USER_PASSWORD)
+    user.password_hash = hash_password(await get_current_default_password())
     db.add(user)
     await db.flush()
 

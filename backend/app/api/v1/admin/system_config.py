@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends
 from loguru import logger
 from pydantic import BaseModel
-from sqlalchemy import Date, cast, delete
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -49,10 +49,10 @@ async def get_basic_settings(
         return BasicSettingsConfig()
 
     return BasicSettingsConfig(
-        version=data.get(b"version", b"1.0.0").decode(),
-        debug=data.get(b"debug", b"0") == b"1",
-        allow_register=data.get(b"allow_register", b"0") == b"1",
-        maintenance_mode=data.get(b"maintenance_mode", b"0") == b"1",
+        version=data.get("version", "1.0.0"),
+        debug=data.get("debug") == "1",
+        allow_register=data.get("allow_register") == "1",
+        maintenance_mode=data.get("maintenance_mode") == "1",
     )
 
 
@@ -97,10 +97,10 @@ async def get_feishu_settings(
         return FeishuSettingsConfig()
 
     return FeishuSettingsConfig(
-        enabled=data.get(b"enabled", b"0") == b"1",
-        app_id=data.get(b"app_id", b"").decode(),
-        app_secret=decrypt_secret(data.get(b"app_secret", b"").decode()),
-        redirect_uri=data.get(b"redirect_uri", b"").decode(),
+        enabled=data.get("enabled") == "1",
+        app_id=data.get("app_id", ""),
+        app_secret=decrypt_secret(data.get("app_secret", "")),
+        redirect_uri=data.get("redirect_uri", ""),
     )
 
 
@@ -142,8 +142,9 @@ async def get_security_settings(
         # 返回配置文件中的默认密码
         return SecuritySettingsConfig(default_password=settings.DEFAULT_USER_PASSWORD)
 
+    stored = data.get("default_password")
     return SecuritySettingsConfig(
-        default_password=decrypt_secret(data.get(b"default_password", settings.DEFAULT_USER_PASSWORD.encode()).decode()),
+        default_password=decrypt_secret(stored) if stored else settings.DEFAULT_USER_PASSWORD,
     )
 
 
@@ -159,11 +160,15 @@ async def update_security_settings(
         mapping={"default_password": encrypt_secret(config.default_password)}
     )
 
-    # 同时更新 settings 对象（运行时生效）
-    settings.DEFAULT_USER_PASSWORD = config.default_password
-
     logger.info("用户安全设置已更新")
     return config
+
+
+async def get_current_default_password() -> str:
+    """从 Redis 读取管理员配置的默认密码，回退到 settings 初始值。多 worker 安全。"""
+    redis = await get_redis()
+    data = await redis.hget(SECURITY_SETTINGS_KEY, "default_password")
+    return decrypt_secret(data) if data else settings.DEFAULT_USER_PASSWORD
 
 
 # ========== 数据维护 ==========
@@ -183,9 +188,9 @@ async def clean_logs(
     """清理审计日志（默认保留90天）"""
     from app.models.audit_log import AuditLog
 
-    cutoff_date = datetime.utcnow().date() - timedelta(days=days)
+    cutoff = datetime.utcnow() - timedelta(days=days)
     result = await db.execute(
-        delete(AuditLog).where(cast(AuditLog.created_at, Date) < cutoff_date)
+        delete(AuditLog).where(AuditLog.created_at < cutoff)
     )
     deleted = result.rowcount or 0
     await db.commit()
@@ -223,13 +228,10 @@ async def clean_cache(
     """清理 Redis 缓存（保留配置项）"""
     redis = await get_redis()
 
-    # 获取所有键
-    keys = await redis.keys("*")
-
-    # 过滤出非配置项的缓存键
+    # 使用 scan_iter 替代 keys("*")，避免阻塞 Redis；decode_responses=True 下键已是 str
     cache_keys = [
-        k for k in keys
-        if not k.decode().startswith("system:")
+        k async for k in redis.scan_iter(match="*")
+        if not k.startswith("system:")
     ]
 
     if cache_keys:
@@ -290,9 +292,7 @@ async def get_domain_prompts(
     config = DomainPromptsConfig()
     if data:
         for code in DOMAIN_CODES:
-            val = data.get(code.encode()) or data.get(code, b"")
-            if isinstance(val, bytes):
-                val = val.decode()
+            val = data.get(code) or ""
             if val:
                 setattr(config, code, val)
     return config

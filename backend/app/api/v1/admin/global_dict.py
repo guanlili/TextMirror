@@ -107,16 +107,21 @@ async def batch_create_global_words(
     _user=Depends(require_permission("admin:global_dict:edit")),
 ):
     """批量添加全局词条"""
+    # 一次性查询已存在的词条，避免逐条 N+1 查询
+    word_set = {entry.word for entry in data.entries}
+    type_set = {entry.type for entry in data.entries}
+    existing_result = await db.execute(
+        select(GlobalWord.word, GlobalWord.type).where(
+            GlobalWord.word.in_(word_set),
+            GlobalWord.type.in_(type_set),
+        )
+    )
+    existing_set = {(r[0], r[1]) for r in existing_result.fetchall()}
+
     added = 0
     skipped = 0
     for entry in data.entries:
-        exists = await db.execute(
-            select(GlobalWord).where(
-                GlobalWord.word == entry.word,
-                GlobalWord.type == entry.type,
-            )
-        )
-        if exists.scalar_one_or_none():
+        if (entry.word, entry.type) in existing_set:
             skipped += 1
             continue
         db.add(GlobalWord(

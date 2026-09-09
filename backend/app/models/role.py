@@ -97,10 +97,10 @@ class RolePermission(BaseModel):
     __tablename__ = "role_permissions"
 
     role_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=False, comment="角色ID"
+        Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=False, index=True, comment="角色ID"
     )
     permission_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False, comment="权限ID"
+        Integer, ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False, index=True, comment="权限ID"
     )
 
     # 关联关系

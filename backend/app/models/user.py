@@ -36,7 +36,7 @@ class User(BaseModel):
         String(200), nullable=True, comment="部门"
     )
     role_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("roles.id"), nullable=False, comment="角色ID"
+        Integer, ForeignKey("roles.id"), nullable=False, index=True, comment="角色ID"
     )
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False, comment="是否启用"

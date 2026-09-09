@@ -40,7 +40,7 @@ class ProofreadTask(BaseModel):
         String(64), nullable=True, comment="游客访问令牌 SHA-256 哈希"
     )
     status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="PENDING",
+        String(20), nullable=False, default="PENDING", index=True,
         comment="PENDING/STARTED/PROGRESS/RETRYING/SUCCESS/FAILURE/REVOKED/CANCELLED",
     )
     phase: Mapped[Optional[str]] = mapped_column(
