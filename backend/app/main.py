@@ -31,7 +31,8 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理：启动和关闭时执行"""
     # ---- 日志配置 ----
     logger.remove()
-    logger.add(sys.stderr, level=settings.LOG_LEVEL, rotation="50 MB", retention="7 days")
+    # rotation/retention 仅对文件 sink 生效；容器内走 stderr + docker 日志轮转
+    logger.add(sys.stderr, level=settings.LOG_LEVEL)
 
     # ---- 启动阶段 ----
     logger.info(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} 正在启动...")

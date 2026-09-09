@@ -70,7 +70,9 @@ async def list_audit_logs(
 
     # 关键词搜索（用户名/工号/输入输出内容，转义 LIKE 通配符）
     if keyword:
-        escaped_kw = f"%{keyword.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')}%"
+        # py<3.12 的 f-string 表达式内不允许反斜杠，先转义再拼
+        escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        escaped_kw = f"%{escaped}%"
         base_query = base_query.where(
             or_(
                 AuditLog.username.ilike(escaped_kw, escape="\\"),
