@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import decode_token, hash_api_key
+from app.core.security import decode_token, hash_api_key, is_token_revoked_by_password_change
 
 # HTTP Bearer Token 提取器
 security_scheme = HTTPBearer(auto_error=False)
@@ -85,6 +85,13 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="用户已被禁用",
+        )
+
+    # 密码变更后，变更前签发的 Access Token 立即失效（改密/管理员重置均触发）
+    if is_token_revoked_by_password_change(payload, user.password_changed_at):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="密码已变更，请重新登录",
         )
 
     role_code = payload.get("role_code")

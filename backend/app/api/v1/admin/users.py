@@ -1,6 +1,7 @@
 """
 TextMirror 用户管理 API（管理后台）
 """
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -306,8 +307,9 @@ async def reset_user_password(
     if user is None:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    # 重置为系统默认密码
+    # 重置为系统默认密码（变更时间戳使用户既有 Token 全部失效）
     user.password_hash = hash_password(await get_current_default_password())
+    user.password_changed_at = datetime.now(timezone.utc)
     db.add(user)
     await db.flush()
 
