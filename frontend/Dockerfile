@@ -1,7 +1,7 @@
 # TextMirror 前端 Dockerfile（多阶段构建 - Nginx + 静态文件 + 反向代理）
 # 默认 HTTP 模式，如需 HTTPS 请参考 README.md 中的说明
 # ---- 构建阶段 ----
-FROM node:18-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
