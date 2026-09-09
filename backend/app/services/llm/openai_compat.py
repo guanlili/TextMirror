@@ -27,7 +27,9 @@ _client_pools: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, Dict[tuple,
     weakref.WeakKeyDictionary()
 )
 
-# 各 api_base 已验证成功的 chat 路径，跨实例共享，避免每个新实例重新 404 试探
+# 各 api_base 已验证成功的 chat 路径，跨实例共享，避免每个新实例重新 404 试探。
+# 无需加锁：仅单条 dict get/set（GIL 下原子），写入只在请求成功后发生（幂等），
+# Web/Celery 各进程持有独立副本，最坏情况是重复探测一次。
 _verified_endpoints: Dict[str, str] = {}
 
 

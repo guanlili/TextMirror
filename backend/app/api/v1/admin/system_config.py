@@ -2,12 +2,12 @@
 TextMirror 系统配置管理 API（管理后台）
 包含：基本设置、飞书配置、安全设置、数据维护
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from loguru import logger
 from pydantic import BaseModel
-from sqlalchemy import delete
+from sqlalchemy import delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -188,7 +188,7 @@ async def clean_logs(
     """清理审计日志（默认保留90天）"""
     from app.models.audit_log import AuditLog
 
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     result = await db.execute(
         delete(AuditLog).where(AuditLog.created_at < cutoff)
     )
@@ -254,11 +254,11 @@ async def clean_expired_whitelist(
     """清理过期放行词"""
     from app.models.dictionary import WhitelistWord
 
-    now = datetime.utcnow()
+    # expire_at 是 naive 列（历史 schema），用 SQL 侧 now() 比较避免 aware/naive 传参冲突
     result = await db.execute(
         delete(WhitelistWord).where(
-            WhitelistWord.expires_at.isnot(None),
-            WhitelistWord.expires_at < now
+            WhitelistWord.expire_at.isnot(None),
+            WhitelistWord.expire_at < func.now(),
         )
     )
     deleted = result.rowcount or 0
