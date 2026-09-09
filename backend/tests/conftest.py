@@ -68,14 +68,20 @@ def _patch_refund_for_fakeredis(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _disable_audit_log_background_writes(monkeypatch):
-    """审计日志后台任务会额外占用 SQLite 连接，单测中禁用以避免 database is locked。"""
+    """审计日志后台任务会额外占用 SQLite 连接，单测中禁用以避免 database is locked。
+
+    多数 API 模块用 `from app.services.audit_log import record_audit_log` 直接绑定，
+    patch 模块属性不影响它们——必须 patch ensure_future 的目标 _write_audit_log 本身，
+    否则后台写与每个用例结束时的事件循环关闭竞态，泄漏持有写锁的 aiosqlite 连接。
+    """
     from app.services import audit_log as audit_log_module
 
-    def _noop(*args, **kwargs):
+    async def _noop_write(log_data):
         pass
 
-    monkeypatch.setattr(audit_log_module, "record_audit_log", _noop)
-    monkeypatch.setattr(audit_log_module, "record_audit_log_sync", _noop)
+    monkeypatch.setattr(audit_log_module, "_write_audit_log", _noop_write)
+    monkeypatch.setattr(audit_log_module, "record_audit_log", lambda *a, **k: None)
+    monkeypatch.setattr(audit_log_module, "record_audit_log_sync", lambda *a, **k: None)
 
 
 @pytest.fixture(autouse=True)
