@@ -65,14 +65,13 @@ def create_access_token(
     :param expires_delta: 过期时间差
     :return: JWT Token 字符串
     """
+    now = datetime.now(timezone.utc)
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = now + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(
-            minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
-        )
+        expire = now + timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
 
-    to_encode = {"sub": str(subject), "exp": expire, "type": "access"}
+    to_encode = {"sub": str(subject), "exp": expire, "iat": now, "type": "access"}
     if extra_data:
         to_encode.update(extra_data)
 
@@ -91,14 +90,13 @@ def create_refresh_token(
     :param expires_delta: 过期时间差
     :return: JWT Token 字符串
     """
+    now = datetime.now(timezone.utc)
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = now + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(
-            days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS
-        )
+        expire = now + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
 
-    to_encode = {"sub": str(subject), "exp": expire, "type": "refresh"}
+    to_encode = {"sub": str(subject), "exp": expire, "iat": now, "type": "refresh"}
 
     return jwt.encode(
         to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM

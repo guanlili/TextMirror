@@ -394,8 +394,6 @@ def async_proofread_document(self, db_task_id: int):
     except _CancelledError:
         logger.info(f"[Task {celery_task_id}] 任务已被用户取消")
         return {"cancelled": True, "task_id": celery_task_id}
-    finally:
-        sync_engine.dispose()
 
 
 @celery_app.task(name="maintenance.clean_uploaded_documents")
@@ -412,7 +410,6 @@ def clean_uploaded_documents():
     import time
     from datetime import datetime, timedelta, timezone
 
-    from sqlalchemy import create_engine
     from sqlalchemy import text as sa_text
 
     from app.services.upload import remove_upload_dir
@@ -422,75 +419,71 @@ def clean_uploaded_documents():
         logger.info("[定时清理] 上传目录不存在，跳过")
         return {"skipped": True}
 
-    sync_url = settings.DATABASE_URL.replace("postgresql+asyncpg", "postgresql+psycopg2")
-    engine = create_engine(sync_url)
+    engine = _get_sync_engine()
     stats = {"deleted_records": 0, "orphan_dirs": 0, "expired_guest": 0, "missing_files": 0}
-    try:
-        with engine.connect() as conn:
-            rows = conn.execute(sa_text(
-                "SELECT file_id, owner_kind, status, created_at FROM uploaded_documents"
-            )).fetchall()
+    with engine.connect() as conn:
+        rows = conn.execute(sa_text(
+            "SELECT file_id, owner_kind, status, created_at FROM uploaded_documents"
+        )).fetchall()
 
-        known = {r[0]: {"owner_kind": r[1], "status": r[2], "created_at": r[3]} for r in rows}
+    known = {r[0]: {"owner_kind": r[1], "status": r[2], "created_at": r[3]} for r in rows}
 
-        # 1) 已删除记录的残留目录
-        for file_id, info in known.items():
-            if info["status"] == "deleted" and os.path.isdir(os.path.join(upload_dir, file_id)):
-                remove_upload_dir(file_id)
-                stats["deleted_records"] += 1
+    # 1) 已删除记录的残留目录
+    for file_id, info in known.items():
+        if info["status"] == "deleted" and os.path.isdir(os.path.join(upload_dir, file_id)):
+            remove_upload_dir(file_id)
+            stats["deleted_records"] += 1
 
-        # 3) 过期游客文件（同时把记录标记为 deleted，避免仍出现在后台列表）
-        retention = settings.GUEST_FILE_RETENTION_DAYS
-        if retention > 0:
-            cutoff = datetime.now(timezone.utc) - timedelta(days=retention)
-            expired = [
-                fid for fid, info in known.items()
-                if info["owner_kind"] == "guest" and info["status"] != "deleted"
-                and info["created_at"] is not None
-                and _as_utc_naive_safe(info["created_at"]) < cutoff
-            ]
-            for file_id in expired:
-                remove_upload_dir(file_id)
-                stats["expired_guest"] += 1
-            if expired:
-                with engine.connect() as conn:
-                    conn.execute(
-                        sa_text(
-                            "UPDATE uploaded_documents SET status='deleted', deleted_at=NOW(), "
-                            "extracted_text=NULL WHERE file_id = ANY(:ids)"
-                        ),
-                        {"ids": expired},
-                    )
-                    conn.commit()
+    # 3) 过期游客文件（同时把记录标记为 deleted，避免仍出现在后台列表）
+    retention = settings.GUEST_FILE_RETENTION_DAYS
+    if retention > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention)
+        expired = [
+            fid for fid, info in known.items()
+            if info["owner_kind"] == "guest" and info["status"] != "deleted"
+            and info["created_at"] is not None
+            and _as_utc_naive_safe(info["created_at"]) < cutoff
+        ]
+        for file_id in expired:
+            remove_upload_dir(file_id)
+            stats["expired_guest"] += 1
+        if expired:
+            with engine.connect() as conn:
+                conn.execute(
+                    sa_text(
+                        "UPDATE uploaded_documents SET status='deleted', deleted_at=NOW(), "
+                        "extracted_text=NULL WHERE file_id = ANY(:ids)"
+                    ),
+                    {"ids": expired},
+                )
+                conn.commit()
 
-        # 2) 孤儿目录（无任何数据库记录）
-        min_age = settings.ORPHAN_DIR_MIN_AGE_HOURS * 3600
-        now = time.time()
-        for name in os.listdir(upload_dir):
-            path = os.path.join(upload_dir, name)
-            if not os.path.isdir(path) or name == "icons" or name in known:
+    # 2) 孤儿目录（无任何数据库记录）
+    min_age = settings.ORPHAN_DIR_MIN_AGE_HOURS * 3600
+    now = time.time()
+    for name in os.listdir(upload_dir):
+        path = os.path.join(upload_dir, name)
+        if not os.path.isdir(path) or name == "icons" or name in known:
+            continue
+        try:
+            if now - os.path.getmtime(path) < min_age:
                 continue
-            try:
-                if now - os.path.getmtime(path) < min_age:
-                    continue
-            except OSError:
-                continue
-            remove_upload_dir(name)
-            stats["orphan_dirs"] += 1
+        except OSError:
+            continue
+        remove_upload_dir(name)
+        stats["orphan_dirs"] += 1
 
-        # 统计磁盘缺失的有效记录（只观察不处理）
-        for file_id, info in known.items():
-            if info["status"] != "deleted" and not os.path.isdir(os.path.join(upload_dir, file_id)):
-                stats["missing_files"] += 1
+    # 统计磁盘缺失的有效记录（只观察不处理）
+    for file_id, info in known.items():
+        if info["status"] != "deleted" and not os.path.isdir(os.path.join(upload_dir, file_id)):
+            stats["missing_files"] += 1
 
-        logger.info(
-            f"[定时清理] 上传目录清理完成: 已删记录残留={stats['deleted_records']} "
-            f"孤儿目录={stats['orphan_dirs']} 过期游客文件={stats['expired_guest']} "
-            f"磁盘缺失记录={stats['missing_files']}"
-        )
-        return stats
-    finally:
-        engine.dispose()
+    logger.info(
+        f"[定时清理] 上传目录清理完成: 已删记录残留={stats['deleted_records']} "
+        f"孤儿目录={stats['orphan_dirs']} 过期游客文件={stats['expired_guest']} "
+        f"磁盘缺失记录={stats['missing_files']}"
+    )
+    return stats
 
 
 def _as_utc_naive_safe(dt):
@@ -507,21 +500,16 @@ def clean_old_audit_logs(retention_days: int = 90):
     """
     from datetime import datetime, timedelta
 
-    from sqlalchemy import create_engine
     from sqlalchemy import text as sa_text
 
-    sync_url = settings.DATABASE_URL.replace("postgresql+asyncpg", "postgresql+psycopg2")
-    engine = create_engine(sync_url)
-    try:
-        cutoff = datetime.utcnow() - timedelta(days=retention_days)
-        with engine.connect() as conn:
-            result = conn.execute(
-                sa_text("DELETE FROM audit_logs WHERE created_at < :cutoff"),
-                {"cutoff": cutoff},
-            )
-            conn.commit()
-            deleted = result.rowcount or 0
-        logger.info(f"[定时清理] 审计日志清理完成: 删除 {deleted} 条（{retention_days} 天前）")
-        return {"deleted": deleted}
-    finally:
-        engine.dispose()
+    engine = _get_sync_engine()
+    cutoff = datetime.utcnow() - timedelta(days=retention_days)
+    with engine.connect() as conn:
+        result = conn.execute(
+            sa_text("DELETE FROM audit_logs WHERE created_at < :cutoff"),
+            {"cutoff": cutoff},
+        )
+        conn.commit()
+        deleted = result.rowcount or 0
+    logger.info(f"[定时清理] 审计日志清理完成: 删除 {deleted} 条（{retention_days} 天前）")
+    return {"deleted": deleted}

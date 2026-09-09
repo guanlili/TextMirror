@@ -32,7 +32,10 @@ from app.models.proofread import ProofreadRecord  # noqa
 from app.models.dictionary import Dictionary, DictionaryEntry, WhitelistWord  # noqa
 from app.models.global_word import GlobalWord  # noqa
 from app.models.llm_config import LLMConfig  # noqa
+from app.models.api_key import ApiKey  # noqa
 from app.models.audit_log import AuditLog  # noqa
+from app.models.issue_feedback import IssueFeedback  # noqa
+from app.models.proofread_task import ProofreadTask  # noqa
 from app.models.uploaded_document import UploadedDocument  # noqa
 
 target_metadata = Base.metadata
