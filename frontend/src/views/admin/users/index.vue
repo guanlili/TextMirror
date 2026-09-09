@@ -117,7 +117,9 @@ const editingUser = ref<AdminUserItem | null>(null)
 const form = ref({ employee_id: '', username: '', password: '', role_id: 0, department: '', phone: '', daily_quota: null as number | null, remark: '' })
 
 onMounted(async () => {
-  try { roles.value = await listRolesApi() } catch {}
+  try { roles.value = await listRolesApi() } catch {
+    // 拦截器已处理
+  }
   await fetchList()
 })
 
@@ -128,7 +130,9 @@ async function fetchList() {
     const res = await listUsersApi({ page: page.value, page_size: pageSize, keyword: keyword.value || undefined, is_active: isActive })
     users.value = res.items
     total.value = res.total
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   loading.value = false
 }
 
@@ -159,7 +163,9 @@ async function handleSave() {
     showCreateDialog.value = false
     resetForm()
     await fetchList()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   saving.value = false
 }
 
@@ -168,7 +174,9 @@ async function handleToggleActive(row: AdminUserItem) {
 }
 
 async function handleDelete(id: number) {
-  try { await deleteUserApi(id); ElMessage.success('已删除'); await fetchList() } catch {}
+  try { await deleteUserApi(id); ElMessage.success('已删除'); await fetchList() } catch {
+    // 拦截器已处理
+  }
 }
 </script>
 

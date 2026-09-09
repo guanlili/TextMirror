@@ -196,7 +196,9 @@ async function fetchList() {
     })
     items.value = res.items
     total.value = res.total
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   loading.value = false
 }
 
@@ -204,7 +206,9 @@ async function openDetail(row: HistoryItem) {
   try {
     detail.value = await getHistoryDetailApi(row.id)
     showDetail.value = true
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
 }
 
 async function handleDelete(id: number) {
@@ -212,7 +216,9 @@ async function handleDelete(id: number) {
     await deleteHistoryApi(id)
     ElMessage.success('记录已删除')
     await fetchList()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
 }
 
 function formatTime(t?: string): string {

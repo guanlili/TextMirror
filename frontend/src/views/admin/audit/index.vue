@@ -304,7 +304,9 @@ async function fetchLogs() {
 async function fetchStats() {
   try {
     stats.value = await getAuditStatsApi()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
 }
 
 function handleSearch() {
@@ -326,7 +328,9 @@ async function showDetail(id: number) {
   try {
     detail.value = await getAuditLogDetailApi(id)
     detailVisible.value = true
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
 }
 
 // 工具函数

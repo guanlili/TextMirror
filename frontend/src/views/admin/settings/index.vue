@@ -252,27 +252,25 @@ const securitySettings = reactive<SecuritySettingsConfig>({
 })
 
 onMounted(async () => {
-  try {
-    const config = await getAdminSiteConfigApi()
-    Object.assign(siteConfig, config)
-    originalSiteConfig = { ...config }
-  } catch {}
-  
-  try {
-    const basic = await getBasicSettingsApi()
-    Object.assign(settings, basic)
-  } catch {}
-  
-  try {
-    const feishu = await getFeishuSettingsApi()
-    Object.assign(feishuSettings, feishu)
-  } catch {}
-  
-  try {
-    const security = await getSecuritySettingsApi()
-    Object.assign(securitySettings, security)
-  } catch {}
-
+  const [siteRes, basicRes, feishuRes, securityRes] = await Promise.allSettled([
+    getAdminSiteConfigApi(),
+    getBasicSettingsApi(),
+    getFeishuSettingsApi(),
+    getSecuritySettingsApi(),
+  ])
+  if (siteRes.status === 'fulfilled') {
+    Object.assign(siteConfig, siteRes.value)
+    originalSiteConfig = { ...siteRes.value }
+  }
+  if (basicRes.status === 'fulfilled') {
+    Object.assign(settings, basicRes.value)
+  }
+  if (feishuRes.status === 'fulfilled') {
+    Object.assign(feishuSettings, feishuRes.value)
+  }
+  if (securityRes.status === 'fulfilled') {
+    Object.assign(securitySettings, securityRes.value)
+  }
 })
 
 /** 保存品牌设置 */

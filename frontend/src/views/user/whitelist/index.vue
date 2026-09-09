@@ -122,7 +122,9 @@ onMounted(() => fetchList())
 
 async function fetchList() {
   loading.value = true
-  try { list.value = await listWhitelistApi({ keyword: keyword.value || undefined, page_size: 200 }) } catch {}
+  try { list.value = await listWhitelistApi({ keyword: keyword.value || undefined, page_size: 200 }) } catch {
+    // 拦截器已处理
+  }
   loading.value = false
 }
 
@@ -160,7 +162,9 @@ async function handleSave() {
     showAddDialog.value = false
     resetForm()
     await fetchList()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   saving.value = false
 }
 
@@ -169,7 +173,9 @@ async function handleDelete(id: number) {
     await deleteWhitelistApi(id)
     ElMessage.success('放行词已删除')
     await fetchList()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
 }
 
 async function handleBatchImport() {
@@ -187,7 +193,9 @@ async function handleBatchImport() {
     showBatchDialog.value = false
     batchText.value = ''
     await fetchList()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   saving.value = false
 }
 </script>

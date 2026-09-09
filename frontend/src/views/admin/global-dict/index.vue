@@ -240,7 +240,9 @@ async function fetchSuggestions() {
     const res = await getDictSuggestionsApi()
     suggestions.whitelist = res.whitelist
     suggestions.correction = res.correction
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   suggestionsLoading.value = false
 }
 
@@ -256,7 +258,9 @@ async function adoptWhitelist(word: string) {
     suggestions.whitelist = suggestions.whitelist.filter(s => s.word !== word)
     ElMessage.success(`已将「${word}」加入放行词`)
     fetchStats()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   adopting.value = ''
 }
 
@@ -267,7 +271,9 @@ async function adoptCorrection(word: string, suggestion: string) {
     suggestions.correction = suggestions.correction.filter(s => s.word !== word)
     ElMessage.success(`已将「${word}→${suggestion}」加入纠错词条`)
     fetchStats()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   adopting.value = ''
 }
 

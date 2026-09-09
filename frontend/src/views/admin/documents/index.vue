@@ -81,8 +81,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Download, Delete } from '@element-plus/icons-vue'
-import { listDocumentsApi, deleteDocumentApi, type AdminDocumentItem } from '@/api/admin'
-import axios from 'axios'
+import { listDocumentsApi, deleteDocumentApi, downloadDocumentApi, type AdminDocumentItem } from '@/api/admin'
 
 const loading = ref(false)
 const documents = ref<AdminDocumentItem[]>([])
@@ -128,18 +127,14 @@ function handleSearch() {
 
 async function handleDownload(row: AdminDocumentItem) {
   try {
-    const token = localStorage.getItem('access_token')
-    const res = await axios.get(`/api/v1/admin/documents/${row.file_id}/download`, {
-      responseType: 'blob',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const data = await downloadDocumentApi(row.file_id)
+    const url = window.URL.createObjectURL(new Blob([data]))
     const a = document.createElement('a')
     a.href = url
     a.download = row.filename
     a.click()
     window.URL.revokeObjectURL(url)
-  } catch (_e: any) {
+  } catch {
     ElMessage.error('下载失败')
   }
 }

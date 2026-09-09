@@ -81,13 +81,17 @@ const editingRole = ref<RoleItem | null>(null)
 const form = ref({ name: '', code: '', description: '', permission_ids: [] as number[] })
 
 onMounted(async () => {
-  try { permissionTree.value = await getPermissionTreeApi() } catch {}
+  try { permissionTree.value = await getPermissionTreeApi() } catch {
+    // 拦截器已处理
+  }
   await fetchList()
 })
 
 async function fetchList() {
   loading.value = true
-  try { roles.value = await listRolesApi() } catch {}
+  try { roles.value = await listRolesApi() } catch {
+    // 拦截器已处理
+  }
   loading.value = false
 }
 
@@ -118,12 +122,16 @@ async function handleSave() {
     showCreateDialog.value = false
     resetForm()
     await fetchList()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   saving.value = false
 }
 
 async function handleDelete(id: number) {
-  try { await deleteRoleApi(id); ElMessage.success('已删除'); await fetchList() } catch {}
+  try { await deleteRoleApi(id); ElMessage.success('已删除'); await fetchList() } catch {
+    // 拦截器已处理
+  }
 }
 </script>
 

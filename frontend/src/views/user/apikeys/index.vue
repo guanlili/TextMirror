@@ -164,7 +164,9 @@ function openCreateDialog() {
 
 async function fetchList() {
   loading.value = true
-  try { list.value = (await listApiKeysApi()).items } catch {}
+  try { list.value = (await listApiKeysApi()).items } catch {
+    // 拦截器已处理
+  }
   loading.value = false
 }
 
@@ -189,7 +191,9 @@ async function handleCreate() {
     createdKey.value = res
     copied.value = false
     await fetchList()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
   saving.value = false
 }
 
@@ -198,7 +202,9 @@ async function handleRevoke(id: number) {
     await revokeApiKeyApi(id)
     ElMessage.success('密钥已吊销')
     await fetchList()
-  } catch {}
+  } catch {
+    // 拦截器已处理
+  }
 }
 
 async function copyKey() {
