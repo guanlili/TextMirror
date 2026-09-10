@@ -44,3 +44,10 @@ class ApiKeyItem(BaseModel):
 class ApiKeyListResponse(BaseModel):
     items: list[ApiKeyItem] = []
     total: int = 0
+
+
+class ApiKeyAdminUpdateRequest(BaseModel):
+    """管理端更新密钥请求：仅显式传入的字段会被修改"""
+    is_active: Optional[bool] = Field(None, description="吊销(false)/恢复(true)")
+    daily_quota: Optional[int] = Field(None, ge=1, le=100000, description="每日调用上限（显式传 null 表示清除、跟随用户配额）")
+    remark: Optional[str] = Field(None, max_length=500, description="备注（显式传 null 表示清除）")

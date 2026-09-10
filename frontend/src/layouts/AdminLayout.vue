@@ -29,6 +29,10 @@
           <el-icon><Setting /></el-icon>
           <template #title>策略管理</template>
         </el-menu-item>
+        <el-menu-item index="/admin/apikeys">
+          <el-icon><Key /></el-icon>
+          <template #title>API密钥管理</template>
+        </el-menu-item>
         <el-menu-item index="/admin/llm">
           <el-icon><Cpu /></el-icon>
           <template #title>大模型配置</template>
