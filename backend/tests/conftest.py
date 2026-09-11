@@ -60,10 +60,12 @@ def _patch_refund_for_fakeredis(monkeypatch):
             rate_limit_module.logger.error(f"退还密钥日配额 Redis 异常: {e}")
 
     monkeypatch.setattr(rate_limit_module, "refund_api_key_daily_usage", _async_refund)
-    # open.py 在模块导入时直接绑定 refund_api_key_daily_usage，必须同时 patch 该命名空间
+    # open/open_polish 在模块导入时直接绑定 refund_api_key_daily_usage，必须同时 patch 各命名空间
     from app.api.v1 import open as open_module
+    from app.api.v1 import open_polish as open_polish_module
 
     monkeypatch.setattr(open_module, "refund_api_key_daily_usage", _async_refund)
+    monkeypatch.setattr(open_polish_module, "refund_api_key_daily_usage", _async_refund)
 
 
 @pytest.fixture(autouse=True)
