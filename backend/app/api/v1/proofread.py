@@ -221,6 +221,28 @@ async def text_proofread_compare(
     )
     items = [ModelProofreadResult(**i) for i in raw_items]
 
+    # 落带权重的对比记录：配额从「只预检不消耗」改为真正计量（与开放 API 同口径）。
+    # 游客不落（游客配额走 IP 限流）；全部失败不落（零消耗）
+    if current_user:
+        successes = [i for i in items if i.success]
+        if successes:
+            db.add(ProofreadRecord(
+                user_id=current_user.id,
+                type="text",
+                original_text=request.text,
+                check_types=json.dumps([]),
+                domain=request.domain,
+                result={
+                    "compare": True,
+                    "models": [i.config_name for i in items],
+                    "issues": [issue.model_dump() for i in successes for issue in i.issues],
+                    "issues_per_model": {str(i.config_id): i.total_issues for i in items},
+                },
+                total_issues=sum(i.total_issues for i in successes),
+                quota_weight=len(successes),
+            ))
+            await db.flush()
+
     record_audit_log(
         http_request, "proofread_compare", user=current_user,
         input_text=request.text,
