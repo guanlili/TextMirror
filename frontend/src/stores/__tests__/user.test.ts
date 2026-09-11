@@ -28,7 +28,6 @@ const me: UserInfo = {
   role_id: 1,
   role_name: '超级管理员',
   role_code: 'super_admin',
-  is_active: true,
   permissions: ['admin:access'],
 }
 
