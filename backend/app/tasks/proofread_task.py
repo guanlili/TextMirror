@@ -182,6 +182,17 @@ class ProofreadDocumentTask(celery_app.Task):
                     session.commit()
                 if db_task.owner_api_key_id:
                     _refund_key_daily_quota(db_task.owner_api_key_id)
+                    # 配置了回调的开放 API 任务：推送失败事件（尽力而为）
+                    from app.services.webhook import build_event, dispatch_webhook
+
+                    dispatch_webhook(db_task.owner_api_key_id, build_event(
+                        "document.failed",
+                        db_task.task_id,
+                        {
+                            "error_code": db_task.error_code or "PROOFREAD_FAILED",
+                            "message": db_task.message or "校对任务最终失败",
+                        },
+                    ))
         except Exception as e:
             logger.warning(f"[on_failure] 处理失败 task_id={task_id}: {e}")
 
@@ -402,6 +413,20 @@ def async_proofread_document(self, db_task_id: int):
             db_task.result_json = result_payload
             db_task.finished_at = datetime.now(timezone.utc)
             session.commit()
+
+            # 开放 API 提交且配置了回调：推送完成事件（尽力而为，不阻塞主任务）
+            if db_task.owner_api_key_id:
+                from app.services.webhook import build_event, dispatch_webhook
+
+                dispatch_webhook(db_task.owner_api_key_id, build_event(
+                    "document.completed",
+                    db_task.task_id,
+                    {
+                        "total_issues": result["total_issues"],
+                        "chunks_count": result["chunks_count"],
+                        "corrected_download_url": result_payload.get("corrected_download_url"),
+                    },
+                ))
 
             logger.info(f"[Task {celery_task_id}] 异步校对完成: issues={result['total_issues']}")
             return result_payload

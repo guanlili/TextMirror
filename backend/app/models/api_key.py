@@ -45,6 +45,12 @@ class ApiKey(BaseModel):
     remark: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True, comment="备注"
     )
+    webhook_url: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True, comment="异步任务完成回调地址(null=不回调)"
+    )
+    webhook_secret: Mapped[Optional[str]] = mapped_column(
+        String(300), nullable=True, comment="回调签名密文(Fernet加密, HMAC-SHA256签名用)"
+    )
 
     def __repr__(self):
         return f"<ApiKey(id={self.id}, name={self.name}, prefix={self.key_prefix}..., active={self.is_active})>"
