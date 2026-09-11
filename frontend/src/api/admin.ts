@@ -18,6 +18,27 @@ export function getDashboardStatsApi(): Promise<DashboardStats> {
   return request.get('/admin/dashboard/stats')
 }
 
+export interface TrendPoint {
+  date: string
+  count: number
+  users: number
+}
+
+export interface TopUserItem {
+  user_id: number
+  username: string
+  employee_id: string
+  count: number
+}
+
+export function getUsageTrendApi(days = 30): Promise<{ days: number; daily: TrendPoint[] }> {
+  return request.get('/admin/dashboard/trend', { params: { days } })
+}
+
+export function getTopUsersApi(days = 30, limit = 10): Promise<{ days: number; items: TopUserItem[] }> {
+  return request.get('/admin/dashboard/top-users', { params: { days, limit } })
+}
+
 // ========== 用户管理 ==========
 export interface AdminUserItem {
   id: number

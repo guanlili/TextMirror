@@ -4,7 +4,7 @@ TextMirror 管理后台仪表盘 API
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from loguru import logger
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -86,4 +86,82 @@ async def get_dashboard_stats(
         "total_token_usage": total_token_usage,
         "today_document_count": today_document_count,
         "total_document_count": total_document_count,
+    }
+
+
+@router.get("/trend", summary='近 N 日校对趋势（按日量+活跃用户+token）')
+async def get_usage_trend(
+    days: int = Query(30, ge=7, le=90, description="统计天数（7-90）"),
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission("admin:access")),
+):
+    """
+    近 N 日校对趋势：按日校对次数（SUM(quota_weight) 口径）、活跃用户数、token 消耗。
+    日期边界 Python 侧按 Asia/Shanghai 计算后做 UTC 范围计数（与配额/用量口径一致）。
+    """
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo("Asia/Shanghai")
+    now_local = datetime.now(tz)
+    start_local = (now_local - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    daily = []
+    for i in range(days):
+        day_start = start_local + timedelta(days=i)
+        day_end = day_start + timedelta(days=1)
+        row = (await db.execute(
+            select(
+                func.coalesce(func.sum(ProofreadRecord.quota_weight), 0).label("count"),
+                func.count(func.distinct(ProofreadRecord.user_id)).label("users"),
+            ).where(
+                ProofreadRecord.created_at >= day_start.astimezone(timezone.utc),
+                ProofreadRecord.created_at < day_end.astimezone(timezone.utc),
+            )
+        )).one()
+        daily.append({
+            "date": day_start.strftime("%m-%d"),
+            "count": int(row.count or 0),
+            "users": int(row.users or 0),
+        })
+
+    return {"days": days, "daily": daily}
+
+
+@router.get("/top-users", summary='校对量 Top 用户榜（近 N 日）')
+async def get_top_users(
+    days: int = Query(30, ge=7, le=90, description="统计天数（7-90）"),
+    limit: int = Query(10, ge=1, le=50, description="返回条数"),
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission("admin:access")),
+):
+    """按 SUM(quota_weight) 排名的活跃用户榜（近 N 日）。"""
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo("Asia/Shanghai")
+    start_utc = (datetime.now(tz) - timedelta(days=days - 1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ).astimezone(timezone.utc)
+
+    rows = (await db.execute(
+        select(
+            User.id,
+            User.username,
+            User.employee_id,
+            func.coalesce(func.sum(ProofreadRecord.quota_weight), 0).label("count"),
+        )
+        .join(ProofreadRecord, ProofreadRecord.user_id == User.id)
+        .where(ProofreadRecord.created_at >= start_utc)
+        .group_by(User.id, User.username, User.employee_id)
+        .order_by(func.sum(ProofreadRecord.quota_weight).desc())
+        .limit(limit)
+    )).all()
+
+    return {
+        "days": days,
+        "items": [
+            {"user_id": r.id, "username": r.username, "employee_id": r.employee_id, "count": int(r.count)}
+            for r in rows
+        ],
     }
