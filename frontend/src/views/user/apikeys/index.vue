@@ -42,6 +42,11 @@
             <span>{{ row.used_today ?? '-' }}<template v-if="row.daily_quota"> / {{ row.daily_quota }}</template></span>
           </template>
         </el-table-column>
+        <el-table-column label="近7日" width="80" align="center">
+          <template #default="{ row }">
+            <span>{{ row.used_7d ?? 0 }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="过期时间" width="170">
           <template #default="{ row }">
             <span v-if="row.expires_at" style="font-size: 12px; color: #999;">{{ formatTime(row.expires_at) }}</span>

@@ -11,10 +11,10 @@ from celery import signals
 from loguru import logger
 from sqlalchemy import select, update
 
+# 注册 ORM 元数据：任务内保存 ProofreadRecord 时其 user_id/api_key_id 外键需要解析到
+# users/api_keys 表，且 User↔Role 相互引用需同时注册，否则 mapper 初始化失败（记录保存静默失败）
+import app.models.api_key  # noqa
 import app.models.role  # noqa
-
-# 注册 ORM 元数据：任务内保存 ProofreadRecord 时其 user_id 外键需要解析到 users 表，
-# 且 User↔Role 相互引用需同时注册，否则 mapper 初始化失败（记录保存静默失败）
 import app.models.user  # noqa
 from app.celery_app import celery_app
 from app.core.config import settings
@@ -365,6 +365,7 @@ def async_proofread_document(self, db_task_id: int):
                     from app.models.proofread import ProofreadRecord
                     record = ProofreadRecord(
                         user_id=user_id,
+                        api_key_id=db_task.owner_api_key_id,
                         type="document",
                         original_text=text[:10000],
                         check_types=json.dumps(check_types or []),

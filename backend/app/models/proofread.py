@@ -15,10 +15,15 @@ class ProofreadRecord(BaseModel):
     __table_args__ = (
         # 配额检查按 (user_id, created_at) 范围统计当日记录，每次校对请求都会走
         Index("ix_proofread_records_user_created", "user_id", "created_at"),
+        # 开放 API 用量统计按 (api_key_id, created_at) 聚合
+        Index("ix_proofread_records_apikey_created", "api_key_id", "created_at"),
     )
 
     user_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=True, comment="用户ID(游客为null)"
+    )
+    api_key_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("api_keys.id"), nullable=True, comment="开放API密钥ID(非API调用为null)"
     )
     type: Mapped[str] = mapped_column(
         String(20), nullable=False, default="text", comment="记录类型: text/document/polish"

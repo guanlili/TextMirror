@@ -38,6 +38,7 @@ class ApiKeyItem(BaseModel):
     is_active: bool = True
     status: str = Field(..., description="active/revoked/expired")
     used_today: Optional[int] = Field(None, description="今日调用次数（Redis 不可用时为 null）")
+    used_7d: int = Field(0, description="近 7 天成功调用次数（按落库记录统计）")
     remark: Optional[str] = Field(None, description="备注")
 
 
