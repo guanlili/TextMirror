@@ -32,7 +32,7 @@ Most document proofreading tools rely on closed-source commercial services — e
 - **🔍 Precise issue location** — highlighted results, review item by item, accept or ignore each
 - **📚 Deterministic lexicon engine** — sensitive/error words matched with 100% recall (not probabilistic), three-layer lexicon + user feedback flywheel
 - **📖 Operable domain rules** — built-in official-document / legal domain rules; edit industry rules in the admin console with instant effect, no redeploy
-- **🔌 Open API** — API keys + 5 endpoints to integrate proofreading into your own workflows, always-on Swagger docs, unified error contract
+- **🔌 Open API** — API keys + 8 endpoints to integrate proofreading and AI polishing into your own workflows, always-on Swagger docs, unified error contract
 - **🏢 Enterprise management** — full RBAC, audit logs, per-user daily quotas (unlimited supported), guest rate limiting
 - **🔐 Auth security** — password change instantly invalidates all old tokens; short-lived access tokens with auto-renewal
 - **📱 Responsive** — complete PC and mobile layouts
@@ -80,7 +80,7 @@ Most document proofreading tools rely on closed-source commercial services — e
 ### 🔌 Open API
 > Integrate proofreading into your workflows (scripts / CI / enterprise systems):
 > - **Self-service API keys**: create in the web UI (SHA-256 hashed storage, RPM + daily-quota two-layer limiting, automatic refund on failure)
-> - **5 endpoints**: text proofread / multi-model compare / async document review (upload → poll) / job status / model list
+> - **8 endpoints**: text proofread / multi-model compare / async document review (upload → poll) / job status / model list / usage statistics / AI polish (incl. streaming)
 > - **Unified error contract**: `{code, message}` with always-on Swagger docs (`/api/v1/open/docs`) — Try it out works out of the box
 
 ### 🎨 Branding (White-label)
