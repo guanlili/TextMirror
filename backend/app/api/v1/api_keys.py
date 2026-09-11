@@ -8,6 +8,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from loguru import logger
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -129,14 +130,29 @@ async def list_api_keys(
     start_local = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=6)
     start_utc = start_local.astimezone(timezone.utc)
     usage_rows = (await db.execute(
-        select(ProofreadRecord.api_key_id, func.count())
+        select(ProofreadRecord.api_key_id, func.coalesce(func.sum(ProofreadRecord.quota_weight), 0))
         .where(
             ProofreadRecord.api_key_id.in_([k.id for k in keys]),
             ProofreadRecord.created_at >= start_utc,
         )
         .group_by(ProofreadRecord.api_key_id)
     )).all()
-    used_7d_map = {r[0]: r[1] for r in usage_rows}
+    used_7d_map = {r[0]: int(r[1]) for r in usage_rows}
+
+    # 各密钥最近一次回调投递状态（Redis 不可用时静默为空）
+    webhook_last_map: dict = {}
+    try:
+        from app.core.redis import get_redis
+
+        redis = get_redis()
+        if keys:
+            pipe = redis.pipeline()
+            for k in keys:
+                pipe.hgetall(f"textmirror:webhook_status:{k.id}")
+            for k, raw in zip(keys, await pipe.execute()):
+                webhook_last_map[k.id] = raw or None
+    except Exception as e:
+        logger.warning(f"读取回调投递状态失败（不影响列表）: {e}")
 
     items = []
     for k in keys:
@@ -155,6 +171,7 @@ async def list_api_keys(
             used_7d=used_7d_map.get(k.id, 0),
             remark=k.remark,
             webhook_url=k.webhook_url,
+            webhook_last=webhook_last_map.get(k.id),
         ))
 
     return ApiKeyListResponse(items=items, total=len(items))

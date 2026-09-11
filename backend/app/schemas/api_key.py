@@ -41,6 +41,7 @@ class ApiKeyItem(BaseModel):
     used_7d: int = Field(0, description="近 7 天成功调用次数（按落库记录统计）")
     remark: Optional[str] = Field(None, description="备注")
     webhook_url: Optional[str] = Field(None, description="回调地址（未配置为 null）")
+    webhook_last: Optional[dict] = Field(None, description="最近一次回调投递状态（未投递/Redis 不可用为 null）")
 
 
 class ApiKeyListResponse(BaseModel):
