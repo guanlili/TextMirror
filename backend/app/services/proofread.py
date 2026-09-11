@@ -89,8 +89,8 @@ PROOFREAD_SYSTEM_PROMPT = """你是一位拥有20年经验的资深中文审校�
 用户指定纠错(标注"必须执行")词条出现时一律按映射替换报告。
 
 【校对准则】
-1. 精确定位：o(原文片段)必须是原文中逐字匹配的原始文本，不可修改、截断或概括，确保前端能精确高亮
-2. 有效建议：s(修改建议)必须是可以直接替换原文的完整修正文本，禁止输出说明性文字（如"规范11位手机号"不是可替换文本）；若无法给出具体替换值，则报 warning 级并在 e 中说明需人工核对
+1. 精确定位：o(原文片段)必须是原文中逐字匹配的原始文本，不可修改、截断或概括，确保前端能精确高亮。定位只圈出有问题的一段（词/短语/短句），不要圈整句——圈得越短替换越安全
+2. 有效建议：s(修改建议)必须是可以直接替换原文的完整修正文本，禁止输出说明性文字（如"规范11位手机号"不是可替换文本）。替换到原文后整句必须通顺——给出建议前先默读一遍替换结果，若替换后仍是病句（如生造词只改一字仍不通）则重写建议或改为整短语替换；仍给不出通顺替换时报 warning 级并在 e 中说明需人工核对
 3. 清晰说明：e(原因说明)用简练中文解释问题所在，不超过25个字
 4. 准确分类：t(问题类型)必须从以下枚举中选择：typo(错别字)、grammar(语法错误)、punctuation(标点符号)、style(表达优化)、sensitive(敏感词)、logic(逻辑问题)
 5. 合理定级：sv(严重度)分三级——error(明确错误,必须修改)、warning(可能有误或不规范,建议修改)、info(可优化项,酌情修改)
@@ -705,6 +705,9 @@ async def proofread_text(
     # 定位失败的降级——消灭"高亮失败/假问题"这类最伤信任的输出
     all_issues = verify_llm_issues(text, all_issues)
 
+    # 建议有效性自检：改写类建议若没修掉错误核心，降级 warning 提示人工核对
+    all_issues = _check_suggestion_effective(all_issues)
+
     logger.info(f"[校对] 完成 问题={len(all_issues)} 总耗时={time.perf_counter()-t0:.2f}s 用量={total_usage}")
 
     return {
@@ -751,6 +754,41 @@ def _filter_whitelist_issues(issues: List[Dict[str, Any]],
 def _normalize_for_match(s: str) -> str:
     """匹配用归一化：去所有空白（LLM 偶尔增删空格/换行导致逐字匹配失败）"""
     return "".join(s.split())
+
+
+def _check_suggestion_effective(issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    建议有效性自检（确定性后处理）：改写类建议（grammar/style）若替换后
+    原错误的核心仍在——典型形态：original 的错误子串被原样保留进 suggestion
+    （如「拍擦着→拍擦过」，生造词「拍擦」根本没被修掉）——说明模型只改了
+    语气/时态没解决问题。这类建议直接替换会产出新的病句，降级为 warning
+    并在说明中标注需人工核对；不丢弃（模型可能只是表述保守，问题本身是真的）。
+    错字类（typo）不适用：其 original/suggestion 通常逐字对应，含同字属正常
+    （如「帐号→账号」共享「号」）。
+    """
+    checked: List[Dict[str, Any]] = []
+    for issue in issues:
+        if issue.get("source") in ("dict_scan", "consistency", "format_rule"):
+            checked.append(issue)
+            continue
+        original = issue.get("original") or ""
+        suggestion = issue.get("suggestion") or ""
+        if not original or not suggestion:
+            checked.append(issue)
+            continue
+        # 无效建议的可靠形态：suggestion 完整包含 original（膨胀式改写——
+        # 报告的问题片段被原封不动保留，只是在外围加了字，如「拍擦着→轻轻地拍擦着」），
+        # 或 suggestion 与 original 完全相同。删字修复（「使我们→我们」）、
+        # 正常替换（「严格执行→贯彻落实」）都不会命中。
+        if original and (original in suggestion and len(suggestion) > len(original) or suggestion == original):
+            issue = dict(issue)
+            issue["severity"] = "warning"
+            issue["explanation"] = f"（建议待改进：原文片段被原样保留，需人工核对）{(issue.get('explanation') or '')[:18]}"
+            checked.append(issue)
+            continue
+        checked.append(issue)
+    return checked
+
 
 
 def verify_llm_issues(text: str, issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
