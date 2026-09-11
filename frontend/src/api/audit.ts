@@ -77,3 +77,13 @@ export function getAuditLogDetailApi(id: number): Promise<AuditLogDetail> {
 export function getAuditStatsApi(): Promise<AuditStats> {
   return request.get('/admin/audit/stats')
 }
+
+export interface ActionTypeItem {
+  action: string
+  count: number
+}
+
+/** 获取实际存在的操作类型（动态，含计数） */
+export function getActionTypesApi(): Promise<{ items: ActionTypeItem[] }> {
+  return request.get('/admin/audit/action-types')
+}

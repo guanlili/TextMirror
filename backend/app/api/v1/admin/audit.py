@@ -35,9 +35,13 @@ async def list_audit_logs(
     """
     base_query = select(AuditLog)
 
-    # 操作类型筛选
+    # 操作类型筛选（支持逗号分隔多值：quick_login,login_failed）
     if action_type:
-        base_query = base_query.where(AuditLog.action_type == action_type)
+        actions = [a.strip() for a in action_type.split(",") if a.strip()]
+        if len(actions) == 1:
+            base_query = base_query.where(AuditLog.action_type == actions[0])
+        elif actions:
+            base_query = base_query.where(AuditLog.action_type.in_(actions))
 
     # 用户类型筛选
     if user_type == "guest":
@@ -214,3 +218,18 @@ async def get_audit_stats(
         "total_count": total_count,
         "type_distribution": type_distribution,
     }
+
+
+@router.get("/action-types", summary='获取实际存在的操作类型列表（动态，含计数）')
+async def get_action_types(
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission("admin:access")),
+):
+    """从审计数据聚合 distinct 动作类型（含出现次数），供筛选下拉动态渲染——
+    避免硬编码清单跟随代码漂移（新增动作自动出现）。"""
+    rows = (await db.execute(
+        select(AuditLog.action_type, func.count().label("count"))
+        .group_by(AuditLog.action_type)
+        .order_by(func.count().desc())
+    )).all()
+    return {"items": [{"action": r.action_type, "count": r.count} for r in rows]}

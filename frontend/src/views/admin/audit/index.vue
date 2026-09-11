@@ -10,20 +10,23 @@
 
     <!-- 筛选区 -->
     <el-card class="filter-card">
+      <div class="quick-chips">
+        <span class="quick-label">快捷：</span>
+        <el-button size="small" :type="filters.status === 'failed' ? 'primary' : ''" @click="applyQuick({ status: filters.status === 'failed' ? '' : 'failed' })">失败操作</el-button>
+        <el-button size="small" :type="isQuickGroup('login') ? 'primary' : ''" @click="applyQuickGroup('login')">登录动态</el-button>
+        <el-button size="small" :type="isQuickGroup('proofread') ? 'primary' : ''" @click="applyQuickGroup('proofread')">审校行为</el-button>
+        <el-button size="small" :type="isQuickGroup('apikey') ? 'primary' : ''" @click="applyQuickGroup('apikey')">密钥操作</el-button>
+        <el-button size="small" :type="isQuickGroup('admin') ? 'primary' : ''" @click="applyQuickGroup('admin')">管理操作</el-button>
+      </div>
       <el-form :inline="true" :model="filters" class="filter-form" @submit.prevent="handleSearch">
         <el-form-item label="操作类型">
-          <el-select v-model="filters.action_type" placeholder="全部" clearable style="width: 140px;">
-            <el-option label="AI润色" value="polish" />
-            <el-option label="文本校对" value="proofread_text" />
-            <el-option label="文档校对" value="proofread_doc" />
-            <el-option label="查看历史" value="view_history" />
-            <el-option label="登录成功" value="login_success" />
-            <el-option label="登录失败" value="login_failed" />
-            <el-option label="API文本审校" value="api_proofread" />
-            <el-option label="API多模型对比" value="api_proofread_compare" />
-            <el-option label="API文档审校" value="api_proofread_doc" />
-            <el-option label="API密钥创建" value="apikey_create" />
-            <el-option label="API密钥吊销" value="apikey_revoke" />
+          <el-select v-model="filters.action_type" placeholder="全部" clearable filterable style="width: 170px;">
+            <el-option
+              v-for="t in actionTypes"
+              :key="t.action"
+              :label="`${actionLabel(t.action)}（${t.count}）`"
+              :value="t.action"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="用户类型">
@@ -228,9 +231,11 @@ import {
   getAuditLogsApi,
   getAuditLogDetailApi,
   getAuditStatsApi,
+  getActionTypesApi,
   type AuditLogItem,
   type AuditLogDetail,
   type AuditStats,
+  type ActionTypeItem,
 } from '@/api/audit'
 import { formatTime, formatSize } from '@/utils/format'
 
@@ -249,6 +254,49 @@ const filters = reactive({
   ip: '',
   keyword: '',
 })
+
+// 动态操作类型（从审计数据聚合，含计数；新动作自动出现）
+const actionTypes = ref<ActionTypeItem[]>([])
+
+async function loadActionTypes() {
+  try {
+    actionTypes.value = (await getActionTypesApi()).items
+  } catch {
+    // 拦截器已处理
+  }
+}
+
+// 快捷筛选：单条件切换 / 动作前缀分组
+const QUICK_GROUPS: Record<string, string[]> = {
+  login: ['login_success', 'login_failed', 'quick_login'],
+  proofread: ['proofread_text', 'proofread_doc', 'proofread_compare', 'polish', 'polish_compare'],
+  apikey: ['apikey_create', 'apikey_revoke', 'apikey_admin_update', 'apikey_webhook_set', 'apikey_webhook_clear', 'apikey_webhook_test'],
+  admin: ['user_create', 'user_update', 'user_delete', 'role_', 'policy_', 'llm_', 'global_dict_', 'site_config_'],
+}
+const activeGroup = ref('')
+
+function applyQuick(patch: Record<string, string>) {
+  Object.assign(filters, patch)
+  activeGroup.value = ''
+  page.value = 1
+  fetchLogs()
+}
+
+function isQuickGroup(group: string): boolean {
+  return activeGroup.value === group
+}
+
+function applyQuickGroup(group: string) {
+  if (activeGroup.value === group) {
+    activeGroup.value = ''
+    filters.action_type = ''
+  } else {
+    activeGroup.value = group
+    filters.action_type = (QUICK_GROUPS[group] || []).join(',')
+  }
+  page.value = 1
+  fetchLogs()
+}
 
 // 统计
 const stats = ref<AuditStats>({
@@ -273,6 +321,7 @@ const detail = ref<AuditLogDetail | null>(null)
 onMounted(() => {
   fetchLogs()
   fetchStats()
+  loadActionTypes()
 })
 
 async function fetchLogs() {
@@ -387,6 +436,19 @@ function deviceLabel(type: string | null): string {
 </script>
 
 <style scoped lang="scss">
+.quick-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+
+  .quick-label {
+    font-size: 13px;
+    color: #999;
+  }
+}
+
 .audit-page {
   max-width: 1400px;
   margin: 0 auto;

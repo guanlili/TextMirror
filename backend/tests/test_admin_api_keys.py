@@ -211,3 +211,14 @@ async def test_patch_without_changes_is_noop(client, admin, plain_user):
 async def test_unauthenticated_request_rejected(client):
     resp = await client.get("/api/v1/admin/api-keys")
     assert resp.status_code == 401
+
+
+async def test_audit_action_types_endpoint(client, admin):
+    """审计动作类型聚合端点：返回 distinct 动作+计数（动态筛选数据源）。"""
+    resp = await client.get("/api/v1/admin/audit/action-types", headers=await _admin_headers(client, admin))
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert isinstance(items, list)
+    # 形态校验（共享库动作不确定，只验字段存在）
+    for it in items:
+        assert "action" in it and "count" in it
