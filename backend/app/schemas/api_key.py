@@ -57,3 +57,10 @@ class ApiKeyWebhookSetResponse(BaseModel):
     """设置回调响应：签名密钥仅此一次返回"""
     url: str
     secret: str = Field(..., description="签名密钥明文（仅此一次展示，用于校验 X-TextMirror-Signature）")
+
+
+class ApiKeyAdminUpdateRequest(BaseModel):
+    """管理端更新密钥请求：仅显式传入的字段会被修改"""
+    is_active: Optional[bool] = Field(None, description="吊销(false)/恢复(true)")
+    daily_quota: Optional[int] = Field(None, ge=1, le=100000, description="每日调用上限（显式传 null 表示清除、跟随用户配额）")
+    remark: Optional[str] = Field(None, max_length=500, description="备注（显式传 null 表示清除）")

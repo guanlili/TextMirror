@@ -4,6 +4,7 @@ TextMirror API 路由聚合
 """
 from fastapi import APIRouter
 
+from app.api.v1.admin.api_keys import router as admin_api_keys_router
 from app.api.v1.admin.audit import router as admin_audit_router
 from app.api.v1.admin.dashboard import router as admin_dashboard_router
 from app.api.v1.admin.documents import router as admin_documents_router
@@ -69,6 +70,7 @@ api_router.include_router(admin_settings_router, prefix="/admin")
 api_router.include_router(admin_audit_router, prefix="/admin")
 api_router.include_router(admin_documents_router, prefix="/admin")
 api_router.include_router(admin_policy_router, prefix="/admin")
+api_router.include_router(admin_api_keys_router, prefix="/admin")
 api_router.include_router(admin_system_config_router, prefix="/admin")
 
 # ---- 站点信息（公开） ----

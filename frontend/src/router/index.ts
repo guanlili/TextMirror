@@ -118,6 +118,12 @@ const adminRoutes: RouteRecordRaw[] = [
         meta: { title: '策略管理', icon: 'Setting' },
       },
       {
+        path: 'apikeys',
+        name: 'AdminApiKeys',
+        component: () => import('@/views/admin/apikeys/index.vue'),
+        meta: { title: 'API密钥管理', icon: 'Key' },
+      },
+      {
         path: 'llm',
         name: 'AdminLLM',
         component: () => import('@/views/admin/llm/index.vue'),
