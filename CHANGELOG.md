@@ -4,6 +4,18 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。项目暂未发布正式版本号，按合并日期里程碑分组。
 
+## [2026-09-11]
+
+### 新增
+- **管理员全量 API 密钥管理页**：跨用户列表（分页/关键词/状态筛选）、吊销/恢复（恢复校验单用户活跃上限）、调配额、改备注。([#53](https://github.com/guanlili/TextMirror/pull/53))
+- **API 用量统计**：校对记录归属到调用密钥（`proofread_records.api_key_id`）；`GET /open/usage` 按日/按密钥聚合（近 N 天）；密钥页新增「近7日」列。([#55](https://github.com/guanlili/TextMirror/pull/55))
+- **AI 润色开放端点**：`POST /open/polish`（三版本并发）与 `POST /open/polish/stream`（SSE 流式），计费与审校同口径。([#56](https://github.com/guanlili/TextMirror/pull/56))
+- **异步任务完成回调（Webhook）**：任务完成/失败向密钥配置的地址推送签名通知（HMAC-SHA256 验签、SSRF 防护、指数退避重试、测试推送）。([#57](https://github.com/guanlili/TextMirror/pull/57))
+- **首次部署向导最小版**：容器首启自动初始化种子数据；生产模式管理员初始密码改为随机生成（日志 + 落盘）；首登引导修改密码。([#58](https://github.com/guanlili/TextMirror/pull/58))
+
+### 文档
+- 新增 CHANGELOG.md 与英文 README（README.en.md，与中文版互链）。([#54](https://github.com/guanlili/TextMirror/pull/54))
+
 ## [2026-09-10]
 
 ### 安全
