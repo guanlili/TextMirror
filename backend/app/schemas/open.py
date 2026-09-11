@@ -1,10 +1,11 @@
 """
 TextMirror 开放 API Schema（对外稳定契约，独立于 Web 端 schema 演进）
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas.polish import PolishVersion
 from app.schemas.proofread import Domain, ProofreadIssue
 
 # ======================================================================
@@ -138,3 +139,31 @@ class OpenUsageResponse(BaseModel):
     daily: List[OpenUsageDailyItem] = Field(default_factory=list, description="按日聚合（含空日期补零）")
     keys: List[OpenUsageKeyItem] = Field(default_factory=list, description="按密钥聚合")
     scope: str = Field(..., description="统计范围：api_key（当前密钥）/ user（名下全部密钥）")
+
+
+# ======================================================================
+# AI 润色
+# ======================================================================
+
+PolishStyle = Literal[
+    "formal", "friendly", "plain", "concise", "evidence",
+    "strategic", "practical", "firm", "gentle", "action",
+]
+
+
+class OpenPolishRequest(BaseModel):
+    """AI 润色请求"""
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"text": "这段文字需要更加正式的表达方式来呈现。", "style": "formal"}},
+    )
+
+    text: str = Field(..., min_length=10, max_length=5000, description="待润色原文（10-5000字）")
+    style: PolishStyle = Field(default="formal", description="润色风格（10 种，见枚举）")
+
+
+class OpenPolishResponse(BaseModel):
+    """AI 润色响应（三个版本：轻量/标准/深度）"""
+    versions: List[PolishVersion] = Field(default_factory=list, description="三个润色版本")
+    style: str = Field(default="formal", description="所选风格 key")
+    style_name: str = Field(default="正式规范", description="风格中文名")
+    usage: Dict[str, int] = Field(default_factory=dict, description="Token 用量（流式接口不返回）")
