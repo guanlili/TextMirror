@@ -289,6 +289,29 @@ async def open_proofread_compare(
         if failed > 0:
             await refund_api_key_daily_usage(api_key, failed)
 
+    # 落一条带权重的对比记录：用户配额按 SUM(quota_weight) 计量（此前只预检不落库，
+    # 预检通过后配额实际不消耗），用量统计归属到调用密钥。权重=成功模型数，
+    # 与密钥日配额（按成功数结算）同口径；全部失败不落（用户配额零消耗）
+    successes = [i for i in items if i.success]
+    if successes:
+        db.add(ProofreadRecord(
+            user_id=user.id,
+            api_key_id=api_key.id if api_key is not None else None,
+            type="text",
+            original_text=request.text,
+            check_types=json.dumps([]),
+            domain=request.domain,
+            result={
+                "compare": True,
+                "models": [i.config_name for i in items],
+                "issues": [issue.model_dump() for i in successes for issue in i.issues],
+                "issues_per_model": {str(i.config_id): i.total_issues for i in items},
+            },
+            total_issues=sum(i.total_issues for i in successes),
+            quota_weight=len(successes),
+        ))
+        await db.flush()
+
     record_audit_log(
         http_request, "api_proofread_compare", user=user,
         input_text=request.text,

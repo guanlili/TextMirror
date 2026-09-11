@@ -70,16 +70,16 @@ def _shanghai_today_range() -> tuple:
 
 
 async def _count_today_records(user_id: int, db: AsyncSession) -> int:
-    """统计用户当日（Asia/Shanghai）校对记录数"""
+    """统计用户当日（Asia/Shanghai）配额消耗：SUM(quota_weight)——多模型对比一条记录按成功模型数计"""
     day_start, day_end = _shanghai_today_range()
     result = await db.execute(
-        select(func.count()).select_from(ProofreadRecord).where(
+        select(func.coalesce(func.sum(ProofreadRecord.quota_weight), 0)).select_from(ProofreadRecord).where(
             ProofreadRecord.user_id == user_id,
             ProofreadRecord.created_at >= day_start,
             ProofreadRecord.created_at < day_end,
         )
     )
-    return result.scalar() or 0
+    return int(result.scalar() or 0)
 
 
 async def check_user_quota(user, db: AsyncSession) -> None:

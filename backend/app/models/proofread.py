@@ -52,6 +52,10 @@ class ProofreadRecord(BaseModel):
     source_filename: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True, comment="源文件名(文档校对)"
     )
+    quota_weight: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1",
+        comment="配额消耗权重(多模型对比=成功模型数,其余=1)"
+    )
 
     def __repr__(self):
         return f"<ProofreadRecord(id={self.id}, type={self.type}, issues={self.total_issues})>"

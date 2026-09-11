@@ -65,13 +65,13 @@ async def open_usage(
         day_start_local = start_local + timedelta(days=i)
         day_start_utc = day_start_local.astimezone(timezone.utc)
         day_end_utc = (day_start_local + timedelta(days=1)).astimezone(timezone.utc)
-        count = (await db.execute(
-            select(func.count()).select_from(ProofreadRecord).where(
+        count = int((await db.execute(
+            select(func.coalesce(func.sum(ProofreadRecord.quota_weight), 0)).select_from(ProofreadRecord).where(
                 *base_filters,
                 ProofreadRecord.created_at >= day_start_utc,
                 ProofreadRecord.created_at < day_end_utc,
             )
-        )).scalar() or 0
+        )).scalar() or 0)
         daily.append(OpenUsageDailyItem(date=day_start_local.strftime("%Y-%m-%d"), count=count))
 
     key_rows = (await db.execute(
@@ -80,12 +80,12 @@ async def open_usage(
             ApiKey.name,
             ApiKey.key_prefix,
             ApiKey.key_suffix,
-            func.count().label("count"),
+            func.coalesce(func.sum(ProofreadRecord.quota_weight), 0).label("count"),
         )
         .join(ProofreadRecord, ProofreadRecord.api_key_id == ApiKey.id)
         .where(*base_filters, ProofreadRecord.created_at >= start_local.astimezone(timezone.utc))
         .group_by(ApiKey.id, ApiKey.name, ApiKey.key_prefix, ApiKey.key_suffix)
-        .order_by(func.count().desc())
+        .order_by(func.sum(ProofreadRecord.quota_weight).desc())
     )).all()
     keys = [
         OpenUsageKeyItem(

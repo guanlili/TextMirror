@@ -44,8 +44,8 @@ async def get_dashboard_stats(
     # 校对统计：今日次数 + 总次数 + 今日活跃用户（1 条 SQL）
     proofread_stats = await db.execute(
         select(
-            func.count().label("total"),
-            func.count().filter(today_expr_proofread).label("today"),
+            func.coalesce(func.sum(ProofreadRecord.quota_weight), 0).label("total"),
+            func.coalesce(func.sum(ProofreadRecord.quota_weight).filter(today_expr_proofread), 0).label("today"),
             func.count(func.distinct(ProofreadRecord.user_id))
             .filter(today_expr_proofread, ProofreadRecord.user_id.isnot(None))
             .label("active_today"),
