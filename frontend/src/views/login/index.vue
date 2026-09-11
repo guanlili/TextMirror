@@ -123,6 +123,16 @@
               </el-button>
             </el-form-item>
           </el-form>
+
+          <!-- 一键登录（内网演示便利，管理员可在后台关闭） -->
+          <div v-if="siteStore.quickLoginEnabled" class="quick-login-row">
+            <el-button :loading="quickLoading === 'admin'" size="default" class="quick-btn" @click="handleQuickLogin('admin')">
+              一键管理员
+            </el-button>
+            <el-button :loading="quickLoading === 'demo'" size="default" class="quick-btn" @click="handleQuickLogin('demo')">
+              体验账号
+            </el-button>
+          </div>
         </div>
 
         <!-- 飞书扫码登录 -->
@@ -178,7 +188,7 @@ import { ElMessage, ElMessageBox, FormInstance } from 'element-plus'
 import { User, Lock, Connection, WarningFilled } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useSiteStore } from '@/stores/site'
-import { getFeishuConfigApi, feishuCallbackApi } from '@/api/auth'
+import { getFeishuConfigApi, feishuCallbackApi, quickLoginApi } from '@/api/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -187,6 +197,7 @@ const siteStore = useSiteStore()
 
 const loginFormRef = ref<FormInstance>()
 const loading = ref(false)
+const quickLoading = ref<'admin' | 'demo' | ''>('')
 const feishuLoading = ref(false)
 const activeTab = ref<'account' | 'feishu'>('account')
 
@@ -284,6 +295,25 @@ async function handleFeishuCallback() {
     }
     ElMessage.error(errorMap[error] || '登录失败')
   }
+}
+
+// 一键登录（内网演示账号）
+async function handleQuickLogin(account: 'admin' | 'demo') {
+  quickLoading.value = account
+  try {
+    const res = await quickLoginApi(account)
+    userStore.token = res.access_token
+    localStorage.setItem('access_token', res.access_token)
+    if (res.refresh_token) {
+      localStorage.setItem('refresh_token', res.refresh_token)
+    }
+    await userStore.fetchUserInfo()
+    ElMessage.success(account === 'admin' ? '已进入管理员演示' : '已进入体验账号')
+    router.push(account === 'admin' ? '/admin/dashboard' : '/polish')
+  } catch {
+    // 拦截器已处理
+  }
+  quickLoading.value = ''
 }
 
 // 账号密码登录
@@ -588,6 +618,17 @@ onMounted(async () => {
   .feishu-disabled-sub {
     font-size: 12px;
     color: #bbb;
+  }
+}
+
+/* 一键登录 */
+.quick-login-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+
+  .quick-btn {
+    flex: 1;
   }
 }
 

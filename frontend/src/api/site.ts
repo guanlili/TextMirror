@@ -10,6 +10,7 @@ export interface SiteConfig {
   login_slogan?: string
   footer_text?: string
   guest_mode_enabled?: string
+  quick_login_enabled?: string
 }
 
 /** 获取站点公开配置（无需登录） */

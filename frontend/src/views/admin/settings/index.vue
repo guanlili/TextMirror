@@ -24,6 +24,10 @@
           <el-switch v-model="guestModeOn" />
           <span style="font-size: 12px; color: #999; margin-left: 12px;">关闭后所有功能需登录使用，适合企业内部部署</span>
         </el-form-item>
+        <el-form-item label="一键登录">
+          <el-switch v-model="quickLoginOn" />
+          <span style="font-size: 12px; color: #999; margin-left: 12px;">开启后登录页显示「一键管理员 / 体验账号」按钮（内网演示便利；一键管理员拥有全部权限，公开网络环境请关闭）</span>
+        </el-form-item>
         <el-form-item label="浏览器图标">
           <div class="favicon-config">
             <div class="favicon-preview">
@@ -204,12 +208,18 @@ const siteConfig = reactive<SiteConfig>({
   login_slogan: '',
   footer_text: '',
   guest_mode_enabled: 'on',
+  quick_login_enabled: 'on',
 })
 
 // Switch 双向绑定（on/off ↔ true/false）
 const guestModeOn = computed({
   get: () => siteConfig.guest_mode_enabled !== 'off',
   set: (v: boolean) => { siteConfig.guest_mode_enabled = v ? 'on' : 'off' },
+})
+
+const quickLoginOn = computed({
+  get: () => siteConfig.quick_login_enabled !== 'off',
+  set: (v: boolean) => { siteConfig.quick_login_enabled = v ? 'on' : 'off' },
 })
 
 // 原始值（用于重置）

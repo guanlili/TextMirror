@@ -424,6 +424,28 @@ async def seed_llm_configs(session):
     logger.info(f"大模型配置初始化完成，共 {len(configs)} 条")
 
 
+async def seed_demo_user(session, user_role):
+    """初始化演示普通账号 demo（一键登录体验用，仅普通用户权限）"""
+    result = await session.execute(
+        select(User).where(User.employee_id == "demo")
+    )
+    if result.scalar_one_or_none():
+        logger.info("演示账号 demo 已存在，跳过初始化")
+        return
+
+    # 演示账号用固定密码（一键登录免密入口本身无密码校验；此处密码仅当一键登录
+    # 关闭后的手动兜底，无敏感权限不值得随机化制造运维负担）
+    session.add(User(
+        employee_id="demo",
+        username="演示账号",
+        password_hash=hash_password("demo123456"),
+        role_id=user_role.id,
+        is_active=True,
+    ))
+    await session.flush()
+    logger.info("演示账号创建完成: demo / demo123456（一键登录体验用）")
+
+
 async def run_seed():
     """执行所有种子数据初始化（幂等；完成后写 Redis setup_done 标记）"""
     logger.info("开始初始化种子数据...")
@@ -446,6 +468,8 @@ async def run_seed():
             admin_role, user_role = await seed_roles(session, perm_map)
             if admin_role:
                 await seed_admin_user(session, admin_role)
+            if user_role:
+                await seed_demo_user(session, user_role)
             await seed_global_words(session)
             await seed_llm_configs(session)
             await session.commit()

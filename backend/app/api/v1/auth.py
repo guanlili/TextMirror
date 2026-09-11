@@ -4,7 +4,7 @@ TextMirror 认证 API
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -256,6 +256,74 @@ async def change_password(
 
     logger.info(f"用户修改密码: {current_user.employee_id}")
     return {"message": "密码修改成功"}
+
+
+@router.post("/quick-login", response_model=LoginResponse, summary='一键登录（内网演示账号）')
+async def quick_login(
+    account: str = Query(..., description="admin / demo"),
+    http_request: Request = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    一键登录：免密登录演示账号（登录页按钮触发）。
+    - 站点配置 quick_login_enabled=off 时整体关闭（管理员后台可控）
+    - admin：演示管理员（注意：拥有管理后台全部权限）
+    - demo：演示普通账号（seed 自动创建，看不了管理后台）
+    - 每个来源 IP 每分钟最多 10 次（防脚本滥用刷 token）
+    """
+    from app.services.site_config import get_site_config
+
+    config = await get_site_config()
+    if config.get("quick_login_enabled", "on") != "on":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="一键登录已关闭，请使用账号密码登录")
+
+    client_ip = get_client_ip(http_request)
+    if account not in ("admin", "demo"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="演示账号不存在")
+    # RPM 限流（借固定分钟窗口计数；超限 429）
+    try:
+        from app.core.redis import get_redis
+
+        minute = datetime.now().strftime("%Y%m%d%H%M")
+        key = f"textmirror:quick_login_rpm:{client_ip}:{minute}"
+        redis = get_redis()
+        count = await redis.incr(key)
+        if count == 1:
+            await redis.expire(key, 120)
+        if count > 10:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="操作过于频繁，请稍后再试")
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # Redis 异常不阻塞登录
+
+    result = await db.execute(select(User).where(User.employee_id == account))
+    user = result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="演示账号未初始化，请先运行种子数据")
+
+    role_code = None
+    if user.role_id is not None:
+        result = await db.execute(select(Role).where(Role.id == user.role_id))
+        role = result.scalar_one_or_none()
+        if role is not None:
+            role_code = role.code
+    access_token = create_access_token(
+        subject=user.id,
+        extra_data={"role_code": role_code} if role_code else None,
+    )
+    refresh_token = create_refresh_token(subject=user.id)
+
+    record_audit_log_sync(
+        "quick_login", client_ip=client_ip, user_agent=http_request.headers.get("User-Agent", ""), user=user,
+    )
+
+    return LoginResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+        must_change_password=await _is_initial_admin_pending(user),
+    )
 
 
 @router.post("/refresh", response_model=LoginResponse, summary='使用 Refresh Token 获取新的 Access Token')
