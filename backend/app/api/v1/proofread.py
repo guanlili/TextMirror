@@ -222,10 +222,17 @@ async def text_proofread_compare(
     items = [ModelProofreadResult(**i) for i in raw_items]
 
     # 落带权重的对比记录：配额从「只预检不消耗」改为真正计量（与开放 API 同口径）。
-    # 游客不落（游客配额走 IP 限流）；全部失败不落（零消耗）
+    # 游客不落（游客配额走 IP 限流）；全部失败不落（零消耗）；
+    # 问题按 (original, suggestion) 去重——同一错误多模型发现只留一条（带 found_by）
     if current_user:
         successes = [i for i in items if i.success]
         if successes:
+            from app.services.model_compare import dedupe_compare_issues
+
+            merged_issues = dedupe_compare_issues([
+                {"config_name": i.config_name, "issues": [issue.model_dump() for issue in i.issues]}
+                for i in successes
+            ])
             db.add(ProofreadRecord(
                 user_id=current_user.id,
                 type="text",
@@ -235,10 +242,10 @@ async def text_proofread_compare(
                 result={
                     "compare": True,
                     "models": [i.config_name for i in items],
-                    "issues": [issue.model_dump() for i in successes for issue in i.issues],
+                    "issues": merged_issues,
                     "issues_per_model": {str(i.config_id): i.total_issues for i in items},
                 },
-                total_issues=sum(i.total_issues for i in successes),
+                total_issues=len(merged_issues),
                 quota_weight=len(successes),
             ))
             await db.flush()

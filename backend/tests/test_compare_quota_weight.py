@@ -74,6 +74,27 @@ async def _create_two_configs():
         return cfgs
 
 
+def _fake_compare_dupe_result(cfgs, success_flags):
+    """两模型各报 1 个相同错误 + 模型 A 多报 1 个独有错误"""
+    from app.services.model_compare import cross_model_stats
+
+    items = []
+    for idx, (c, ok) in enumerate(zip(cfgs, success_flags)):
+        issues = []
+        if ok:
+            issues.append({"original": "错词", "type": "typo", "suggestion": "对词", "explanation": "", "severity": "warning"})
+            if idx == 0:
+                issues.append({"original": "独有错", "type": "typo", "suggestion": "独有对", "explanation": "", "severity": "warning"})
+        items.append({
+            "config_id": c.id, "config_name": c.name, "model": c.model,
+            "success": ok, "issues": issues,
+            "total_issues": len(issues),
+            "error": None if ok else "timeout", "elapsed_ms": 10,
+        })
+    consensus, only_in = cross_model_stats(items)
+    return items, consensus, only_in
+
+
 def _fake_compare_result(cfgs, success_flags):
     from app.services.model_compare import cross_model_stats
 
@@ -190,3 +211,32 @@ async def test_quota_blocks_when_weighted_usage_reaches_limit(client):
         )
     assert resp.status_code == 429
     assert resp.json()["detail"]["code"] == "QUOTA_EXCEEDED"
+
+
+async def test_compare_record_issues_deduped(client):
+    """两模型发现同一错误只落一条，found_by 记录发现它的模型；独有错误保留"""
+    user, plaintext, _ = await _create_user_with_key(daily_quota=10)
+    cfgs = await _create_two_configs()
+
+    with patch("app.services.model_compare.run_proofread_compare",
+               side_effect=lambda **kw: _fake_compare_dupe_result(cfgs, [True, True])):
+        resp = await client.post(
+            "/api/v1/open/proofread/compare",
+            json={"text": "测试对比文本", "config_ids": [c.id for c in cfgs]},
+            headers={"Authorization": f"Bearer {plaintext}"},
+        )
+    assert resp.status_code == 200, resp.text
+
+    from sqlalchemy import select
+
+    async with async_session_factory() as session:
+        record = (await session.execute(
+            select(ProofreadRecord).where(ProofreadRecord.user_id == user.id)
+        )).scalars().one()
+        issues = record.result["issues"]
+        # 共同错误去重为 1 条 + 模型 A 独有 1 条 = 2（不去重会是 3）
+        assert record.total_issues == 2
+        assert len(issues) == 2
+        by_original = {i["original"]: i for i in issues}
+        assert len(by_original["错词"]["found_by"]) == 2  # 两个模型都发现了它
+        assert len(by_original["独有错"]["found_by"]) == 1

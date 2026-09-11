@@ -12,6 +12,18 @@
 - **AI 润色开放端点**：`POST /open/polish`（三版本并发）与 `POST /open/polish/stream`（SSE 流式），计费与审校同口径。([#56](https://github.com/guanlili/TextMirror/pull/56))
 - **异步任务完成回调（Webhook）**：任务完成/失败向密钥配置的地址推送签名通知（HMAC-SHA256 验签、SSRF 防护、指数退避重试、测试推送）。([#57](https://github.com/guanlili/TextMirror/pull/57))
 - **首次部署向导最小版**：容器首启自动初始化种子数据；生产模式管理员初始密码改为随机生成（日志 + 落盘）；首登引导修改密码。([#58](https://github.com/guanlili/TextMirror/pull/58))
+- **易混词搭配规则**：权力/权利等高混淆对的确定性兜底（5 条搭配级规则，零 token 100% 召回）。([#60](https://github.com/guanlili/TextMirror/pull/60))
+- **Webhook 投递可见性 + 密钥页回调管理界面**：投递状态写 Redis（最近状态 + 最近 20 次明细）；`/api-keys` 列表透出 `webhook_last`；补齐回调设置/测试/清除的完整 UI。([#63](https://github.com/guanlili/TextMirror/pull/63))
+
+### 修复
+- **对比配额真实计量**：多模型对比此前只预检不落库，配额实际不消耗（可无限对比）；改为按成功模型数落 `quota_weight` 加权记录，配额/用量/dashboard 统一切换 SUM 口径。([#62](https://github.com/guanlili/TextMirror/pull/62))
+- **对比历史问题去重**：对比记录的问题按（原文+建议）去重——同一错误被多个模型发现不再重复出现，`found_by` 标注发现模型（多模型共识可见）。
+
+### 工程化
+- `open.py` 模块拆分（1118 行 → open/open_polish/open_usage/open_documents/open_common 五模块）。([#61](https://github.com/guanlili/TextMirror/pull/61))
+- CI 新增 Docker 镜像构建 job（buildx + gha 缓存）——此前 CI 不验证 Dockerfile 路径，vite7 升级时镜像构建崩了但 PR 全绿。([#64](https://github.com/guanlili/TextMirror/pull/64))
+- 前端测试基建（vitest）：format 工具与 user store 单测，结束前端零测试状态。([#64](https://github.com/guanlili/TextMirror/pull/64))
+- pre-commit 新增 `detect-private-key` hook。([#65](https://github.com/guanlili/TextMirror/pull/65))
 
 ### 文档
 - 新增 CHANGELOG.md 与英文 README（README.en.md，与中文版互链）。([#54](https://github.com/guanlili/TextMirror/pull/54))

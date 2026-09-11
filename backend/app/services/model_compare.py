@@ -85,3 +85,25 @@ def cross_model_stats(items: List[dict]) -> Tuple[List[str], Dict[int, List[str]
         elif len(set(owners)) == 1:
             only_in.setdefault(owners[0], []).append(orig)
     return consensus, only_in
+
+
+def dedupe_compare_issues(successes: List[dict]) -> List[dict]:
+    """
+    对比落库用：各成功模型的问题按 (original, suggestion) 去重。
+
+    同一错误被多个模型发现只保留一条，附加 found_by（发现它的模型名列表）
+    与 consensus_count（模型数）——历史详情不重复，还能看出哪些是多模型共识。
+    """
+    seen: dict = {}
+    for item in successes:
+        for issue in item.get("issues", []):
+            key = (issue.get("original", ""), issue.get("suggestion", ""))
+            if key in seen:
+                entry = seen[key]
+                if item["config_name"] not in entry["found_by"]:
+                    entry["found_by"].append(item["config_name"])
+            else:
+                merged = dict(issue)
+                merged["found_by"] = [item["config_name"]]
+                seen[key] = merged
+    return list(seen.values())

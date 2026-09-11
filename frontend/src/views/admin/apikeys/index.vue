@@ -50,6 +50,27 @@
             <span>{{ row.used_today ?? '-' }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="近7日" width="80" align="center">
+          <template #default="{ row }">
+            <span>{{ row.used_7d ?? 0 }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="回调" width="90" align="center">
+          <template #default="{ row }">
+            <el-tooltip v-if="row.webhook_last" :hide-after="0" placement="top">
+              <template #content>
+                最近投递：{{ row.webhook_last.event }}
+                （{{ row.webhook_last.status === 'delivered' ? '送达' : '失败' }}
+                <template v-if="row.webhook_last.status_code">HTTP {{ row.webhook_last.status_code }}</template>）
+              </template>
+              <el-tag :type="row.webhook_last.status === 'delivered' ? 'success' : 'danger'" size="small" style="cursor: default;">
+                {{ row.webhook_last.status === 'delivered' ? '已送达' : '投递失败' }}
+              </el-tag>
+            </el-tooltip>
+            <el-tag v-else-if="row.webhook_url" type="info" size="small" style="cursor: default;">未投递</el-tag>
+            <span v-else style="color: #ccc;">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="每日上限" width="100" align="center">
           <template #default="{ row }">
             <span v-if="row.daily_quota">{{ row.daily_quota }}</span>

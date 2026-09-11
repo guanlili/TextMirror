@@ -5,6 +5,7 @@ TextMirror 管理后台 - API 密钥全量管理
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from loguru import logger
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,6 +70,37 @@ async def list_all_api_keys(
     )
     rows = result.all()
 
+    # 近 7 天各密钥成功调用量（SUM(quota_weight)，与配额/用量口径一致），一次聚合查完
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+
+    from app.models.proofread import ProofreadRecord
+
+    tz = ZoneInfo("Asia/Shanghai")
+    start_utc = (datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=6)).astimezone(timezone.utc)
+    key_ids = [k.id for k, _ in rows]
+    usage_rows = (await db.execute(
+        select(ProofreadRecord.api_key_id, func.coalesce(func.sum(ProofreadRecord.quota_weight), 0))
+        .where(ProofreadRecord.api_key_id.in_(key_ids), ProofreadRecord.created_at >= start_utc)
+        .group_by(ProofreadRecord.api_key_id)
+    )).all() if key_ids else []
+    used_7d_map = {r[0]: int(r[1]) for r in usage_rows}
+
+    # 各密钥最近一次回调投递状态（Redis 不可用时静默为空）
+    webhook_last_map: dict = {}
+    try:
+        from app.core.redis import get_redis
+
+        if key_ids:
+            redis = get_redis()
+            pipe = redis.pipeline()
+            for kid in key_ids:
+                pipe.hgetall(f"textmirror:webhook_status:{kid}")
+            for kid, raw in zip(key_ids, await pipe.execute()):
+                webhook_last_map[kid] = raw or None
+    except Exception as e:
+        logger.warning(f"读取回调投递状态失败（不影响列表）: {e}")
+
     items = []
     for k, u in rows:
         used_today = await get_api_key_daily_usage(k)
@@ -86,7 +118,10 @@ async def list_all_api_keys(
             "is_active": k.is_active,
             "status": compute_key_status(k),
             "used_today": used_today,
+            "used_7d": used_7d_map.get(k.id, 0),
             "remark": k.remark,
+            "webhook_url": k.webhook_url,
+            "webhook_last": webhook_last_map.get(k.id),
         })
 
     return {"items": items, "total": total, "page": page, "page_size": page_size}

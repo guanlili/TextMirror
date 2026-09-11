@@ -291,9 +291,16 @@ async def open_proofread_compare(
 
     # 落一条带权重的对比记录：用户配额按 SUM(quota_weight) 计量（此前只预检不落库，
     # 预检通过后配额实际不消耗），用量统计归属到调用密钥。权重=成功模型数，
-    # 与密钥日配额（按成功数结算）同口径；全部失败不落（用户配额零消耗）
+    # 与密钥日配额（按成功数结算）同口径；全部失败不落（用户配额零消耗）。
+    # 问题按 (original, suggestion) 去重——同一错误多模型发现只留一条（带 found_by）
     successes = [i for i in items if i.success]
     if successes:
+        from app.services.model_compare import dedupe_compare_issues
+
+        merged_issues = dedupe_compare_issues([
+            {"config_name": i.config_name, "issues": [issue.model_dump() for issue in i.issues]}
+            for i in successes
+        ])
         db.add(ProofreadRecord(
             user_id=user.id,
             api_key_id=api_key.id if api_key is not None else None,
@@ -304,10 +311,10 @@ async def open_proofread_compare(
             result={
                 "compare": True,
                 "models": [i.config_name for i in items],
-                "issues": [issue.model_dump() for i in successes for issue in i.issues],
+                "issues": merged_issues,
                 "issues_per_model": {str(i.config_id): i.total_issues for i in items},
             },
-            total_issues=sum(i.total_issues for i in successes),
+            total_issues=len(merged_issues),
             quota_weight=len(successes),
         ))
         await db.flush()
