@@ -257,7 +257,7 @@ async function handleFeishuCallback() {
     userStore.token = feishuToken
     await userStore.fetchUserInfo()
     ElMessage.success('飞书登录成功')
-    router.replace('/polish')
+    router.replace('/proofread/text')
     return
   }
 
@@ -273,7 +273,7 @@ async function handleFeishuCallback() {
       userStore.token = res.access_token
       await userStore.fetchUserInfo()
       ElMessage.success(res.is_new_user ? '首次登录，已自动创建账号' : '飞书登录成功')
-      router.replace('/polish')
+      router.replace('/proofread/text')
     } catch (e: unknown) {
       // 错误已在 axios 拦截器中统一处理和提示
       console.error('[飞书callback失败]', e)
@@ -309,7 +309,7 @@ async function handleQuickLogin(account: 'admin' | 'demo') {
     }
     await userStore.fetchUserInfo()
     ElMessage.success(account === 'admin' ? '已进入管理员演示' : '已进入体验账号')
-    router.push(account === 'admin' ? '/admin/dashboard' : '/polish')
+    router.push(account === 'admin' ? '/admin/dashboard' : '/proofread/text')
   } catch {
     // 拦截器已处理
   }
@@ -339,7 +339,7 @@ async function handleLogin() {
           // 暂不修改
         }
       }
-      const redirect = (route.query.redirect as string) || '/polish'
+      const redirect = (route.query.redirect as string) || '/proofread/text'
       router.push(redirect)
     } catch {
       // 错误已在 axios 拦截器中处理

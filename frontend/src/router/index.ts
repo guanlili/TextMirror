@@ -31,14 +31,8 @@ const userRoutes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/layouts/UserLayout.vue'),
-    redirect: '/polish',
+    redirect: '/proofread/text',
     children: [
-      {
-        path: 'polish',
-        name: 'AIPolish',
-        component: () => import('@/views/user/polish/index.vue'),
-        meta: { title: 'AI润色', icon: 'MagicStick' },
-      },
       {
         path: 'proofread/text',
         name: 'TextProofread',
@@ -74,6 +68,12 @@ const userRoutes: RouteRecordRaw[] = [
         name: 'ApiKeys',
         component: () => import('@/views/user/apikeys/index.vue'),
         meta: { title: 'API 密钥', icon: 'Key', requireAuth: true },
+      },
+      {
+        path: 'polish',
+        name: 'AIPolish',
+        component: () => import('@/views/user/polish/index.vue'),
+        meta: { title: 'AI润色', icon: 'MagicStick' },
       },
       {
         path: 'profile',

@@ -1,7 +1,7 @@
 <template>
   <el-container class="user-layout">
     <aside class="workspace-sidebar desktop-only">
-      <div class="brand" @click="router.push('/polish')">
+      <div class="brand" @click="router.push('/proofread/text')">
         <div class="brand-mark"><img :src="siteStore.faviconUrl" alt="" /></div>
         <div class="brand-copy">
           <strong>{{ siteStore.platformName }}</strong>
@@ -9,9 +9,8 @@
         </div>
       </div>
 
-      <div class="sidebar-label">智能创作</div>
+      <div class="sidebar-label">智能审校</div>
       <el-menu :default-active="activeMenu" router class="workspace-menu">
-        <el-menu-item index="/polish"><el-icon><MagicStick /></el-icon><span>AI 智能润色</span></el-menu-item>
         <el-menu-item index="/proofread/text"><el-icon><Edit /></el-icon><span>文本在线校对</span></el-menu-item>
         <el-menu-item index="/proofread/document"><el-icon><Document /></el-icon><span>文档上传校对</span></el-menu-item>
       </el-menu>
@@ -25,6 +24,11 @@
           <el-menu-item index="/apikeys"><el-icon><Key /></el-icon><span>API 密钥</span></el-menu-item>
         </el-menu>
       </template>
+
+      <div class="sidebar-label secondary-label">更多工具</div>
+      <el-menu :default-active="activeMenu" router class="workspace-menu">
+        <el-menu-item index="/polish"><el-icon><MagicStick /></el-icon><span>AI 智能润色</span></el-menu-item>
+      </el-menu>
 
       <div class="sidebar-spacer" />
       <button class="theme-toggle" :title="isDark ? '切换到亮色模式' : '切换到暗色模式'" @click="toggle">
@@ -41,7 +45,7 @@
       <el-header class="workspace-header">
         <div class="header-left">
           <el-button class="mobile-menu-btn" text circle aria-label="打开导航菜单" @click="mobileMenuVisible = true"><el-icon><Operation /></el-icon></el-button>
-          <div class="mobile-brand" @click="router.push('/polish')">
+          <div class="mobile-brand" @click="router.push('/proofread/text')">
             <img :src="siteStore.faviconUrl" alt="" /><strong>{{ siteStore.platformName }}</strong>
           </div>
           <div class="page-context desktop-only">
@@ -92,12 +96,12 @@
         <div class="drawer-brand"><img :src="siteStore.faviconUrl" alt="" /><div><strong>{{ siteStore.platformName }}</strong><span>{{ siteStore.platformSubtitle }}</span></div></div>
       </template>
       <el-menu :default-active="activeMenu" router @select="mobileMenuVisible = false" class="mobile-nav-menu">
-        <el-menu-item index="/polish"><el-icon><MagicStick /></el-icon><span>AI 智能润色</span></el-menu-item>
         <el-menu-item index="/proofread/text"><el-icon><Edit /></el-icon><span>文本在线校对</span></el-menu-item>
         <el-menu-item index="/proofread/document"><el-icon><Document /></el-icon><span>文档上传校对</span></el-menu-item>
         <el-menu-item v-if="userStore.isLoggedIn" index="/dictionary"><el-icon><Collection /></el-icon><span>个性化词库</span></el-menu-item>
         <el-menu-item v-if="userStore.isLoggedIn" index="/whitelist"><el-icon><CircleCheck /></el-icon><span>放行词管理</span></el-menu-item>
         <el-menu-item v-if="userStore.isLoggedIn" index="/history"><el-icon><Clock /></el-icon><span>校对历史</span></el-menu-item>
+        <el-menu-item index="/polish"><el-icon><MagicStick /></el-icon><span>AI 智能润色</span></el-menu-item>
         <el-menu-item v-if="userStore.isLoggedIn" index="/apikeys"><el-icon><Key /></el-icon><span>API 密钥</span></el-menu-item>
       </el-menu>
     </el-drawer>
