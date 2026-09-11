@@ -16,6 +16,18 @@ export interface ApiKeyItem {
   used_today: number | null
   used_7d?: number
   remark?: string | null
+  webhook_url?: string | null
+  webhook_last?: WebhookDelivery | null
+}
+
+export interface WebhookDelivery {
+  event: string
+  job_id: string
+  status: 'delivered' | 'failed'
+  status_code: number
+  error: string
+  attempt: number
+  timestamp: string
 }
 
 export interface ApiKeyListResponse {
@@ -53,4 +65,19 @@ export function createApiKeyApi(payload: ApiKeyCreatePayload): Promise<ApiKeyCre
 /** 吊销密钥 */
 export function revokeApiKeyApi(id: number): Promise<void> {
   return request.delete(`/api-keys/${id}`)
+}
+
+/** 设置回调地址（每次设置轮换签名密钥，明文仅返回一次） */
+export function setWebhookApi(id: number, url: string): Promise<{ url: string; secret: string }> {
+  return request.put(`/api-keys/${id}/webhook`, { url })
+}
+
+/** 清除回调 */
+export function clearWebhookApi(id: number): Promise<void> {
+  return request.delete(`/api-keys/${id}/webhook`)
+}
+
+/** 发送测试回调 */
+export function testWebhookApi(id: number): Promise<{ message: string; status_code: number }> {
+  return request.post(`/api-keys/${id}/webhook/test`)
 }

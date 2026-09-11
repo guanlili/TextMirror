@@ -9,6 +9,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
+from app.core import redis as redis_module
 from app.core.database import async_session_factory
 from app.core.secret_crypto import decrypt_secret, encrypt_secret
 from app.core.security import hash_api_key, hash_password
@@ -221,6 +222,92 @@ async def test_webhook_test_without_config_400(client):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 400
+
+
+# ----------------------------------------------------------------------
+# 投递可见性：状态记录与列表透出
+# ----------------------------------------------------------------------
+
+async def test_delivery_status_recorded_to_redis(client):
+    import fakeredis
+
+    import app.tasks.webhook_task as wt
+
+    user, _, key = await _create_user_with_key()
+    await _configure_webhook(key.id, "whsec_abc")
+
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    event = build_event("document.completed", "job-9", {"total_issues": 1})
+    with patch("app.tasks.webhook_task.httpx.post", return_value=_mock_response(200)), \
+         patch.object(wt, "_get_sync_redis", return_value=fake):
+        result = wt.webhook_deliver.apply(args=(key.id, event)).get()
+
+    assert result["delivered"] is True
+    status = fake.hgetall(f"textmirror:webhook_status:{key.id}")
+    assert status["status"] == "delivered"
+    assert status["event"] == "document.completed"
+    assert status["job_id"] == "job-9"
+    assert int(status["status_code"]) == 200
+    log = fake.lrange(f"textmirror:webhook_log:{key.id}", 0, -1)
+    assert len(log) == 1
+    assert json.loads(log[0])["status"] == "delivered"
+
+
+async def test_delivery_failure_status_recorded(client):
+    import fakeredis
+    from celery.exceptions import Retry
+
+    import app.tasks.webhook_task as wt
+
+    user, _, key = await _create_user_with_key()
+    await _configure_webhook(key.id, "whsec_abc")
+
+    fake = fakeredis.FakeRedis(decode_responses=True)
+    event = build_event("document.failed", "job-10", {"error_code": "PROOFREAD_FAILED"})
+    with patch("app.tasks.webhook_task.httpx.post", return_value=_mock_response(500)), \
+         patch.object(wt, "_get_sync_redis", return_value=fake):
+        with pytest.raises((httpx.HTTPStatusError, Retry)):
+            wt.webhook_deliver.apply(args=(key.id, event)).get()
+
+    status = fake.hgetall(f"textmirror:webhook_status:{key.id}")
+    assert status["status"] == "failed"
+    assert int(status["status_code"]) == 500
+
+
+async def test_api_keys_list_includes_webhook_last(client):
+    user, _, key = await _create_user_with_key()
+    token = await _login(client, user.employee_id)
+
+    await redis_module.redis_client.hset(
+        f"textmirror:webhook_status:{key.id}",
+        mapping={
+            "event": "document.completed", "status": "delivered", "status_code": "200",
+            "job_id": "job-1", "error": "", "attempt": "1",
+            "timestamp": "2026-09-11T00:00:00+00:00",
+        },
+    )
+    resp = await client.get("/api/v1/api-keys", headers={"Authorization": f"Bearer {token}"})
+    item = [i for i in resp.json()["items"] if i["id"] == key.id][0]
+    assert item["webhook_last"]["status"] == "delivered"
+    assert item["webhook_last"]["event"] == "document.completed"
+
+    # 同一用户的另一把未投递密钥为 null
+    async with async_session_factory() as session:
+        plaintext2 = f"tm_{_uuid.uuid4().hex}"
+        key2 = ApiKey(
+            user_id=user.id,
+            name="第二把密钥",
+            key_prefix=plaintext2[:13],
+            key_suffix=plaintext2[-4:],
+            key_hash=hash_api_key(plaintext2),
+            is_active=True,
+        )
+        session.add(key2)
+        await session.commit()
+        await session.refresh(key2)
+    resp = await client.get("/api/v1/api-keys", headers={"Authorization": f"Bearer {token}"})
+    item2 = [i for i in resp.json()["items"] if i["id"] == key2.id][0]
+    assert item2["webhook_last"] is None
 
 
 # ----------------------------------------------------------------------

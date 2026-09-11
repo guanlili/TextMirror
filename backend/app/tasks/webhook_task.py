@@ -15,6 +15,58 @@ from app.tasks.proofread_task import _get_sync_engine
 
 MAX_RETRIES = 5
 TIMEOUT_SECONDS = 10
+LOG_MAX_ENTRIES = 20
+
+
+def _get_sync_redis():
+    """同步 Redis 客户端（worker 上下文；测试可替换此工厂注入 fakeredis）"""
+    import redis as sync_redis
+
+    from app.core.config import settings as app_settings
+
+    return sync_redis.Redis(
+        host=app_settings.REDIS_HOST,
+        port=app_settings.REDIS_PORT,
+        username=app_settings.REDIS_USERNAME or None,
+        password=app_settings.REDIS_PASSWORD or None,
+        db=app_settings.REDIS_DB,
+        decode_responses=True,
+        socket_timeout=5,
+    )
+
+
+def _record_delivery(api_key_id: int, entry: dict) -> None:
+    """
+    投递状态写 Redis（同步上下文，失败不抛出）：
+    - hash webhook_status:{key_id}：最近一次投递结果（列表页展示用）
+    - list webhook_log:{key_id}：最近 N 次尝试明细（排障用），LPUSH+LTRIM 截断
+    """
+    try:
+        r = _get_sync_redis()
+        try:
+            r.hset(f"textmirror:webhook_status:{api_key_id}", mapping=entry)
+            payload = json.dumps(entry, ensure_ascii=False)
+            r.lpush(f"textmirror:webhook_log:{api_key_id}", payload)
+            r.ltrim(f"textmirror:webhook_log:{api_key_id}", 0, LOG_MAX_ENTRIES - 1)
+        finally:
+            r.close()
+    except Exception as e:
+        logger.warning(f"[Webhook] 投递状态记录失败 key={api_key_id}: {e}")
+
+
+def _delivery_entry(event: dict, status: str, status_code: int | None = None,
+                    error: str | None = None, attempt: int = 1) -> dict:
+    from datetime import datetime, timezone
+
+    return {
+        "event": event.get("event", ""),
+        "job_id": event.get("job_id", ""),
+        "status": status,  # delivered / failed
+        "status_code": status_code or 0,
+        "error": (error or "")[:200],
+        "attempt": attempt,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @shared_task(
@@ -68,10 +120,16 @@ def webhook_deliver(self, api_key_id: int, event: dict):
             f"[Webhook] 投递失败(将重试 {self.request.retries}/{MAX_RETRIES}) "
             f"key={api_key_id} event={event.get('event')} url={url}: {type(e).__name__}: {e}"
         )
+        _record_delivery(api_key_id, _delivery_entry(
+            event, "failed", error=f"{type(e).__name__}: {e}", attempt=self.request.retries + 1,
+        ))
         raise
 
     if 200 <= resp.status_code < 300:
         logger.info(f"[Webhook] 投递成功 key={api_key_id} event={event.get('event')} status={resp.status_code}")
+        _record_delivery(api_key_id, _delivery_entry(
+            event, "delivered", status_code=resp.status_code, attempt=self.request.retries + 1,
+        ))
         return {"delivered": True, "status_code": resp.status_code}
 
     # 3xx 不跟随重定向（重定向可能被用于绕过地址校验）；4xx/5xx 重试（410 Gone 等明确放弃场景不区分，统一重试到上限）
@@ -79,6 +137,9 @@ def webhook_deliver(self, api_key_id: int, event: dict):
         f"[Webhook] 目标返回非 2xx(将重试 {self.request.retries}/{MAX_RETRIES}) "
         f"key={api_key_id} event={event.get('event')} status={resp.status_code}"
     )
+    _record_delivery(api_key_id, _delivery_entry(
+        event, "failed", status_code=resp.status_code, attempt=self.request.retries + 1,
+    ))
     raise httpx.HTTPStatusError(
         f"webhook target returned {resp.status_code}",
         request=resp.request,

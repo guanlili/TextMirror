@@ -59,8 +59,24 @@
             <span v-else style="color: #999;">未使用</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="90" align="center">
+        <el-table-column label="回调" width="90" align="center">
           <template #default="{ row }">
+            <el-tooltip v-if="row.webhook_last" :hide-after="0" placement="top">
+              <template #content>
+                最近投递：{{ row.webhook_last.event }}
+                （{{ row.webhook_last.status === 'delivered' ? '送达' : '失败' }}
+                <template v-if="row.webhook_last.status_code">HTTP {{ row.webhook_last.status_code }}</template>）
+              </template>
+              <el-tag :type="row.webhook_last.status === 'delivered' ? 'success' : 'danger'" size="small" style="cursor: default;">
+                {{ row.webhook_last.status === 'delivered' ? '已送达' : '投递失败' }}
+              </el-tag>
+            </el-tooltip>
+            <span v-else style="color: #ccc;">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="130" align="center">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="openWebhookDialog(row)">回调</el-button>
             <el-popconfirm
               v-if="row.status === 'active'"
               title="吊销后立即失效且不可恢复，确定？"
@@ -136,6 +152,51 @@
         <el-button v-else type="primary" @click="showDialog = false">我已保存</el-button>
       </template>
     </el-dialog>
+    <!-- 回调管理弹窗 -->
+    <el-dialog v-model="showWebhookDialog" title="任务回调（Webhook）" width="520px">
+      <template v-if="webhookKey">
+        <el-alert type="info" :closable="false" style="margin-bottom: 14px;"
+          title="异步文档审校任务完成/失败时向该地址推送签名通知（POST）。重新保存会轮换签名密钥。" />
+
+        <el-descriptions :column="1" border size="small" style="margin-bottom: 14px;" v-if="webhookKey.webhook_last">
+          <el-descriptions-item label="最近投递">
+            <el-tag :type="webhookKey.webhook_last.status === 'delivered' ? 'success' : 'danger'" size="small">
+              {{ webhookKey.webhook_last.status === 'delivered' ? '送达' : '失败' }}
+            </el-tag>
+            {{ webhookKey.webhook_last.event }}
+            <template v-if="webhookKey.webhook_last.status_code">（HTTP {{ webhookKey.webhook_last.status_code }}）</template>
+            <span style="color: #999; font-size: 12px; margin-left: 6px;">{{ formatTime(webhookKey.webhook_last.timestamp) }}</span>
+            <div v-if="webhookKey.webhook_last.error" style="color: #f56c6c; font-size: 12px;">{{ webhookKey.webhook_last.error }}</div>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <el-form label-width="80px">
+          <el-form-item label="回调地址">
+            <el-input v-model="webhookForm.url" placeholder="https://your-server.com/hook" />
+            <div class="form-tip">http/https；不允许内网地址</div>
+          </el-form-item>
+        </el-form>
+
+        <template v-if="webhookSecretShown">
+          <el-alert type="warning" :closable="false" style="margin: 12px 0;"
+            title="签名密钥仅展示这一次，请立即复制保存（用于校验 X-TextMirror-Signature 头）" />
+          <div class="key-box">
+            <code>{{ webhookSecretShown }}</code>
+            <el-button type="primary" size="small" @click="copyWebhookSecret">{{ webhookSecretCopied ? '已复制' : '复制' }}</el-button>
+          </div>
+        </template>
+      </template>
+      <template #footer>
+        <template v-if="webhookKey?.webhook_url">
+          <el-button type="danger" link @click="handleClearWebhook">清除回调</el-button>
+          <el-button @click="handleTestWebhook" :loading="testingWebhook">发送测试</el-button>
+        </template>
+        <el-button @click="showWebhookDialog = false">关闭</el-button>
+        <el-button type="primary" :loading="savingWebhook" @click="handleSaveWebhook">
+          {{ webhookKey?.webhook_url ? '保存（轮换密钥）' : '保存' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -144,6 +205,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   listApiKeysApi, createApiKeyApi, revokeApiKeyApi,
+  setWebhookApi, clearWebhookApi, testWebhookApi,
   type ApiKeyItem,
 } from '@/api/apiKeys'
 
@@ -158,6 +220,84 @@ const form = ref<{ name: string; daily_quota: number | null; expires_at: string 
 })
 
 const showDialog = ref(false)
+
+const showWebhookDialog = ref(false)
+const webhookKey = ref<ApiKeyItem | null>(null)
+const webhookForm = ref<{ url: string }>({ url: '' })
+const webhookSecretShown = ref('')
+const webhookSecretCopied = ref(false)
+const savingWebhook = ref(false)
+const testingWebhook = ref(false)
+
+function openWebhookDialog(row: ApiKeyItem) {
+  webhookKey.value = row
+  webhookForm.value = { url: row.webhook_url || '' }
+  webhookSecretShown.value = ''
+  webhookSecretCopied.value = false
+  showWebhookDialog.value = true
+}
+
+async function refreshWebhookKey() {
+  const id = webhookKey.value?.id
+  if (!id) return
+  await fetchList()
+  webhookKey.value = list.value.find(k => k.id === id) || webhookKey.value
+}
+
+async function handleSaveWebhook() {
+  if (!webhookKey.value) return
+  const url = webhookForm.value.url.trim()
+  if (!url) {
+    ElMessage.warning('请填写回调地址')
+    return
+  }
+  savingWebhook.value = true
+  try {
+    const res = await setWebhookApi(webhookKey.value.id, url)
+    webhookSecretShown.value = res.secret
+    webhookSecretCopied.value = false
+    ElMessage.success('回调地址已保存，签名密钥仅展示一次')
+    await refreshWebhookKey()
+  } catch {
+    // 拦截器已处理
+  }
+  savingWebhook.value = false
+}
+
+async function handleClearWebhook() {
+  if (!webhookKey.value) return
+  try {
+    await clearWebhookApi(webhookKey.value.id)
+    ElMessage.success('回调已清除')
+    webhookSecretShown.value = ''
+    webhookForm.value.url = ''
+    await refreshWebhookKey()
+  } catch {
+    // 拦截器已处理
+  }
+}
+
+async function handleTestWebhook() {
+  if (!webhookKey.value) return
+  testingWebhook.value = true
+  try {
+    const res = await testWebhookApi(webhookKey.value.id)
+    ElMessage.success(res.message)
+    await refreshWebhookKey()
+  } catch {
+    // 拦截器已处理
+  }
+  testingWebhook.value = false
+}
+
+async function copyWebhookSecret() {
+  try {
+    await navigator.clipboard.writeText(webhookSecretShown.value)
+    webhookSecretCopied.value = true
+  } catch {
+    ElMessage.info('复制失败，请手动选中文本复制')
+  }
+}
 
 onMounted(() => fetchList())
 
