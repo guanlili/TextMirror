@@ -21,6 +21,7 @@ from app.core.security import (
     is_token_revoked_by_password_change,
     verify_password,
 )
+from app.core.seed import INITIAL_ADMIN_PENDING_KEY
 from app.models.role import Permission, Role, RolePermission
 from app.models.user import User
 from app.schemas.auth import (
@@ -35,6 +36,16 @@ from app.schemas.auth import (
 from app.services.audit_log import get_client_ip, record_audit_log_sync
 
 router = APIRouter(prefix="/auth", tags=["认证"])
+
+
+async def _is_initial_admin_pending(user: User) -> bool:
+    """首启管理员是否仍在使用随机初始密码（Redis 标记，改密成功后清除）"""
+    if user.employee_id != "admin":
+        return False
+    try:
+        return await get_redis().get(INITIAL_ADMIN_PENDING_KEY) == "1"
+    except Exception:
+        return False
 
 
 async def _check_login_lock(employee_id: str, client_ip: str) -> None:
@@ -165,6 +176,7 @@ async def login(request: LoginRequest, http_request: Request, db: AsyncSession =
         access_token=access_token,
         refresh_token=refresh_token,
         token_type="bearer",
+        must_change_password=await _is_initial_admin_pending(user),
     )
 
 
@@ -234,6 +246,13 @@ async def change_password(
     current_user.password_changed_at = datetime.now(timezone.utc)
     db.add(current_user)
     await db.flush()
+
+    # 首启管理员改密完成：清除登录提醒标记
+    if current_user.employee_id == "admin":
+        try:
+            await get_redis().delete(INITIAL_ADMIN_PENDING_KEY)
+        except Exception:
+            pass
 
     logger.info(f"用户修改密码: {current_user.employee_id}")
     return {"message": "密码修改成功"}

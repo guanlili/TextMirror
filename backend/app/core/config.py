@@ -84,6 +84,10 @@ class Settings(BaseSettings):
     # ---- 用户默认密码 ----
     DEFAULT_USER_PASSWORD: str = "admin123"
 
+    # ---- 首次部署 ----
+    # 生产模式 seed 生成随机管理员密码后的落盘位置（容器内路径）
+    INITIAL_ADMIN_PASSWORD_FILE: str = "/app/initial_admin_password.txt"
+
     # ---- CORS 配置 ----
     CORS_ORIGINS: List[str] = [
         "http://localhost:3022",

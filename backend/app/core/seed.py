@@ -3,16 +3,22 @@ TextMirror 数据库种子数据
 初始化角色、权限、超级管理员账号
 """
 import asyncio
+import secrets
 
 from loguru import logger
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.core.database import async_session_factory, init_db
 from app.core.security import hash_password
 from app.models.global_word import GlobalWord
 from app.models.llm_config import LLMConfig
 from app.models.role import Permission, Role, RolePermission
 from app.models.user import User
+
+SETUP_DONE_KEY = "system:setup_done"
+# 首启随机密码管理员「未改密」标记：登录时提醒改密，改密成功后清除
+INITIAL_ADMIN_PENDING_KEY = "system:initial_admin_password_pending"
 
 # 权限种子数据：(编码, 名称, 类型, 父编码, 路径, 图标, 排序)
 PERMISSION_SEED = [
@@ -164,16 +170,45 @@ async def seed_admin_user(session, admin_role):
         logger.info("管理员账号已存在，跳过初始化")
         return
 
+    # 开发环境保留 admin123 便利；生产生成随机密码（日志+文件各留一份），
+    # 与弱密码启动守卫（拒绝 DEFAULT_USER_PASSWORD=admin123）语义对齐
+    pending_marker = False
+    if settings.DEBUG:
+        password = "admin123"
+        logger.info("超级管理员账号创建完成（DEBUG）: admin / admin123")
+    else:
+        password = secrets.token_urlsafe(12)
+        pending_marker = True
+        logger.info("=" * 60)
+        logger.info("初始管理员账号创建完成：工号 admin")
+        logger.info(f"初始密码（仅此一次展示）：{password}")
+        logger.info("请立即登录并修改密码；密码同时写入 INITIAL_ADMIN_PASSWORD_FILE")
+        logger.info("=" * 60)
+        try:
+            password_file = settings.INITIAL_ADMIN_PASSWORD_FILE
+            with open(password_file, "w", encoding="utf-8") as f:
+                f.write(f"admin / {password}\n")
+            logger.info(f"初始密码已落盘: {password_file}（修改密码后可删除）")
+        except OSError as e:
+            logger.warning(f"初始密码文件写入失败（请从上方日志复制保存）: {e}")
+
     admin_user = User(
         employee_id="admin",
         username="系统管理员",
-        password_hash=hash_password("admin123"),
+        password_hash=hash_password(password),
         role_id=admin_role.id,
         is_active=True,
     )
     session.add(admin_user)
     await session.flush()
-    logger.info("超级管理员账号创建完成: admin / admin123")
+
+    if pending_marker:
+        try:
+            from app.core.redis import get_redis
+
+            await get_redis().set(INITIAL_ADMIN_PENDING_KEY, "1")
+        except Exception as e:
+            logger.warning(f"initial_admin_password_pending 标记写入失败: {e}")
 
 
 # ======================================================================
@@ -390,9 +425,20 @@ async def seed_llm_configs(session):
 
 
 async def run_seed():
-    """执行所有种子数据初始化"""
+    """执行所有种子数据初始化（幂等；完成后写 Redis setup_done 标记）"""
     logger.info("开始初始化种子数据...")
     await init_db()
+
+    # seed 在容器入口执行（早于应用 lifespan），需自行初始化 Redis——
+    # 首启管理员的改密提醒标记依赖它；Redis 不可用时降级跳过标记（seed 本身仍完成）
+    redis_ready = False
+    try:
+        from app.core.redis import get_redis, init_redis
+
+        await init_redis()
+        redis_ready = True
+    except Exception as e:
+        logger.warning(f"Redis 不可用，首启管理员提醒标记与 setup_done 将跳过: {e}")
 
     async with async_session_factory() as session:
         try:
@@ -408,6 +454,31 @@ async def run_seed():
             await session.rollback()
             logger.error(f"种子数据初始化失败: {e}")
             raise
+
+    if redis_ready:
+        try:
+            from app.core.redis import get_redis
+
+            await get_redis().set(SETUP_DONE_KEY, "1")
+        except Exception as e:
+            logger.warning(f"setup_done 标记写入失败（不影响启动）: {e}")
+        finally:
+            try:
+                from app.core.redis import get_redis
+
+                await get_redis().close()
+            except Exception:
+                pass
+
+
+async def is_setup_done() -> bool:
+    """首次部署检测：种子数据是否已初始化"""
+    try:
+        from app.core.redis import get_redis
+
+        return await get_redis().get(SETUP_DONE_KEY) == "1"
+    except Exception:
+        return False
 
 
 if __name__ == "__main__":

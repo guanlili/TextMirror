@@ -21,6 +21,7 @@ export interface AuthTokens {
   access_token: string
   refresh_token?: string
   is_new_user?: boolean
+  must_change_password?: boolean
 }
 
 export interface FeishuConfig {
