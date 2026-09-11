@@ -2,8 +2,9 @@
 TextMirror API 密钥自助管理
 创建/列表/吊销，仅支持 JWT 登录态（API 密钥本身不能管理密钥，防止泄漏后自我复制）
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
@@ -15,6 +16,7 @@ from app.core.dependencies import get_current_user
 from app.core.rate_limit import get_api_key_daily_usage
 from app.core.security import generate_api_key
 from app.models.api_key import ApiKey
+from app.models.proofread import ProofreadRecord
 from app.models.user import User
 from app.schemas.api_key import (
     ApiKeyCreateRequest,
@@ -119,6 +121,20 @@ async def list_api_keys(
     )
     keys: List[ApiKey] = list(result.scalars().all())
 
+    # 近 7 天（Asia/Shanghai 自然日）各密钥成功调用量，一次聚合查完
+    tz = ZoneInfo("Asia/Shanghai")
+    start_local = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=6)
+    start_utc = start_local.astimezone(timezone.utc)
+    usage_rows = (await db.execute(
+        select(ProofreadRecord.api_key_id, func.count())
+        .where(
+            ProofreadRecord.api_key_id.in_([k.id for k in keys]),
+            ProofreadRecord.created_at >= start_utc,
+        )
+        .group_by(ProofreadRecord.api_key_id)
+    )).all()
+    used_7d_map = {r[0]: r[1] for r in usage_rows}
+
     items = []
     for k in keys:
         used_today = await get_api_key_daily_usage(k)
@@ -133,6 +149,7 @@ async def list_api_keys(
             is_active=k.is_active,
             status=_key_status(k),
             used_today=used_today,
+            used_7d=used_7d_map.get(k.id, 0),
             remark=k.remark,
         ))
 

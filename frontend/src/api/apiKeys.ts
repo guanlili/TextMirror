@@ -14,6 +14,7 @@ export interface ApiKeyItem {
   is_active: boolean
   status: 'active' | 'revoked' | 'expired'
   used_today: number | null
+  used_7d?: number
   remark?: string | null
 }
 

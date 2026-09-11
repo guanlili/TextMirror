@@ -111,3 +111,30 @@ class OpenModelItem(BaseModel):
 class OpenModelsResponse(BaseModel):
     """可用模型列表"""
     models: List[OpenModelItem] = Field(..., description="已启用的模型配置列表")
+
+
+# ======================================================================
+# 用量统计
+# ======================================================================
+
+class OpenUsageDailyItem(BaseModel):
+    """单日用量"""
+    date: str = Field(..., description="日期（Asia/Shanghai 业务时区，YYYY-MM-DD）")
+    count: int = Field(..., description="当日成功调用次数")
+
+
+class OpenUsageKeyItem(BaseModel):
+    """单密钥用量汇总"""
+    key_id: int = Field(..., description="密钥ID")
+    key_display: str = Field(..., description="密钥脱敏展示（前缀...后4位）")
+    key_name: str = Field(..., description="密钥名称")
+    count: int = Field(..., description="统计周期内成功调用次数")
+
+
+class OpenUsageResponse(BaseModel):
+    """用量统计响应"""
+    days: int = Field(..., description="统计周期（天）")
+    total: int = Field(..., description="统计周期内成功调用总次数")
+    daily: List[OpenUsageDailyItem] = Field(default_factory=list, description="按日聚合（含空日期补零）")
+    keys: List[OpenUsageKeyItem] = Field(default_factory=list, description="按密钥聚合")
+    scope: str = Field(..., description="统计范围：api_key（当前密钥）/ user（名下全部密钥）")
