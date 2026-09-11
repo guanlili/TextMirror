@@ -40,11 +40,23 @@ class ApiKeyItem(BaseModel):
     used_today: Optional[int] = Field(None, description="今日调用次数（Redis 不可用时为 null）")
     used_7d: int = Field(0, description="近 7 天成功调用次数（按落库记录统计）")
     remark: Optional[str] = Field(None, description="备注")
+    webhook_url: Optional[str] = Field(None, description="回调地址（未配置为 null）")
 
 
 class ApiKeyListResponse(BaseModel):
     items: list[ApiKeyItem] = []
     total: int = 0
+
+
+class ApiKeyWebhookSetRequest(BaseModel):
+    """设置回调地址请求（每次设置都轮换签名密钥）"""
+    url: str = Field(..., max_length=500, description="回调地址（http/https，不允许内网地址）")
+
+
+class ApiKeyWebhookSetResponse(BaseModel):
+    """设置回调响应：签名密钥仅此一次返回"""
+    url: str
+    secret: str = Field(..., description="签名密钥明文（仅此一次展示，用于校验 X-TextMirror-Signature）")
 
 
 class ApiKeyAdminUpdateRequest(BaseModel):

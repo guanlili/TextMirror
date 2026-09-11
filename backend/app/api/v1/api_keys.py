@@ -4,6 +4,7 @@ TextMirror API 密钥自助管理
 """
 from datetime import datetime, timedelta, timezone
 from typing import List
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -23,6 +24,8 @@ from app.schemas.api_key import (
     ApiKeyCreateResponse,
     ApiKeyItem,
     ApiKeyListResponse,
+    ApiKeyWebhookSetRequest,
+    ApiKeyWebhookSetResponse,
 )
 from app.services.audit_log import record_audit_log
 
@@ -151,6 +154,7 @@ async def list_api_keys(
             used_today=used_today,
             used_7d=used_7d_map.get(k.id, 0),
             remark=k.remark,
+            webhook_url=k.webhook_url,
         ))
 
     return ApiKeyListResponse(items=items, total=len(items))
@@ -180,3 +184,136 @@ async def revoke_api_key(
     )
 
     return {"message": "密钥已吊销"}
+
+
+@router.put("/{key_id}/webhook", response_model=ApiKeyWebhookSetResponse, summary="设置任务回调地址")
+async def set_api_key_webhook(
+    key_id: int,
+    body: ApiKeyWebhookSetRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    设置回调地址：异步文档审校任务完成/失败时向该地址 POST 事件通知。
+    每次设置都**轮换签名密钥**（明文仅本次响应返回一次，用后请妥善保存）。
+    重新设置同一地址也会轮换密钥。
+    """
+    from secrets import token_hex
+
+    from app.core.config import settings
+    from app.core.secret_crypto import encrypt_secret
+    from app.services.webhook import validate_webhook_url
+
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == current_user.id)
+    )
+    api_key = result.scalar_one_or_none()
+    if api_key is None:
+        raise HTTPException(status_code=404, detail="密钥不存在")
+
+    url = body.url.strip()
+    try:
+        validate_webhook_url(url, allow_private=settings.DEBUG)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    secret = f"whsec_{token_hex(24)}"
+    api_key.webhook_url = url
+    api_key.webhook_secret = encrypt_secret(secret)
+    await db.flush()
+
+    record_audit_log(
+        http_request, "apikey_webhook_set", user=current_user,
+        extra_params={"key_id": api_key.id, "webhook_url": url},
+    )
+
+    return ApiKeyWebhookSetResponse(url=url, secret=secret)
+
+
+@router.delete("/{key_id}/webhook", summary="清除任务回调")
+async def clear_api_key_webhook(
+    key_id: int,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """清除回调地址与签名密钥（任务完成不再通知）"""
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == current_user.id)
+    )
+    api_key = result.scalar_one_or_none()
+    if api_key is None:
+        raise HTTPException(status_code=404, detail="密钥不存在")
+
+    api_key.webhook_url = None
+    api_key.webhook_secret = None
+    await db.flush()
+
+    record_audit_log(
+        http_request, "apikey_webhook_clear", user=current_user,
+        extra_params={"key_id": api_key.id},
+    )
+
+    return {"message": "回调已清除"}
+
+
+@router.post("/{key_id}/webhook/test", summary="发送测试回调")
+async def test_api_key_webhook(
+    key_id: int,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    立即向已配置的回调地址发送一条测试事件（同步执行，直接返回送达结果）。
+    事件体结构与真实通知一致（event=webhook.test），可用于联调验签。
+    """
+    import json as _json
+
+    import httpx
+
+    from app.core.secret_crypto import decrypt_secret
+    from app.services.webhook import build_event, sign_payload
+
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == current_user.id)
+    )
+    api_key = result.scalar_one_or_none()
+    if api_key is None:
+        raise HTTPException(status_code=404, detail="密钥不存在")
+    if not api_key.webhook_url:
+        raise HTTPException(status_code=400, detail="该密钥未配置回调地址，请先设置")
+
+    event = build_event("webhook.test", "test", {"message": "这是一条测试回调，收到即表示回调链路正常"})
+    body = _json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode()
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "TextMirror-Webhook/1.0",
+        "X-TextMirror-Event": event["event"],
+        "X-TextMirror-Delivery": f"test-{uuid4().hex}",
+    }
+    secret = decrypt_secret(api_key.webhook_secret) if api_key.webhook_secret else ""
+    if secret:
+        headers["X-TextMirror-Signature"] = sign_payload(secret, body)
+
+    try:
+        resp = httpx.post(api_key.webhook_url, content=body, headers=headers, timeout=10, follow_redirects=False)
+        delivered = 200 <= resp.status_code < 300
+        record_audit_log(
+            http_request, "apikey_webhook_test", user=current_user,
+            extra_params={"key_id": api_key.id, "status_code": resp.status_code, "delivered": delivered},
+        )
+        if delivered:
+            return {"message": f"测试事件已送达（HTTP {resp.status_code}）", "status_code": resp.status_code, "event": event}
+        return {"message": f"目标返回 HTTP {resp.status_code}（非 2xx 视为未送达，请检查接收端）", "status_code": resp.status_code, "event": event}
+    except httpx.HTTPError as e:
+        record_audit_log(
+            http_request, "apikey_webhook_test", user=current_user,
+            extra_params={"key_id": api_key.id, "delivered": False, "error": str(e)},
+            status="failed", error_message=str(e),
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"测试事件发送失败：{type(e).__name__}（请确认地址可达且不拦截外网请求）",
+        )
