@@ -125,11 +125,8 @@
 cp backend/.env.example backend/.env
 
 # 2. 一键构建并启动（postgres + redis + backend 热重载 + celery + frontend）
+#    首次启动自动完成建表、迁移与种子数据（管理员/角色权限/全局词库），无需手动初始化
 docker compose -f docker-compose.dev.yml up -d --build
-
-# 3. 初始化数据库（建表 + 种子数据：管理员/角色权限/全局词库）
-docker exec textmirror-dev-backend python -m app.core.seed
-docker exec textmirror-dev-backend alembic stamp head   # 标记迁移基线
 ```
 
 ### 本地开发（裸机）
@@ -168,7 +165,7 @@ cd ../frontend && npm run dev
 |------|------|
 | 前端 | http://localhost:3022 |
 | 后端 API 文档 | http://localhost:3020/docs |
-| 默认账号 | admin / admin123 |
+| 默认账号 | admin / admin123（DEBUG 开发模式；生产首启为随机密码，见容器日志与 `initial_admin_password.txt`） |
 
 ---
 

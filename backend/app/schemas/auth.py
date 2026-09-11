@@ -17,6 +17,7 @@ class LoginResponse(BaseModel):
     access_token: str = Field(..., description="访问令牌")
     refresh_token: str = Field(..., description="刷新令牌")
     token_type: str = Field(default="bearer", description="令牌类型")
+    must_change_password: bool = Field(default=False, description="初始密码未修改（首次部署的管理员账号），建议引导改密")
 
 
 class UserInfoResponse(BaseModel):

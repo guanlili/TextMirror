@@ -174,7 +174,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessage, FormInstance } from 'element-plus'
+import { ElMessage, ElMessageBox, FormInstance } from 'element-plus'
 import { User, Lock, Connection, WarningFilled } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useSiteStore } from '@/stores/site'
@@ -293,8 +293,22 @@ async function handleLogin() {
     if (!valid) return
     loading.value = true
     try {
-      await userStore.login(loginForm.employee_id, loginForm.password)
+      const res = await userStore.login(loginForm.employee_id, loginForm.password)
       ElMessage.success('登录成功')
+      // 首次部署的管理员账号（初始密码未修改过）：引导改密（可跳过，下次登录仍会提醒）
+      if (res.must_change_password) {
+        try {
+          await ElMessageBox.confirm(
+            '当前使用的是系统初始密码，建议立即修改以保障账号安全。',
+            '修改初始密码',
+            { confirmButtonText: '去修改', cancelButtonText: '暂不修改', type: 'warning' },
+          )
+          router.push('/profile')
+          return
+        } catch {
+          // 暂不修改
+        }
+      }
       const redirect = (route.query.redirect as string) || '/polish'
       router.push(redirect)
     } catch {
