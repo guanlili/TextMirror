@@ -312,7 +312,7 @@ async def test_open_compare_partial_failure_refunds_failed_models(client, db, us
 
 async def test_document_submit_idempotent(client, db, user, api_key, auth):
     """相同 Idempotency-Key 重复提交返回同一 job_id 且只投递一次 Celery。"""
-    with patch("app.api.v1.open.async_proofread_document.apply_async") as mock_apply:
+    with patch("app.api.v1.open_documents.async_proofread_document.apply_async") as mock_apply:
         headers = {**auth, "Idempotency-Key": "idem-key-001"}
         file_payload = ("test.txt", io.BytesIO("这是一段测试文本。".encode()), "text/plain")
 
@@ -340,7 +340,7 @@ async def test_document_submit_idempotent(client, db, user, api_key, auth):
 
 async def test_document_submit_different_idempotency_key_gets_new_job(client, db, user, api_key, auth):
     """不同 Idempotency-Key 生成不同的 job_id。"""
-    with patch("app.api.v1.open.async_proofread_document.apply_async") as mock_apply:
+    with patch("app.api.v1.open_documents.async_proofread_document.apply_async") as mock_apply:
         file_payload = ("test.txt", io.BytesIO("测试文本。".encode()), "text/plain")
 
         resp1 = await client.post(

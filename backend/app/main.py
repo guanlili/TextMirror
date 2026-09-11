@@ -100,8 +100,8 @@ def create_app() -> FastAPI:
     from fastapi.exceptions import RequestValidationError
     from starlette.exceptions import HTTPException as StarletteHTTPException
 
-    from app.api.v1.open import internal_exception_handler, validation_exception_handler
     from app.api.v1.open import router as open_router
+    from app.api.v1.open_common import internal_exception_handler, validation_exception_handler
 
     open_api_app = FastAPI(
         title=f"{settings.APP_NAME} Open API",

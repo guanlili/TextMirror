@@ -78,7 +78,7 @@ async def _records_for(user_id: int):
 async def test_open_polish_sync_success(client):
     user, plaintext, key = await _create_user_with_key(daily_quota=100)
 
-    with patch("app.api.v1.open.polish_text", return_value=_polish_result()):
+    with patch("app.api.v1.open_polish.polish_text", return_value=_polish_result()):
         resp = await client.post(
             "/api/v1/open/polish",
             json={"text": "这段文字需要更加正式的表达方式来呈现。"},
@@ -111,7 +111,7 @@ async def test_open_polish_service_error_refunds_and_503(client):
     from app.core import redis as redis_module
     from app.core.rate_limit import _api_key_daily_redis_key
 
-    with patch("app.api.v1.open.polish_text", side_effect=RuntimeError("no active model")):
+    with patch("app.api.v1.open_polish.polish_text", side_effect=RuntimeError("no active model")):
         resp = await client.post(
             "/api/v1/open/polish",
             json={"text": "这段文字需要更加正式的表达方式来呈现。"},
@@ -135,7 +135,7 @@ async def test_open_polish_stream_events_and_record(client):
         for evt in _stream_events():
             yield evt
 
-    with patch("app.api.v1.open.polish_text_stream", _fake_stream):
+    with patch("app.api.v1.open_polish.polish_text_stream", _fake_stream):
         resp = await client.post(
             "/api/v1/open/polish/stream",
             json={"text": "这段文字需要更加正式的表达方式来呈现。"},
@@ -167,7 +167,7 @@ async def test_open_polish_stream_fatal_refunds_without_record(client):
         yield {"event": "meta", "style": "formal", "style_name": "正式规范"}
         raise RuntimeError("boom")
 
-    with patch("app.api.v1.open.polish_text_stream", _broken_stream):
+    with patch("app.api.v1.open_polish.polish_text_stream", _broken_stream):
         resp = await client.post(
             "/api/v1/open/polish/stream",
             json={"text": "这段文字需要更加正式的表达方式来呈现。"},
