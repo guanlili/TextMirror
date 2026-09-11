@@ -42,7 +42,7 @@ async def get_dashboard_stats(
     today_expr_doc = _today_expr(UploadedDocument.created_at) == today
 
     # 校对统计：今日次数 + 总次数 + 今日活跃用户（1 条 SQL）
-    proofread_stats = await db.execute(
+    proofread_stats = (await db.execute(
         select(
             func.coalesce(func.sum(ProofreadRecord.quota_weight), 0).label("total"),
             func.coalesce(func.sum(ProofreadRecord.quota_weight).filter(today_expr_proofread), 0).label("today"),
@@ -50,7 +50,7 @@ async def get_dashboard_stats(
             .filter(today_expr_proofread, ProofreadRecord.user_id.isnot(None))
             .label("active_today"),
         ).select_from(ProofreadRecord)
-    ).one()
+    )).one()
     total_proofread_count = proofread_stats.total or 0
     today_proofread_count = proofread_stats.today or 0
     active_users_today = proofread_stats.active_today or 0
@@ -69,12 +69,12 @@ async def get_dashboard_stats(
         logger.warning(f"统计 token 用量失败: {e}")
 
     # 文档统计：今日上传 + 总上传（1 条 SQL）
-    doc_stats = await db.execute(
+    doc_stats = (await db.execute(
         select(
             func.count().label("total"),
             func.count().filter(today_expr_doc).label("today"),
         ).select_from(UploadedDocument).where(UploadedDocument.status != "deleted")
-    ).one()
+    )).one()
     total_document_count = doc_stats.total or 0
     today_document_count = doc_stats.today or 0
 
