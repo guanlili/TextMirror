@@ -31,7 +31,7 @@ def _key_display(api_key: ApiKey) -> str:
     return f"{api_key.key_prefix}...{api_key.key_suffix}"
 
 
-def _key_status(api_key: ApiKey) -> str:
+def compute_key_status(api_key: ApiKey) -> str:
     if not api_key.is_active:
         return "revoked"
     if api_key.expires_at:
@@ -131,7 +131,7 @@ async def list_api_keys(
             last_used_at=k.last_used_at,
             created_at=k.created_at,
             is_active=k.is_active,
-            status=_key_status(k),
+            status=compute_key_status(k),
             used_today=used_today,
             remark=k.remark,
         ))
