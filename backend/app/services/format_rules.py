@@ -35,6 +35,18 @@ _AMOUNT_WAN_RE = re.compile(r"(\d{4,})万元")
 _SEQ_CN_RE = re.compile(r"^[（(]?[一二三四五六七八九十]+[)、.．]", re.MULTILINE)
 _SEQ_AR_RE = re.compile(r"^[（(]?\d+[）、.．]", re.MULTILINE)
 
+# 易混词搭配规则：(错误搭配, 正确搭配, 说明)。
+# 单看「权力/权利」无法判定对错（权力机关/权利义务都成立），但特定搭配下只有
+# 一种正确写法——LLM（尤其 lite 档）对此类高混淆对偶发漏检，规则层兜底。
+# 收录标准：错误搭配在规范文本中几乎不出现，命中即高置信（宁可漏报不可误报）。
+CONFUSABLE_COLLOCATIONS = [
+    ("权力和义务", "权利和义务", "「权利和义务」为固定法律搭配，此处应为「权利」（权利=法定利益，权力=政治力量）"),
+    ("基本权力", "基本权利", "宪法与法律术语为「基本权利」"),
+    ("民主权力", "民主权利", "规范表述为「民主权利」"),
+    ("享有权力", "享有权利", "「享有」搭配的是权利；政治力量语境用「行使权力」"),
+    ("权利机关", "权力机关", "「权力机关」指国家权力机关（如人大），非「权利」"),
+]
+
 
 def _issue(original: str, suggestion: str, explanation: str, severity: str = "warning", issue_type: str = "punctuation") -> Dict[str, Any]:
     return {
@@ -162,6 +174,35 @@ def check_sequence_style(text: str) -> List[Dict[str, Any]]:
     return issues
 
 
+def check_confusable_collocations(text: str) -> List[Dict[str, Any]]:
+    """易混词搭配：权力/权利等高混淆对，仅搭配层面无歧义时报告。
+
+    「享有权力和义务」同时命中「享有权力」与「权力和义务」——按最长匹配
+    优先去重，重叠区间只报一次（更长的搭配判定更可靠）。
+    """
+    matches: List[tuple] = []  # (start, wrong, right, note)
+    for wrong, right, note in CONFUSABLE_COLLOCATIONS:
+        start = 0
+        while True:
+            idx = text.find(wrong, start)
+            if idx == -1:
+                break
+            matches.append((idx, wrong, right, note))
+            start = idx + len(wrong)
+
+    matches.sort(key=lambda m: -len(m[1]))  # 长的优先
+    taken: List[tuple] = []  # 已报告区间
+    issues: List[Dict[str, Any]] = []
+    for start, wrong, right, note in matches:
+        end = start + len(wrong)
+        if any(start < t_end and t_start < end for t_start, t_end in taken):
+            continue
+        taken.append((start, end))
+        issues.append(_issue(wrong, right, note, "warning", "typo"))
+    issues.sort(key=lambda i: text.find(i["original"]))
+    return issues
+
+
 def check_format_rules(text: str) -> List[Dict[str, Any]]:
     """格式规则引擎入口"""
     issues: List[Dict[str, Any]] = []
@@ -171,6 +212,7 @@ def check_format_rules(text: str) -> List[Dict[str, Any]]:
         issues.extend(check_id_cards(text))
         issues.extend(check_amounts(text))
         issues.extend(check_sequence_style(text))
+        issues.extend(check_confusable_collocations(text))
     except Exception as e:
         logger.warning(f"[格式规则] 执行异常（跳过）: {e}")
     if issues:
