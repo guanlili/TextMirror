@@ -35,6 +35,11 @@ export function loginApi(employeeId: string, password: string): Promise<AuthToke
   return request.post('/auth/login', { employee_id: employeeId, password })
 }
 
+/** 一键登录（内网演示账号：admin / demo） */
+export function quickLoginApi(account: 'admin' | 'demo'): Promise<AuthTokens> {
+  return request.post(`/auth/quick-login?account=${account}`)
+}
+
 /** 获取当前登录用户信息 */
 export function getMeApi(): Promise<UserInfo> {
   return request.get('/auth/me')

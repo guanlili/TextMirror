@@ -18,6 +18,7 @@ export const useSiteStore = defineStore('site', () => {
   const loginSlogan = ref('')   // 登录页主标语（空=用副标题）
   const footerText = ref('')    // 页脚文案（空=不显示）
   const guestModeEnabled = ref(true)
+  const quickLoginEnabled = ref(true)
   const loaded = ref(false)
 
   /** 是否使用自定义图标（用于登录页等需要按图标存在与否切换样式的场景） */
@@ -34,6 +35,7 @@ export const useSiteStore = defineStore('site', () => {
       loginSlogan.value = config.login_slogan || ''
       footerText.value = config.footer_text || ''
       guestModeEnabled.value = (config.guest_mode_enabled ?? 'on') === 'on'
+      quickLoginEnabled.value = (config.quick_login_enabled ?? 'on') === 'on'
       loaded.value = true
 
       // 更新浏览器标题
@@ -67,6 +69,7 @@ export const useSiteStore = defineStore('site', () => {
     loginSlogan.value = config.login_slogan || ''
     footerText.value = config.footer_text || ''
     guestModeEnabled.value = (config.guest_mode_enabled ?? 'on') === 'on'
+    quickLoginEnabled.value = (config.quick_login_enabled ?? 'on') === 'on'
     updateDocumentTitle()
     updateFavicon()
   }
@@ -99,6 +102,7 @@ export const useSiteStore = defineStore('site', () => {
     loginSlogan,
     footerText,
     guestModeEnabled,
+    quickLoginEnabled,
     loaded,
     loadSiteConfig,
     ensureLoaded,

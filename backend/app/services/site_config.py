@@ -28,6 +28,8 @@ DEFAULT_SITE_CONFIG: Dict[str, str] = {
     "footer_text": "",
     # 游客模式总开关：off 时所有游客入口关闭，需登录使用
     "guest_mode_enabled": "on",
+    # 一键登录开关：on 时登录页显示「一键管理员/体验账号」按钮（内网演示便利）
+    "quick_login_enabled": "on",
 }
 
 

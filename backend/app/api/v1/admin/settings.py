@@ -29,6 +29,7 @@ class SiteConfigUpdate(BaseModel):
     login_slogan: Optional[str] = None
     footer_text: Optional[str] = None
     guest_mode_enabled: Optional[str] = None  # "on" / "off"
+    quick_login_enabled: Optional[str] = None  # "on" / "off"
 
 
 @router.get("/site", summary='获取站点配置（管理员）')
@@ -46,6 +47,8 @@ async def admin_update_site_config(
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if "guest_mode_enabled" in updates and updates["guest_mode_enabled"] not in ("on", "off"):
         raise HTTPException(status_code=400, detail="guest_mode_enabled 仅支持 on/off")
+    if "quick_login_enabled" in updates and updates["quick_login_enabled"] not in ("on", "off"):
+        raise HTTPException(status_code=400, detail="quick_login_enabled 仅支持 on/off")
     if not updates:
         return await get_site_config()
     return await update_site_config(updates)
