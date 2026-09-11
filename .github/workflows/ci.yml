@@ -45,5 +45,29 @@ jobs:
         run: npm run lint
       - name: Type check
         run: npx vue-tsc --noEmit
+      - name: Unit tests
+        run: npm run test
       - name: Build
         run: npm run build
+
+  # CI 的 npm/pip 路径不经过 Dockerfile——vite7 + node:18 镜像事故（PR 绿但生产
+  # 镜像构建崩）证明必须单独验证 Docker 构建路径
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: false
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max

@@ -8,7 +8,9 @@
     "build": "vue-tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings 0",
-    "lint:fix": "eslint . --max-warnings 0 --fix"
+    "lint:fix": "eslint . --max-warnings 0 --fix",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
@@ -32,6 +34,7 @@
     "unplugin-auto-import": "^21.1.0",
     "unplugin-vue-components": "^0.27.5",
     "vite": "^7.3.6",
+    "vitest": "^5.0.0",
     "vue-eslint-parser": "^10.4.1",
     "vue-tsc": "^2.2.0"
   }
