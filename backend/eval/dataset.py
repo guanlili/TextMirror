@@ -20,6 +20,12 @@ SAMPLES = [
     {"id": "typo-3", "dim": "错别字", "domain": "general",
      "text": "请登录帐号查看详细内容。",
      "expect": ["帐号"]},
+    {"id": "typo-4", "dim": "易混词搭配", "domain": "general",
+     "text": "宪法保障公民的基本权力，任何人不得非法侵犯。",
+     "expect": ["基本权力"]},  # 确定性规则锚点（format_rules 混淆词搭配）
+    {"id": "typo-5", "dim": "易混词搭配", "domain": "general",
+     "text": "双方应依法明确彼此的权力和义务，并规范权力运行。",
+     "expect": ["权力和义务"]},  # 同上；后半句「权力运行」为正确用法不得误报
 
     # ---- 语法/搭配 ----
     {"id": "grammar-1", "dim": "语法", "domain": "general",

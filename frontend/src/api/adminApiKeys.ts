@@ -18,7 +18,16 @@ export interface AdminApiKeyItem {
   is_active: boolean
   status: 'active' | 'revoked' | 'expired'
   used_today: number | null
+  used_7d?: number
   remark: string | null
+  webhook_url?: string | null
+  webhook_last?: {
+    event: string
+    status: 'delivered' | 'failed'
+    status_code: number
+    error: string
+    timestamp: string
+  } | null
 }
 
 export interface AdminApiKeyListResponse {
