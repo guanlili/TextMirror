@@ -144,8 +144,10 @@ def check_naming_consistency(text: str) -> List[Dict[str, Any]]:
                 break
         if len(core) < 4:
             continue
-        # 核心专名的连续子串（从长到短，≥3 字）独立出现检测
-        for size in range(len(core) - 1, 2, -1):
+        # 核心专名的连续子串（从长到短，≥3 字）独立出现检测。
+        # 必须从完整核心长度开始扫——否则「华宇信息技术」被截成
+        # 「华宇信息技」上报，span 与文中实际简称不符
+        for size in range(len(core), 2, -1):
             for i in range(len(core) - size + 1):
                 abbr = core[i: i + size]
                 total = text.count(abbr)
@@ -209,12 +211,11 @@ def check_consistency(text: str) -> List[Dict[str, Any]]:
     return issues
 
 
-# 加总语境：合计/总计/总投资/总费用/总支出 后跟数字金额
-_SUM_TOTAL_RE = re.compile(r"(合计|总计|总金额|总投资|总费用|总支出|总额|共计)[为是:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*(万元|亿元|元|万|亿)")
+# 加总语境：合计/总计/小计/总投资/总费用/总支出 后跟数字金额
+# （「小计」与「合计」在分节文本中同级共存，均为总额句；「人民币」前缀不影响判定）
+_SUM_TOTAL_RE = re.compile(r"(合计|总计|小计|总金额|总投资|总费用|总支出|总额|共计)[为是:：]?\s*(?:人民币)?\s*([0-9]+(?:\.[0-9]+)?)\s*(万元|亿元|元|万|亿)")
 # 前文金额项：数字 + 可选万元/亿元单位
 _AMOUNT_ITEM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(万元|亿元|元|万|亿)")
-
-_SUM_TOTAL_WORDS = ("合计", "总计", "总金额", "总投资", "总费用", "总支出", "总额", "共计")
 
 
 def _amount_to_yuan(value: float, unit: str) -> float:
@@ -233,9 +234,14 @@ def check_amount_summation(text: str) -> List[Dict[str, Any]]:
     防误报约束（全满足才报）：
     - 前文金额项 ≥2 个且单位一致（同万元/同元）
     - 金额项出现在合计句之前 300 字内（语义相关性）
+    - 金额项只取「上一个总额句」之后的段落——分节文本（小计/合计、
+      总投资/合计）中各总额只汇总自己段落的明细，前文总额句的金额
+      也不计入明细，否则正确文本被重复求和而误报
     - 差值超过 1%（容差处理四舍五入）
     """
     issues: List[Dict[str, Any]] = []
+    # 全文所有总额句的匹配区间（区间内的金额是总额本身而非明细项）
+    total_spans = [tm.span() for tm in _SUM_TOTAL_RE.finditer(text)]
     for m in _SUM_TOTAL_RE.finditer(text):
         total_str, unit = m.group(2), m.group(3)
         try:
@@ -247,10 +253,14 @@ def check_amount_summation(text: str) -> List[Dict[str, Any]]:
             continue  # 无单位无法定量纲
         total_yuan = _amount_to_yuan(total_val, unit)
 
-        # 收集合计之前的金额项（300 字窗口）
-        prefix = text[max(0, m.start() - 300): m.start()]
+        # 明细段落 = 上一个总额句结束 ~ 当前总额句开始（300 字窗口内）
+        section_start = 0
+        for ts, te in total_spans:
+            if te <= m.start():
+                section_start = te
+        section = text[max(section_start, m.start() - 300): m.start()]
         items = []
-        for am in _AMOUNT_ITEM_RE.finditer(prefix):
+        for am in _AMOUNT_ITEM_RE.finditer(section):
             v = float(am.group(1))
             u = am.group(2)
             yuan = _amount_to_yuan(v, u)
@@ -269,10 +279,6 @@ def check_amount_summation(text: str) -> List[Dict[str, Any]]:
             continue
         # 同量纲（都是万元级或都是元级）
         item_yuans = [y for y, _ in items]
-        # 有占比/比例数字混入的风险：过滤掉明显的百分比语境
-        item_yuans = [y for y, raw in items if "%" not in prefix[max(0, prefix.find(raw) - 5): prefix.find(raw)]]
-        if len(item_yuans) < 2:
-            continue
         s = sum(item_yuans)
         if total_yuan <= 0 or s <= 0:
             continue

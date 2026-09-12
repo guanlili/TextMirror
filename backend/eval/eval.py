@@ -3,6 +3,8 @@
 
 用法（容器内）：
     docker exec textmirror-dev-backend python -m eval.eval
+    # 指定模型配置（基线跑分须与生产活跃模型一致，防 dev 活跃配置漂移）：
+    docker exec -e EVAL_CONFIG_ID=13 textmirror-dev-backend python -m eval.eval
 
 指标：
 - 召回率（锚点维度）：期望锚点被 issue 覆盖的比例
@@ -13,8 +15,10 @@
 LLM 输出有随机性：结论看趋势（多次跑分对比），不看单次绝对值。
 """
 import asyncio
+import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -22,11 +26,18 @@ from eval.dataset import SAMPLES  # noqa: E402
 from app.services.proofread import proofread_text  # noqa: E402
 
 
-async def run_sample(sample: dict) -> dict:
+async def run_sample(sample: dict, config_id: Optional[int]) -> dict:
     try:
-        result = await proofread_text(text=sample["text"], domain=sample.get("domain", "general"))
+        result = await proofread_text(
+            text=sample["text"],
+            domain=sample.get("domain", "general"),
+            config_id=config_id,
+        )
     except Exception as e:
-        return {"id": sample["id"], "error": str(e), "hit": [], "false_issues": [], "degraded": 0}
+        return {"id": sample["id"], "dim": sample["dim"], "error": str(e),
+                "hit": [], "false_issues": [], "degraded": 0,
+                "anchors_total": len(sample.get("expect", [])), "anchors_hit": 0,
+                "missed": list(sample.get("expect", [])), "issue_count": 0}
 
     issues = result.get("issues", [])
     hit_anchors = []
@@ -54,16 +65,23 @@ async def run_sample(sample: dict) -> dict:
 
 
 async def main():
+    config_env = os.environ.get("EVAL_CONFIG_ID")
+    config_id = int(config_env) if config_env else None
+
     print("=" * 70)
     print("TextMirror 审校评测（固定集跑分）")
+    if config_id:
+        print(f"指定模型配置: id={config_id}")
     print("=" * 70)
 
     results = []
     for s in SAMPLES:
-        r = await run_sample(s)
+        r = await run_sample(s, config_id)
         results.append(r)
         status = "PASS" if (r.get("anchors_hit") == r.get("anchors_total") and not r.get("false_issues")) else "FAIL"
         detail = ""
+        if r.get("error"):
+            detail += f" 错误={r['error']}"
         if r.get("missed"):
             detail += f" 漏={r['missed']}"
         if r.get("false_issues"):
