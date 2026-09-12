@@ -47,6 +47,15 @@ CONFUSABLE_COLLOCATIONS = [
     ("权利机关", "权力机关", "「权力机关」指国家权力机关（如人大），非「权利」"),
 ]
 
+# 半角标点（中文语句应全角）。冒号/分号只看前邻汉字（后随任何字符都算错，
+# 「时间:14:30」「清单如下:\n」均报）；逗号/叹号/问号还要求后随汉字/空白/结尾——
+# 后随拉丁字母或数字时可能身处英文/数字语境（你好,world、3,500），宁漏报。
+# 数字间的冒号（比分3:2）因前邻非汉字天然不命中。mini 对此类漏检稳定
+# （punct-4 英文冒号多轮全静默），规则层补位。
+_HALFWIDTH_CORE_RE = re.compile(r"(?<=[\u4e00-\u9fa5])([,!?]+)(?=[\u4e00-\u9fa5\s]|$)")
+_HALFWIDTH_COLON_RE = re.compile(r"(?<=[\u4e00-\u9fa5])[;:]")
+_HALFWIDTH_MAP = str.maketrans({",": "，", "!": "！", "?": "？", ";": "；", ":": "："})
+
 
 def _issue(original: str, suggestion: str, explanation: str, severity: str = "warning", issue_type: str = "punctuation") -> Dict[str, Any]:
     return {
@@ -203,6 +212,21 @@ def check_confusable_collocations(text: str) -> List[Dict[str, Any]]:
     return issues
 
 
+def check_halfwidth_punct(text: str) -> List[Dict[str, Any]]:
+    """半角标点混入中文语句：命中即建议全角替换（逐字符映射，run 整体替换）。"""
+    issues: List[Dict[str, Any]] = []
+    for pattern in (_HALFWIDTH_CORE_RE, _HALFWIDTH_COLON_RE):
+        for m in pattern.finditer(text):
+            run = m.group(0)
+            fixed = run.translate(_HALFWIDTH_MAP)
+            issues.append(_issue(
+                run, fixed,
+                f"中文语句中的半角标点「{run}」应为全角「{fixed}」", "warning",
+            ))
+    issues.sort(key=lambda i: text.find(i["original"]))
+    return issues
+
+
 def check_format_rules(text: str) -> List[Dict[str, Any]]:
     """格式规则引擎入口"""
     issues: List[Dict[str, Any]] = []
@@ -213,6 +237,7 @@ def check_format_rules(text: str) -> List[Dict[str, Any]]:
         issues.extend(check_amounts(text))
         issues.extend(check_sequence_style(text))
         issues.extend(check_confusable_collocations(text))
+        issues.extend(check_halfwidth_punct(text))
     except Exception as e:
         logger.warning(f"[格式规则] 执行异常（跳过）: {e}")
     if issues:
