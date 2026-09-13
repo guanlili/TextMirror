@@ -12,7 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_factory, get_db
 from app.core.dependencies import get_current_user_optional
-from app.core.rate_limit import check_guest_rate_limit, check_user_quota, reject_guest_if_disabled
+from app.core.rate_limit import (
+    charge_user_daily_quota,
+    check_guest_rate_limit,
+    refund_user_daily_quota,
+    reject_guest_if_disabled,
+)
 from app.models.proofread import ProofreadRecord
 from app.schemas.polish import PolishRequest, PolishResponse, PolishVersion
 from app.services.audit_log import AuditTimer, record_audit_log
@@ -80,11 +85,12 @@ async def text_polish(
     if current_user is None:
         await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
-    else:
-        await check_user_quota(current_user, db)
 
-    # 校验风格参数
+    # 校验风格参数（非法请求不消耗额度）
     _require_style(request.style)
+
+    if current_user is not None:
+        await charge_user_daily_quota(current_user)
 
     timer = AuditTimer()
     timer.start()
@@ -104,6 +110,7 @@ async def text_polish(
             status="failed", error_message=str(e),
             duration_ms=timer.elapsed_ms(),
         )
+        await refund_user_daily_quota(current_user)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="润色服务暂时不可用，请稍后重试",
@@ -118,6 +125,7 @@ async def text_polish(
             status="failed", error_message=str(e),
             duration_ms=timer.elapsed_ms(),
         )
+        await refund_user_daily_quota(current_user)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="润色过程发生错误，请稍后重试",
@@ -189,11 +197,11 @@ async def text_polish_stream(
     if current_user is None:
         await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
-    else:
-        async with async_session_factory() as db:
-            await check_user_quota(current_user, db)
 
     style_config = _require_style(request.style)
+
+    if current_user is not None:
+        await charge_user_daily_quota(current_user)
 
     timer = AuditTimer()
     timer.start()
@@ -221,6 +229,13 @@ async def text_polish_stream(
             logger.error(f"润色流式过程异常: {type(e).__name__}: {e}\n{traceback.format_exc()}")
             error = str(e)
             yield f"data: {json.dumps({'event': 'fatal', 'message': '润色服务暂时不可用，请稍后重试'}, ensure_ascii=False)}\n\n"
+        finally:
+            # 零产出（含客户端断连）：退还预扣额度（用户没拿到任何版本）
+            if current_user is not None and not versions:
+                try:
+                    await refund_user_daily_quota(current_user)
+                except Exception as e:
+                    logger.warning(f"润色流式退还额度失败: {e}")
 
         # 流结束后：保存记录（已登录用户）+ 审计日志
         try:
@@ -311,15 +326,11 @@ def _require_style(style: str) -> dict:
     return POLISH_STYLES[style]
 
 
-async def _check_compare_quota(http_request: Request, current_user, n: int) -> None:
-    """对比模式并发调用 N 个模型，消耗 N 倍额度：按模型数预检配额"""
+async def _check_compare_guest_access(http_request: Request, current_user) -> None:
+    """对比模式游客入口检查（登录用户的额度预扣在模型配置校验后进行，无效配置不消耗额度）"""
     if current_user is None:
         await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
-    else:
-        from app.core.rate_limit import check_user_quota_n_times
-        async with async_session_factory() as db:
-            await check_user_quota_n_times(current_user, db, n)
 
 
 async def _load_compare_configs(config_ids: List[int]) -> dict:
@@ -398,9 +409,12 @@ async def text_polish_compare(
     多模型对比润色：同一段文本用多个已配置模型并发执行「标准润色」
     供用户横向对比不同模型的输出效果
     """
-    await _check_compare_quota(http_request, current_user, len(request.config_ids))
+    await _check_compare_guest_access(http_request, current_user)
     style_config = _require_style(request.style)
     configs = await _load_compare_configs(request.config_ids)
+    # 对比一次消耗 N 倍额度（N=有效模型数）：原子预扣
+    if current_user is not None:
+        await charge_user_daily_quota(current_user, len(configs))
     messages, max_tokens = _build_compare_messages(request.style, request.text)
 
     import time as _time
@@ -438,6 +452,11 @@ async def text_polish_compare(
     items = await _asyncio.gather(*[_run_one(c) for c in configs.values()])
     items = sorted(items, key=lambda i: request.config_ids.index(i.config_id))
 
+    # 失败模型不消耗额度（与密钥日配额按成功数结算同口径）
+    failed = sum(1 for i in items if not i.success)
+    if failed > 0 and current_user is not None:
+        await refund_user_daily_quota(current_user, failed)
+
     await _save_compare_record(
         user_id=current_user.id if current_user else None,
         text=request.text,
@@ -472,9 +491,12 @@ async def text_polish_compare_stream(
     多模型对比润色（流式 SSE）：各模型并发流式执行，逐模型推送增量
     事件流：meta → delta/done/error（带 config_id，各模型交错）→ end
     """
-    await _check_compare_quota(http_request, current_user, len(request.config_ids))
+    await _check_compare_guest_access(http_request, current_user)
     style_config = _require_style(request.style)
     configs = await _load_compare_configs(request.config_ids)
+    # 对比一次消耗 N 倍额度（N=有效模型数）：原子预扣
+    if current_user is not None:
+        await charge_user_daily_quota(current_user, len(configs))
     messages, max_tokens = _build_compare_messages(request.style, request.text)
 
     import asyncio as _asyncio
@@ -574,6 +596,13 @@ async def text_polish_compare_stream(
         finally:
             for t in tasks:
                 t.cancel()
+            # 失败/未产出内容的模型不消耗额度（正常结束与断连同口径结算）
+            if current_user is not None:
+                successes = sum(1 for cid in configs if contents.get(cid))
+                try:
+                    await refund_user_daily_quota(current_user, max(0, len(configs) - successes))
+                except Exception as e:
+                    logger.warning(f"对比流式退还额度失败: {e}")
 
     return StreamingResponse(
         event_stream(),

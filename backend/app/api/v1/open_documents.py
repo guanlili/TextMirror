@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.open_common import (
     DOC_ERROR_RESPONSES,
     JOBS_ERROR_RESPONSES,
-    _check_user_quota_contract,
+    _charge_user_quota_contract,
     _existing_submit_response,
     _normalize_idempotency_key,
 )
@@ -27,6 +27,7 @@ from app.core.rate_limit import (
     check_api_key_rpm,
     check_upload_rate_limit,
     refund_api_key_daily_usage,
+    refund_user_daily_quota,
 )
 from app.core.security import hash_scoped_idempotency_key
 from app.models.api_key import ApiKey
@@ -178,13 +179,15 @@ async def open_submit_document(
         if not extracted_text.strip():
             raise HTTPException(status_code=400, detail={"code": "INVALID_FILE", "message": "文件中未提取到有效文本内容"})
 
-        # ---- 配额（用户输入校验完成后才计费）----
-        try:
-            await _check_user_quota_contract(user, db)
-        except HTTPException:
-            raise
+        # ---- 配额（用户输入校验完成后才计费）：用户配额预扣 → 密钥日配额预扣。
+        # 密钥配额拒绝时退还用户预扣（本次未获服务不消耗用户额度）----
+        await _charge_user_quota_contract(user)
         if api_key is not None:
-            await charge_api_key_daily(api_key, 1)
+            try:
+                await charge_api_key_daily(api_key)
+            except HTTPException:
+                await refund_user_daily_quota(user)
+                raise
     except HTTPException:
         remove_upload_silently(file_path)
         raise
@@ -232,6 +235,7 @@ async def open_submit_document(
         await db.rollback()
         if api_key is not None:
             await refund_api_key_daily_usage(api_key)
+        await refund_user_daily_quota(user)
         remove_upload_silently(file_path)
         if scoped_idempotency_key:
             existing = (await db.execute(
@@ -249,6 +253,7 @@ async def open_submit_document(
         logger.error(f"[OpenAPI] 上传/任务记录保存失败: {e}")
         if api_key is not None:
             await refund_api_key_daily_usage(api_key)
+        await refund_user_daily_quota(user)
         remove_upload_silently(file_path)
         raise HTTPException(
             status_code=500,
@@ -271,6 +276,7 @@ async def open_submit_document(
         await db.commit()
         if api_key is not None:
             await refund_api_key_daily_usage(api_key)
+        await refund_user_daily_quota(user)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "TASK_QUEUE_UNAVAILABLE", "message": "任务队列暂时不可用，请稍后重试"},

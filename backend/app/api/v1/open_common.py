@@ -12,7 +12,12 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.rate_limit import check_user_quota, check_user_quota_n_times
+from app.core.rate_limit import (
+    charge_api_key_daily,
+    charge_user_daily_quota,
+    check_api_key_rpm,
+    refund_user_daily_quota,
+)
 from app.models.uploaded_document import UploadedDocument
 from app.schemas.open import OpenDocumentSubmitResponse
 
@@ -103,13 +108,10 @@ async def internal_exception_handler(request: Request, exc: Exception):
     )
 
 
-async def _check_user_quota_contract(user, db: AsyncSession, n: int = 1) -> None:
-    """用户每日配额检查，429 转换为 code+message 契约（n>1 为多模型对比预检）"""
+async def _charge_user_quota_contract(user, n: int = 1) -> None:
+    """用户每日配额原子预扣，429 转换为 code+message 契约（n>1 为多模型对比权重）"""
     try:
-        if n > 1:
-            await check_user_quota_n_times(user, db, n)
-        else:
-            await check_user_quota(user, db)
+        await charge_user_daily_quota(user, n)
     except HTTPException as e:
         if e.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
             raise HTTPException(
@@ -117,5 +119,21 @@ async def _check_user_quota_contract(user, db: AsyncSession, n: int = 1) -> None
                 detail={"code": "QUOTA_EXCEEDED", "message": str(e.detail)},
             )
         raise
+
+
+async def _open_billing(user, api_key, weight: int = 1) -> None:
+    """开放 API 统一计费顺序：RPM → 用户配额预扣 → 密钥日配额预扣（weight=本次消耗额度数）。
+
+    密钥配额拒绝时退还用户预扣——本次请求未获得服务，用户额度不应消耗。
+    """
+    if api_key is not None:
+        await check_api_key_rpm(api_key)
+    await _charge_user_quota_contract(user, weight)
+    if api_key is not None:
+        try:
+            await charge_api_key_daily(api_key, weight)
+        except HTTPException:
+            await refund_user_daily_quota(user, weight)
+            raise
 
 

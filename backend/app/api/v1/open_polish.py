@@ -9,10 +9,10 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.open_common import ERROR_RESPONSES, _check_user_quota_contract
+from app.api.v1.open_common import ERROR_RESPONSES, _open_billing
 from app.core.database import async_session_factory, get_db
 from app.core.dependencies import get_current_user_or_apikey
-from app.core.rate_limit import charge_api_key_daily, check_api_key_rpm, refund_api_key_daily_usage
+from app.core.rate_limit import refund_api_key_daily_usage, refund_user_daily_quota
 from app.models.api_key import ApiKey
 from app.models.proofread import ProofreadRecord
 from app.models.user import User
@@ -32,14 +32,6 @@ router = APIRouter(tags=["开放API"])
 # ======================================================================
 # AI 润色
 # ======================================================================
-
-async def _polish_billing(user, api_key, db: AsyncSession) -> None:
-    """润色与审校同一计费顺序：RPM → 用户配额（免费检查）→ 密钥日配额（weight=1，与 Web 端单记录口径一致）"""
-    if api_key is not None:
-        await check_api_key_rpm(api_key)
-    await _check_user_quota_contract(user, db)
-    if api_key is not None:
-        await charge_api_key_daily(api_key)
 
 
 def _build_polish_record(
@@ -95,7 +87,8 @@ async def open_polish(
 ):
     """开放 AI 润色端点（复用 Web 端同一润色服务，三版本并发）"""
     user, api_key = auth
-    await _polish_billing(user, api_key, db)
+    # 计费顺序与审校端点一致：RPM → 用户配额预扣 → 密钥日配额预扣
+    await _open_billing(user, api_key)
 
     timer = AuditTimer()
     timer.start()
@@ -115,6 +108,7 @@ async def open_polish(
         )
         if api_key is not None:
             await refund_api_key_daily_usage(api_key)
+        await refund_user_daily_quota(user)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "MODEL_UNAVAILABLE", "message": "润色服务暂时不可用，请稍后重试"},
@@ -129,6 +123,7 @@ async def open_polish(
         )
         if api_key is not None:
             await refund_api_key_daily_usage(api_key)
+        await refund_user_daily_quota(user)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"code": "INTERNAL_ERROR", "message": "润色过程发生错误，请稍后重试"},
@@ -201,8 +196,7 @@ async def open_polish_stream(
     user, api_key = auth
 
     # 限流/配额/扣额在流开始前完成（流式响应无法回传 HTTP 错误码）
-    async with async_session_factory() as billing_db:
-        await _polish_billing(user, api_key, billing_db)
+    await _open_billing(user, api_key)
 
     # 结束鉴权依赖遗留的读事务再开流：db 与鉴权依赖是同一缓存会话，
     # 流结束才随请求关闭，SQLite 下挂着读锁会让流内落库 database is locked（PG 无此问题）
@@ -238,10 +232,12 @@ async def open_polish_stream(
             fatal = True
             yield f"data: {json.dumps({'event': 'fatal', 'message': '润色服务暂时不可用，请稍后重试'}, ensure_ascii=False)}\n\n"
 
-        # 流结束后：零产出退还当日额度 → 落库 → 审计
+        # 流结束后：零产出退还当日额度（密钥+用户） → 落库 → 审计
         try:
-            if fatal and not versions and api_key is not None:
-                await refund_api_key_daily_usage(api_key)
+            if fatal and not versions:
+                if api_key is not None:
+                    await refund_api_key_daily_usage(api_key)
+                await refund_user_daily_quota(user)
             if versions:
                 # 流式收尾在响应流内执行，用独立会话落库（请求会话此刻仍被流持有）
                 async with async_session_factory() as db:
