@@ -6,7 +6,7 @@ from typing import Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.open_common import ERROR_RESPONSES
@@ -59,20 +59,27 @@ async def open_usage(
         ))
 
     # 按日聚合：日期边界在 Python 侧算好（Asia/Shanghai），SQL 只做范围计数——
-    # 与配额检查同模式，兼容 PostgreSQL 与 SQLite，且每个查询都走 (api_key_id, created_at) 索引
-    daily = []
+    # 与配额检查同模式，兼容 PostgreSQL 与 SQLite，且每个子查询都走 (api_key_id, created_at) 索引。
+    # N 天合并为一条 UNION ALL（此前逐日循环 = N 次串行往返）
+    day_stmts = []
     for i in range(days):
         day_start_local = start_local + timedelta(days=i)
         day_start_utc = day_start_local.astimezone(timezone.utc)
         day_end_utc = (day_start_local + timedelta(days=1)).astimezone(timezone.utc)
-        count = int((await db.execute(
-            select(func.coalesce(func.sum(ProofreadRecord.quota_weight), 0)).select_from(ProofreadRecord).where(
+        day_stmts.append(
+            select(func.coalesce(func.sum(ProofreadRecord.quota_weight), 0))
+            .select_from(ProofreadRecord)
+            .where(
                 *base_filters,
                 ProofreadRecord.created_at >= day_start_utc,
                 ProofreadRecord.created_at < day_end_utc,
             )
-        )).scalar() or 0)
-        daily.append(OpenUsageDailyItem(date=day_start_local.strftime("%Y-%m-%d"), count=count))
+        )
+    day_counts = [int(c or 0) for c in (await db.execute(union_all(*day_stmts))).scalars()]
+    daily = [
+        OpenUsageDailyItem(date=(start_local + timedelta(days=i)).strftime("%Y-%m-%d"), count=day_counts[i])
+        for i in range(days)
+    ]
 
     key_rows = (await db.execute(
         select(

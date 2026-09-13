@@ -5,7 +5,7 @@ TextMirror 上传文档记录模型
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
@@ -14,6 +14,10 @@ from app.models.base import BaseModel
 class UploadedDocument(BaseModel):
     """上传文档记录表"""
     __tablename__ = "uploaded_documents"
+    __table_args__ = (
+        # 后台文档列表按 created_at DESC 排序分页，无索引时数据量增大后全表排序
+        Index("ix_uploaded_documents_created_at", "created_at"),
+    )
 
     file_id: Mapped[str] = mapped_column(
         String(100), nullable=False, unique=True, index=True, comment="文件唯一标识(UUID)"

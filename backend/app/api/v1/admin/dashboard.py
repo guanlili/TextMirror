@@ -96,8 +96,9 @@ async def get_usage_trend(
     _user=Depends(require_permission("admin:access")),
 ):
     """
-    近 N 日校对趋势：按日校对次数（SUM(quota_weight) 口径）、活跃用户数、token 消耗。
-    日期边界 Python 侧按 Asia/Shanghai 计算后做 UTC 范围计数（与配额/用量口径一致）。
+    近 N 日校对趋势：按日校对次数（SUM(quota_weight) 口径）、活跃用户数。
+    日期按业务时区在 SQL 内分组（AT TIME ZONE，与 /stats 的 _today_expr 同模式），
+    此前逐日循环查库（90 天 = 90 次串行往返）。
     """
     from datetime import datetime, timedelta, timezone
     from zoneinfo import ZoneInfo
@@ -105,25 +106,25 @@ async def get_usage_trend(
     tz = ZoneInfo("Asia/Shanghai")
     now_local = datetime.now(tz)
     start_local = (now_local - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    start_utc = start_local.astimezone(timezone.utc)
+
+    day_expr = _today_expr(ProofreadRecord.created_at)
+    rows = (await db.execute(
+        select(
+            day_expr.label("day"),
+            func.coalesce(func.sum(ProofreadRecord.quota_weight), 0).label("count"),
+            func.count(func.distinct(ProofreadRecord.user_id)).label("users"),
+        )
+        .where(ProofreadRecord.created_at >= start_utc)
+        .group_by(day_expr)
+    )).all()
+    by_day = {r.day: (int(r.count or 0), int(r.users or 0)) for r in rows}
 
     daily = []
     for i in range(days):
-        day_start = start_local + timedelta(days=i)
-        day_end = day_start + timedelta(days=1)
-        row = (await db.execute(
-            select(
-                func.coalesce(func.sum(ProofreadRecord.quota_weight), 0).label("count"),
-                func.count(func.distinct(ProofreadRecord.user_id)).label("users"),
-            ).where(
-                ProofreadRecord.created_at >= day_start.astimezone(timezone.utc),
-                ProofreadRecord.created_at < day_end.astimezone(timezone.utc),
-            )
-        )).one()
-        daily.append({
-            "date": day_start.strftime("%m-%d"),
-            "count": int(row.count or 0),
-            "users": int(row.users or 0),
-        })
+        day = start_local + timedelta(days=i)
+        count, users = by_day.get(day.strftime("%Y-%m-%d"), (0, 0))
+        daily.append({"date": day.strftime("%m-%d"), "count": count, "users": users})
 
     return {"days": days, "daily": daily}
 

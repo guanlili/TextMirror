@@ -14,6 +14,20 @@ from app.core.database import async_session_factory
 from app.models.audit_log import AuditLog
 from app.utils.ip import get_client_ip
 
+# 后台写库任务强引用集合：事件循环只持任务弱引用，无强引用的任务可能被 GC 中途回收
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_audit_task(log_data: dict) -> None:
+    """后台写审计日志；无运行中事件循环时降级为同步日志输出"""
+    try:
+        task = asyncio.ensure_future(_write_audit_log(log_data))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+    except RuntimeError:
+        logger.warning("审计日志异步写入降级为同步日志记录")
+        logger.info(f"[AUDIT] {log_data.get('action_type')} | user={log_data.get('username')} | ip={log_data.get('client_ip')}")
+
 
 def detect_device_type(user_agent: str) -> str:
     """
@@ -115,12 +129,7 @@ def record_audit_log(
     }
 
     # 异步写入，不阻塞当前请求
-    try:
-        asyncio.ensure_future(_write_audit_log(log_data))
-    except RuntimeError:
-        # 无运行中事件循环时的降级处理（如线程池中的同步上下文）
-        logger.warning("审计日志异步写入降级为同步日志记录")
-        logger.info(f"[AUDIT] {action_type} | user={log_data.get('username')} | ip={log_data.get('client_ip')}")
+    _spawn_audit_task(log_data)
 
 
 def record_audit_log_sync(
@@ -161,10 +170,7 @@ def record_audit_log_sync(
         "token_usage": None,
     }
 
-    try:
-        asyncio.ensure_future(_write_audit_log(log_data))
-    except RuntimeError:
-        logger.info(f"[AUDIT] {action_type} | emp={employee_id_attempt} | ip={client_ip}")
+    _spawn_audit_task(log_data)
 
 
 class AuditTimer:

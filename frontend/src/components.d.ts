@@ -101,6 +101,7 @@ declare module 'vue' {
     Right: typeof import('@element-plus/icons-vue')['Right']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    Search: typeof import('@element-plus/icons-vue')['Search']
     Setting: typeof import('@element-plus/icons-vue')['Setting']
     SwitchButton: typeof import('@element-plus/icons-vue')['SwitchButton']
     Tickets: typeof import('@element-plus/icons-vue')['Tickets']

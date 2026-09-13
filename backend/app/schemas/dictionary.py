@@ -44,7 +44,7 @@ class EntryCreate(BaseModel):
 
 class EntryBatchCreate(BaseModel):
     """批量创建词条"""
-    entries: List[EntryCreate] = Field(..., description="词条列表")
+    entries: List[EntryCreate] = Field(..., max_length=1000, description="词条列表（单次上限 1000 条）")
 
 
 class EntryResponse(BaseModel):
