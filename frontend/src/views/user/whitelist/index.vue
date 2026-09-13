@@ -60,6 +60,9 @@
           </el-button>
         </div>
       </el-empty>
+      <div v-if="hasMore" class="load-more">
+        <el-button size="small" :loading="loading" @click="loadMore">加载更多（已加载 {{ list.length }} 条）</el-button>
+      </div>
     </el-card>
 
     <!-- 添加/编辑弹窗 -->
@@ -112,6 +115,9 @@ const loading = ref(false)
 const saving = ref(false)
 const list = ref<WhitelistItem[]>([])
 const keyword = ref('')
+const PAGE_SIZE = 50
+const page = ref(1)
+const hasMore = ref(false)
 
 const showAddDialog = ref(false)
 const showBatchDialog = ref(false)
@@ -121,15 +127,29 @@ const batchText = ref('')
 
 onMounted(() => fetchList())
 
-async function fetchList() {
+async function fetchList(reset = true) {
   loading.value = true
-  try { list.value = await listWhitelistApi({ keyword: keyword.value || undefined, page_size: 200 }) } catch {
+  try {
+    if (reset) page.value = 1
+    const items = await listWhitelistApi({
+      keyword: keyword.value || undefined,
+      page: page.value,
+      page_size: PAGE_SIZE,
+    })
+    list.value = reset ? items : [...list.value, ...items]
+    hasMore.value = items.length === PAGE_SIZE
+  } catch {
     // 拦截器已处理
   }
   loading.value = false
 }
 
-const debouncedFetchList = debounce(fetchList)
+async function loadMore() {
+  page.value += 1
+  await fetchList(false)
+}
+
+const debouncedFetchList = debounce(() => fetchList())
 
 /** 空状态引导：预填常见示例，打开添加弹窗 */
 function fillExample() {
@@ -208,6 +228,10 @@ async function handleBatchImport() {
 .card-header {
   display: flex; align-items: center; justify-content: space-between;
   .card-title { font-size: 18px; font-weight: 600; }
+}
+.load-more {
+  text-align: center;
+  margin-top: 8px;
 }
 
 @media (max-width: 768px) {

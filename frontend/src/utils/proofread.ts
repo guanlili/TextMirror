@@ -66,18 +66,50 @@ export function computeSensitiveDeletion(
   return { target, anchor: wordIdx }
 }
 
-/** HTML 工具函数：仅在文本节点中替换首个匹配，跳过 HTML 标签 */
+/** 仅在文本节点中替换（跳过 HTML 标签），替换该文本节点内的全部出现 */
 export function replaceTextInHtml(html: string, searchPlain: string, replacementHtml: string): string {
   const search = escapeHtml(searchPlain)
-  let replaced = false
   return html.replace(/(<[^>]*>)|([^<]+)/g, (match: string, tag: string, text: string) => {
-    if (tag || replaced) return match
-    if (text && text.includes(search)) {
-      replaced = true
-      return text.replace(search, replacementHtml)
-    }
-    return match
+    if (tag || !text.includes(search)) return match
+    return text.replaceAll(search, replacementHtml)
   })
+}
+
+/** 高亮条目（original + 展示属性 + 全局索引） */
+export interface HighlightEntry {
+  index: number
+  original: string
+  severity: string
+  type: string
+  suggestion: string
+}
+
+/**
+ * 高亮 HTML 构建（两阶段占位替换）：
+ * 1. 原文片段（转义后）先在文本节点内替换为互不冲突的占位符——长原文优先，
+ *    防止短词拆散长词（「权力」先替换会拆散「权力机关」）与 mark 嵌套
+ * 2. 占位符再统一替换为 <mark>（同一问题的多处出现全部高亮）
+ */
+export function highlightIssues(
+  html: string,
+  entries: HighlightEntry[],
+  markHtml: (entry: HighlightEntry, escapedOriginal: string) => string,
+): string {
+  const sorted = [...entries]
+    .filter(e => e.original)
+    .sort((a, b) => b.original.length - a.original.length)
+  const tokens = new Map<string, string>()
+  for (const entry of sorted) {
+    const escaped = escapeHtml(entry.original)
+    const token = `\u0000${entry.index}\u0000`
+    html = replaceTextInHtml(html, entry.original, token)
+    if (!html.includes(token)) continue
+    tokens.set(token, markHtml(entry, escaped))
+  }
+  for (const [token, mark] of tokens) {
+    html = html.replaceAll(token, mark)
+  }
+  return html
 }
 
 /** 触发浏览器下载一个纯文本文件 */
