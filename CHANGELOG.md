@@ -4,6 +4,11 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。项目暂未发布正式版本号，按合并日期里程碑分组。
 
+## [2026-09-13]
+
+### 修复
+- **审计统计时区对齐**：「今日」从 UTC 会话时区切日（每天 8 小时错位）改为 Asia/Shanghai 业务日；仪表盘趋势与开放 API 用量的逐日循环查询合并为单条 SQL；批量放行词补 1000 条上限并去除逐词查重 N+1；审计日志后台任务持强引用防 GC；`uploaded_documents.created_at` 加索引。([#77](https://github.com/guanlili/TextMirror/pull/77))
+
 ## [2026-09-11]
 
 ### 新增
