@@ -254,6 +254,7 @@ import {
   deleteLLMConfigApi, activateLLMConfigApi, testLLMConfigApi,
   testLLMDraftApi, importLLMConfigsApi, exportLLMConfigsApi,
 } from '@/api/admin'
+import { invalidateAvailableModelsCache } from '@/api/polish'
 import { getErrorDetail } from '@/utils/request'
 
 const loading = ref(false)
@@ -341,6 +342,7 @@ async function handleImportSubmit() {
     ElMessage.success(`导入完成：${parts.join('，')}`)
     showImportDialog.value = false
     importPreview.value = null
+    invalidateAvailableModelsCache()
     fetchList()
     fetchProviders()
   } catch (e: unknown) {
@@ -516,6 +518,7 @@ async function handleSubmit() {
       ElMessage.success('配置已添加')
     }
     showFormDialog.value = false
+    invalidateAvailableModelsCache()
     fetchList()
   } catch (e: unknown) {
     ElMessage.error(getErrorDetail(e) || '操作失败')
@@ -528,6 +531,7 @@ async function handleActivate(id: number) {
   try {
     await activateLLMConfigApi(id)
     ElMessage.success('已切换当前使用的模型')
+    invalidateAvailableModelsCache()
     fetchList()
   } catch (e: unknown) {
     ElMessage.error(getErrorDetail(e) || '切换失败')
@@ -563,6 +567,7 @@ async function handleDelete(id: number) {
     await ElMessageBox.confirm('确定删除该模型配置？', '删除确认', { type: 'warning' })
     await deleteLLMConfigApi(id)
     ElMessage.success('已删除')
+    invalidateAvailableModelsCache()
     fetchList()
   } catch (e: unknown) {
     if (e !== 'cancel') ElMessage.error(getErrorDetail(e) || '删除失败')
@@ -573,6 +578,7 @@ async function handleToggleEnabled(item: LLMConfigItem, enabled: boolean) {
   try {
     await updateLLMConfigApi(item.id, { is_enabled: enabled })
     ElMessage.success(enabled ? '已启用' : '已停用')
+    invalidateAvailableModelsCache()
     fetchList()
   } catch (_e) {
     ElMessage.error('操作失败')

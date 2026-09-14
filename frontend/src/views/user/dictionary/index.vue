@@ -54,7 +54,7 @@
       <div class="entry-toolbar">
         <el-button @click="currentDict = null"><el-icon><Back /></el-icon>返回词库列表</el-button>
         <span class="dict-name">{{ currentDict.name }}</span>
-        <el-tag>{{ entries.length }} 条词条</el-tag>
+        <el-tag>{{ currentDict.entry_count }} 条词条</el-tag>
         <div style="margin-left: auto; display: flex; gap: 8px;">
           <el-button type="primary" size="small" @click="showAddEntry = true">
             <el-icon><Plus /></el-icon>添加词条
@@ -88,6 +88,11 @@
           </el-table-column>
         </el-table>
         <el-empty v-if="!entryLoading && entries.length === 0" description="暂无词条" />
+        <div v-if="entryHasMore" class="load-more">
+          <el-button size="small" :loading="entryLoading" @click="loadMoreEntries">
+            加载更多（已加载 {{ entries.length }} / {{ currentDict.entry_count }} 条）
+          </el-button>
+        </div>
       </el-card>
     </div>
 
@@ -173,6 +178,9 @@ function fillExampleDict() {
 const entries = ref<EntryItem[]>([])
 const entryLoading = ref(false)
 const entryKeyword = ref('')
+const ENTRY_PAGE_SIZE = 50
+const entryPage = ref(1)
+const entryHasMore = ref(false)
 const showAddEntry = ref(false)
 const entryForm = ref({ wrong_word: '', correct_word: '', remark: '' })
 const showBatchImport = ref(false)
@@ -238,21 +246,30 @@ async function openDict(row: DictionaryItem) {
   await fetchEntries()
 }
 
-async function fetchEntries() {
+async function fetchEntries(reset = true) {
   if (!currentDict.value) return
   entryLoading.value = true
   try {
-    entries.value = await listEntriesApi(currentDict.value.id, {
+    if (reset) entryPage.value = 1
+    const list = await listEntriesApi(currentDict.value.id, {
       keyword: entryKeyword.value || undefined,
-      page_size: 200,
+      page: entryPage.value,
+      page_size: ENTRY_PAGE_SIZE,
     })
+    entries.value = reset ? list : [...entries.value, ...list]
+    entryHasMore.value = list.length === ENTRY_PAGE_SIZE
   } catch {
     // 拦截器已处理
   }
   entryLoading.value = false
 }
 
-const debouncedFetchEntries = debounce(fetchEntries)
+async function loadMoreEntries() {
+  entryPage.value += 1
+  await fetchEntries(false)
+}
+
+const debouncedFetchEntries = debounce(() => fetchEntries())
 
 async function handleAddEntry() {
   if (!entryForm.value.wrong_word.trim() || !entryForm.value.correct_word.trim()) {
@@ -346,6 +363,11 @@ function handleDownloadTemplate() {
   margin-bottom: 16px; padding: 12px 16px;
   background: var(--surface); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
   .dict-name { font-size: 16px; font-weight: 600; }
+}
+
+.load-more {
+  text-align: center;
+  margin-top: 8px;
 }
 
 @media (max-width: 768px) {

@@ -26,7 +26,13 @@ from app.core.file_security import (
     sanitize_filename,
     verify_download_signature,
 )
-from app.core.rate_limit import check_guest_rate_limit, check_upload_rate_limit, check_user_quota
+from app.core.rate_limit import (
+    charge_user_daily_quota,
+    check_guest_rate_limit,
+    check_upload_rate_limit,
+    refund_user_daily_quota,
+    reject_guest_if_disabled,
+)
 from app.core.security import derive_guest_task_access_token, hash_scoped_idempotency_key
 from app.models.proofread import ProofreadRecord
 from app.models.uploaded_document import UploadedDocument
@@ -185,7 +191,6 @@ async def upload_document(
     """
     # 游客模式关闭时拒绝游客上传
     if current_user is None:
-        from app.core.rate_limit import reject_guest_if_disabled
         from app.services.guest_policy import get_guest_policy
         await reject_guest_if_disabled(http_request)
         if not (await get_guest_policy())["allow_upload"]:
@@ -325,11 +330,12 @@ async def document_proofread(
     # 加载文档（先校验记录存在且未删除，再复用缓存正文）
     file_info = await _load_document_info(request.file_id, db)
 
-    # 游客限流
+    # 游客限流（游客模式关闭时拒绝；登录用户预扣当日配额，任务失败由 worker 退还）
     if current_user is None:
+        await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
     else:
-        await check_user_quota(current_user, db)
+        await charge_user_daily_quota(current_user)
 
     # 归属校验：登录用户的文档仅本人（及管理员）可校对
     await _check_document_ownership(file_info, current_user, db)
@@ -348,6 +354,7 @@ async def document_proofread(
     except RuntimeError as e:
         import traceback
         logger.error(f"文档校对服务异常: {e}\n{traceback.format_exc()}")
+        await refund_user_daily_quota(current_user)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="校对服务暂时不可用，请稍后重试",
@@ -355,6 +362,7 @@ async def document_proofread(
     except Exception as e:
         import traceback
         logger.error(f"文档校对未知错误: {type(e).__name__}: {e}\n{traceback.format_exc()}")
+        await refund_user_daily_quota(current_user)
         raise HTTPException(status_code=500, detail="校对过程发生错误")
 
     # 生成修订文档
@@ -479,10 +487,11 @@ async def document_proofread_async(
                 return _build_async_task_response(existing)
 
     if current_user is None:
+        await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
     else:
-        async with async_session_factory() as db:
-            await check_user_quota(current_user, db)
+        # 预扣当日配额；任务最终失败/取消由 worker 统一退还
+        await charge_user_daily_quota(current_user)
 
     task_uuid = str(uuid.uuid4())
     access_token_hash = None
@@ -537,6 +546,9 @@ async def document_proofread_async(
                 .values(status="FAILURE", error_code="DISPATCH_FAILED", message="任务投递失败，请重试")
             )
             await db.commit()
+        # 投递失败任务未执行：退还预扣额度
+        # （幂等重试会重新排队该任务，为避免双重计费不再重新预扣）
+        await refund_user_daily_quota(current_user)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="任务队列暂时不可用，请稍后重试",

@@ -6,8 +6,17 @@
 
 ## [2026-09-13]
 
+### 性能
+- **审校悬停联动解耦全文重算**：高亮不再依赖悬停索引（此前每次 mouseenter 触发整篇 escape+替换+DOMPurify，长文档必卡），改 watcher 局部切换 mark 类；高亮两阶段占位替换（长原文优先）修复多处漏高亮与 mark 嵌套。([#76](https://github.com/guanlili/TextMirror/pull/76))
+
 ### 修复
+- **重复错词只改首处**：接受/撤销/批量操作统一 replaceAll，同一错词多处出现全部修正（此前 UI 提示完成但正文残留）；重复上报的同原文同建议问题一并核销；SSE 断流提示结果可能不完整；词库/放行词列表 200 条截断改分页加载更多。([#76](https://github.com/guanlili/TextMirror/pull/76))
+- **配额/限流原子化**：登录用户配额从 check-then-write（读 DB 记录数、校对完成才落库，竞态窗口=整个 LLM 调用，并发可全部越过上限）改为 Redis 原子预扣+失败退还；游客限流 INCR 先行（并发不再全部放行）且窗口对齐上海自然日；被拒请求不虚增计数（当日上调配额立即生效）；游客模式关闭后文档校对/异步提交入口补 403 拒绝。([#75](https://github.com/guanlili/TextMirror/pull/75))
 - **审计统计时区对齐**：「今日」从 UTC 会话时区切日（每天 8 小时错位）改为 Asia/Shanghai 业务日；仪表盘趋势与开放 API 用量的逐日循环查询合并为单条 SQL；批量放行词补 1000 条上限并去除逐词查重 N+1；审计日志后台任务持强引用防 GC；`uploaded_documents.created_at` 加索引。([#77](https://github.com/guanlili/TextMirror/pull/77))
+- **半角标点确定性规则**：冒号/分号前邻汉字即报（LLM 稳定漏检项 100% 补位）；生造词评测锚点锁定检出+建议水位。([#74](https://github.com/guanlili/TextMirror/pull/74))
+
+### 新增
+- 模型列表 60s 缓存（文本校对/文档校对/润色三页共用，管理端改配置即失效）。([#76](https://github.com/guanlili/TextMirror/pull/76))
 
 ## [2026-09-11]
 
