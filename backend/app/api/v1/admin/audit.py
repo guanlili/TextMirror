@@ -173,22 +173,25 @@ async def get_audit_stats(
     _user=Depends(require_permission("admin:access")),
 ):
     """
-    获取审计日志统计概览
+    获取审计日志统计概览（「今日」按 Asia/Shanghai 业务日切，与仪表盘/配额同口径——
+    此前 func.date() 按 UTC 会话时区切日，每天有 8 小时错位）
     """
-    from datetime import date
-    today = date.today()
+    from app.api.v1.admin.dashboard import _today_expr, local_today
+
+    today = local_today().isoformat()
+    today_expr = _today_expr(AuditLog.created_at) == today
 
     # 今日操作总数
     today_count_result = await db.execute(
         select(func.count()).select_from(AuditLog)
-        .where(func.date(AuditLog.created_at) == today)
+        .where(today_expr)
     )
     today_count = today_count_result.scalar() or 0
 
     # 今日游客操作数
     guest_count_result = await db.execute(
         select(func.count()).select_from(AuditLog)
-        .where(func.date(AuditLog.created_at) == today, AuditLog.is_guest.is_(True))
+        .where(today_expr, AuditLog.is_guest.is_(True))
     )
     guest_count = guest_count_result.scalar() or 0
 
@@ -199,7 +202,7 @@ async def get_audit_stats(
     # 今日各操作类型分布
     type_dist_result = await db.execute(
         select(AuditLog.action_type, func.count().label("count"))
-        .where(func.date(AuditLog.created_at) == today)
+        .where(today_expr)
         .group_by(AuditLog.action_type)
     )
     type_distribution = {row[0]: row[1] for row in type_dist_result.fetchall()}
@@ -207,7 +210,7 @@ async def get_audit_stats(
     # 今日失败操作数
     failed_count_result = await db.execute(
         select(func.count()).select_from(AuditLog)
-        .where(func.date(AuditLog.created_at) == today, AuditLog.status == "failed")
+        .where(today_expr, AuditLog.status == "failed")
     )
     failed_count = failed_count_result.scalar() or 0
 

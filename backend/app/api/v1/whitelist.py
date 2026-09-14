@@ -123,17 +123,24 @@ async def batch_create_whitelist(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """批量添加放行词"""
+    """批量添加放行词（单次上限 1000 条）"""
+    if len(words) > 1000:
+        raise HTTPException(status_code=400, detail="单次最多添加 1000 个放行词")
+
+    # 一次查回已存在的词（此前逐词一条 SELECT，千条请求 = 千次往返的长事务）
+    existing = set((await db.execute(
+        select(WhitelistWord.word).where(
+            WhitelistWord.user_id == current_user.id,
+            WhitelistWord.word.in_([w.word for w in words]),
+        )
+    )).scalars())
+
     added = 0
     for item in words:
-        exists = await db.execute(
-            select(WhitelistWord).where(
-                WhitelistWord.user_id == current_user.id,
-                WhitelistWord.word == item.word,
-            )
-        )
-        if exists.scalar_one_or_none():
+        # 请求内重复词也只加一条
+        if item.word in existing:
             continue
+        existing.add(item.word)
         db.add(WhitelistWord(
             user_id=current_user.id,
             word=item.word,
