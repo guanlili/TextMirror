@@ -37,10 +37,14 @@ def _run_async(coro):
     return loop.run_until_complete(coro)
 
 
-# 与 app.core.rate_limit._api_key_daily_redis_key 同构（此处为同步上下文，避免引入异步模块依赖）
+# 与 app.core.rate_limit._REFUND_DAILY_LUA 同构（此处为同步上下文，避免引入异步模块依赖）
 _REFUND_LUA = (
     "local c = redis.call('GET', KEYS[1]) "
-    "if c and tonumber(c) > 0 then return redis.call('DECR', KEYS[1]) end "
+    "if c and tonumber(c) > 0 then "
+    "  local refund = tonumber(ARGV[1]) "
+    "  if tonumber(c) < refund then refund = tonumber(c) end "
+    "  return redis.call('DECRBY', KEYS[1], refund) "
+    "end "
     "return 0"
 )
 
@@ -52,28 +56,50 @@ _sync_engine_pid = None
 _sync_engine_lock = threading.Lock()
 
 
+def _get_sync_redis():
+    """同步 Redis 客户端（任务内退款用；调用方负责 close）"""
+    import redis as sync_redis
+
+    return sync_redis.Redis(
+        host=settings.REDIS_HOST,
+        port=settings.REDIS_PORT,
+        username=settings.REDIS_USERNAME or None,
+        password=settings.REDIS_PASSWORD or None,
+        db=settings.REDIS_DB,
+        decode_responses=True,
+        socket_timeout=5,
+    )
+
+
 def _refund_key_daily_quota(api_key_id: int) -> None:
     """同步 Redis 退还密钥日配额计数（失败不抛出，仅记日志）"""
     try:
         from datetime import datetime
         from zoneinfo import ZoneInfo
 
-        import redis as sync_redis
-
-        r = sync_redis.Redis(
-            host=settings.REDIS_HOST,
-            port=settings.REDIS_PORT,
-            username=settings.REDIS_USERNAME or None,
-            password=settings.REDIS_PASSWORD or None,
-            db=settings.REDIS_DB,
-            decode_responses=True,
-            socket_timeout=5,
-        )
+        r = _get_sync_redis()
         today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
-        r.eval(_REFUND_LUA, 1, f"textmirror:apikey_daily:{api_key_id}:{today}")
+        r.eval(_REFUND_LUA, 1, f"textmirror:apikey_daily:{api_key_id}:{today}", 1)
         r.close()
     except Exception as e:
         logger.warning(f"[退款] 密钥日配额退还失败 key_id={api_key_id}: {e}")
+
+
+def _refund_user_daily_quota_sync(user_id: int, weight: int = 1) -> None:
+    """同步 Redis 退还登录用户日配额预扣（失败不抛出，仅记日志）。
+    用户配额按「无结果不消耗」口径：任务最终失败/取消一律退还。"""
+    if weight <= 0:
+        return
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        r = _get_sync_redis()
+        today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
+        r.eval(_REFUND_LUA, 1, f"textmirror:user_daily:{user_id}:{today}", weight)
+        r.close()
+    except Exception as e:
+        logger.warning(f"[退款] 用户日配额退还失败 user_id={user_id}: {e}")
 
 
 def _get_sync_engine():
@@ -146,9 +172,9 @@ class ProofreadDocumentTask(celery_app.Task):
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         """
-        任务最终失败时统一退还密钥日配额。
+        任务最终失败时统一退还额度。
         退款从任务体移到此处，保证多次重试只退一次；
-        用户取消、集成方指定无效配置等不重试场景也不退款。
+        用户取消、集成方指定无效配置等不重试场景也不退款（密钥口径）。
         """
         from sqlalchemy.orm import Session
 
@@ -163,10 +189,14 @@ class ProofreadDocumentTask(celery_app.Task):
                 db_task = session.get(ProofreadTask, db_task_id)
                 if db_task is None:
                     return
-                # 用户取消与集成方指定无效配置不退款；
-                # 服务端未配置活跃模型属于可退款场景。
+                # 用户取消已在任务体内退还用户额度
                 if db_task.status == "CANCELLED":
                     return
+                # 用户配额按「无结果不消耗」口径：最终失败必退（含无效配置——
+                # 该口径与失败不落库的旧行为一致）
+                if db_task.owner_user_id:
+                    _refund_user_daily_quota_sync(db_task.owner_user_id)
+                # 集成方指定无效配置：密钥额度不退（用户错误）
                 if db_task.error_code == "INVALID_CONFIG":
                     return
                 # 若仍处在执行/重试状态，标记为最终失败
@@ -433,6 +463,9 @@ def async_proofread_document(self, db_task_id: int):
 
     except _CancelledError:
         logger.info(f"[Task {celery_task_id}] 任务已被用户取消")
+        # 取消=零产出：退还预扣的用户日配额（密钥额度按既有口径不退）
+        if user_id:
+            _refund_user_daily_quota_sync(user_id)
         return {"cancelled": True, "task_id": celery_task_id}
 
 

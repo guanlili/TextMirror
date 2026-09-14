@@ -17,13 +17,12 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.open_common import ERROR_RESPONSES, _check_user_quota_contract
+from app.api.v1.open_common import ERROR_RESPONSES, _open_billing
 from app.core.database import get_db
 from app.core.dependencies import get_current_user_or_apikey
 from app.core.rate_limit import (
-    charge_api_key_daily,
-    check_api_key_rpm,
     refund_api_key_daily_usage,
+    refund_user_daily_quota,
 )
 from app.models.api_key import ApiKey
 from app.models.llm_config import LLMConfig
@@ -74,13 +73,8 @@ async def open_proofread(
     """
     user, api_key = auth
 
-    # 顺序：RPM → 用户配额（免费检查）→ 密钥日配额计费。
-    # 用户配额不足时直接拒绝，不扣密钥额度
-    if api_key is not None:
-        await check_api_key_rpm(api_key)
-    await _check_user_quota_contract(user, db)
-    if api_key is not None:
-        await charge_api_key_daily(api_key)
+    # 计费顺序：RPM → 用户配额预扣 → 密钥日配额预扣（密钥拒绝时自动退还用户预扣）
+    await _open_billing(user, api_key)
 
     timer = AuditTimer()
     timer.start()
@@ -106,12 +100,15 @@ async def open_proofread(
             status="failed", error_message=str(e), duration_ms=timer.elapsed_ms(),
         )
         if request.config_id is not None:
-            # 用户指定了无效 config_id：用户错误，不退还配额
+            # 用户指定了无效 config_id：用户错误，不退还密钥额度
+            # （用户配额口径是「无结果不消耗」，预扣照退）
+            await refund_user_daily_quota(user)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={"code": "INVALID_CONFIG", "message": str(e)},
             )
-        # 服务端故障（如未配置活跃模型）：退还密钥日配额
+        # 服务端故障（如未配置活跃模型）：退还密钥日配额与用户配额
+        await refund_user_daily_quota(user)
         if api_key is not None:
             await refund_api_key_daily_usage(api_key)
         raise HTTPException(
@@ -126,7 +123,8 @@ async def open_proofread(
             input_text=request.text, extra_params=audit_extra,
             status="failed", error_message=str(e), duration_ms=timer.elapsed_ms(),
         )
-        # 服务端错误：退还密钥日配额
+        # 服务端错误：退还密钥日配额与用户配额
+        await refund_user_daily_quota(user)
         if api_key is not None:
             await refund_api_key_daily_usage(api_key)
         raise HTTPException(
@@ -257,14 +255,10 @@ async def open_proofread_compare(
             },
         )
 
-    n = len(request.config_ids)
-    # 顺序与文本端点一致：RPM → 用户配额预检（免费）→ 密钥计费（按模型数）
-    if api_key is not None:
-        await check_api_key_rpm(api_key)
-    await _check_user_quota_contract(user, db, n)
-    # 对比一次消耗 n 倍额度：密钥日配额按模型数计
-    if api_key is not None:
-        await charge_api_key_daily(api_key, n)
+    # 对比一次消耗 n 倍额度（n=有效模型数；重复/无效 config_id 不重复计量）
+    n = len(configs)
+    # 计费顺序与文本端点一致：RPM → 用户配额预扣 → 密钥日配额预扣
+    await _open_billing(user, api_key, n)
 
     timer = AuditTimer()
     timer.start()
@@ -273,20 +267,28 @@ async def open_proofread_compare(
         audit_extra["api_key_id"] = api_key.id
 
     from app.services.model_compare import run_proofread_compare
-    raw_items, consensus, only_in = await run_proofread_compare(
-        text=request.text,
-        domain=request.domain,
-        config_ids=request.config_ids,
-        configs=configs,
-        user_id=user.id,
-        log_tag="OpenAPI对比",
-    )
+    try:
+        raw_items, consensus, only_in = await run_proofread_compare(
+            text=request.text,
+            domain=request.domain,
+            config_ids=request.config_ids,
+            configs=configs,
+            user_id=user.id,
+            log_tag="OpenAPI对比",
+        )
+    except Exception:
+        # 整体异常（模型加载等前置失败）：全额退还两侧预扣
+        await refund_user_daily_quota(user, n)
+        if api_key is not None:
+            await refund_api_key_daily_usage(api_key, n)
+        raise
     items = [OpenCompareModelResult(**i) for i in raw_items]
 
-    # 部分模型失败：失败模型退还密钥日配额（按成功数结算，失败的不计费）
-    if api_key is not None:
-        failed = sum(1 for i in items if not i.success)
-        if failed > 0:
+    # 部分模型失败：失败模型退还两侧额度（按成功数结算，失败的不计费）
+    failed = sum(1 for i in items if not i.success)
+    if failed > 0:
+        await refund_user_daily_quota(user, failed)
+        if api_key is not None:
             await refund_api_key_daily_usage(api_key, failed)
 
     # 落一条带权重的对比记录：用户配额按 SUM(quota_weight) 计量（此前只预检不落库，

@@ -19,9 +19,12 @@ from app.utils.ip import get_client_ip
 
 async def check_guest_rate_limit(request: Request, daily_limit: int | None = None):
     """
-    游客限流检查
-    对未携带 Token 的请求进行 IP 维度的每日限流
+    游客限流检查（IP 维度，Asia/Shanghai 自然日窗口，与登录用户/密钥配额同口径）
     每日限制次数取后台「策略管理」配置，未配置时回落到 settings.GUEST_DAILY_LIMIT
+
+    计数器 key 带当日日期后缀，先 INCR 后判断（并发请求不会同时越过上限）；
+    被拒请求随即 DECR 抵消，计数器始终只记实际放行的次数。
+    Redis 异常不阻塞请求（与用户配额、密钥限流一致的降级策略）。
 
     注意：本函数只在请求未通过认证（get_current_user_optional 返回 None）时调用，
     不再依据 Authorization 头是否存在放行——否则伪造任意 Bearer 头即可绕过限流。
@@ -32,33 +35,35 @@ async def check_guest_rate_limit(request: Request, daily_limit: int | None = Non
     if daily_limit is None:
         daily_limit = (await get_guest_policy())["daily_limit"]
 
-    # Redis 计数器 key
-    redis_key = f"textmirror:guest_limit:{client_ip}"
+    redis_key = _daily_key("guest", f"ip:{client_ip}")
 
     try:
         redis = get_redis()
-        current_count = await redis.get(redis_key)
+        count = await redis.incr(redis_key)
+        if count == 1:
+            await redis.expire(redis_key, 172800)
 
-        if current_count is not None and int(current_count) >= daily_limit:
-            logger.warning(f"游客限流触发: IP={client_ip}, count={current_count}")
+        if count > daily_limit:
+            # 抵消被拒请求的自增：计数器只反映实际放行次数，
+            # 管理员当日上调限额后可立即生效
+            await redis.decr(redis_key)
+            logger.warning(f"游客限流触发: IP={client_ip}, count={count}")
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=f"游客每日最多使用 {daily_limit} 次，请登录后继续使用",
             )
-
-        # 计数器自增
-        pipe = redis.pipeline()
-        pipe.incr(redis_key)
-        # 设置24小时过期（首次设置）
-        if current_count is None:
-            pipe.expire(redis_key, 86400)
-        await pipe.execute()
 
     except HTTPException:
         raise
     except Exception as e:
         # Redis 异常不阻塞请求，仅记录日志
         logger.error(f"游客限流 Redis 异常: {e}")
+
+
+def _daily_key(prefix: str, subject: str) -> str:
+    """日计数 Redis key（业务时区 Asia/Shanghai 自然日，次日自动换 key）"""
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
+    return f"textmirror:{prefix}:{subject}:{today}"
 
 
 def _shanghai_today_range() -> tuple:
@@ -82,47 +87,72 @@ async def _count_today_records(user_id: int, db: AsyncSession) -> int:
     return int(result.scalar() or 0)
 
 
-async def check_user_quota(user, db: AsyncSession) -> None:
+async def charge_user_daily_quota(user, weight: int = 1) -> None:
     """
-    登录用户每日使用配额检查
-    统计当日（业务时区 Asia/Shanghai）ProofreadRecord 记录数（text/document/polish）
-    与 user.daily_quota 比较，daily_quota 为 None 表示不限。
-    与仪表盘「今日校对次数」同一口径。
+    登录用户每日使用配额：原子预扣（先 INCRBY 后判断，Asia/Shanghai 自然日）。
+
+    旧实现是 check-then-write——检查读 DB 当日记录数，而 ProofreadRecord 要等
+    校对完成才落库，竞态窗口=整个 LLM 调用（秒级），并发请求可全部通过预检。
+    现改为 Redis 预扣计数（与密钥日配额同一模式），DB 记录仍是展示口径
+    （仪表盘/历史），两侧一致的前提是失败路径调用 refund_user_daily_quota 退还
+    （用户没拿到结果不消耗额度，与「失败不落库=不计消耗」的旧口径等价）。
+
+    daily_quota 为 None 表示不限额（也不计数）。Redis 异常时放行本次
+    （与密钥限流一致的降级策略，弱保证但不阻断服务）。
     """
-    if user is None or user.daily_quota is None:
+    if user is None or user.daily_quota is None or weight <= 0:
         return
+    try:
+        redis = get_redis()
+        key = _daily_key("user_daily", str(user.id))
+        count = await redis.incrby(key, weight)
+        if await redis.ttl(key) < 0:
+            await redis.expire(key, 172800)
+        if count > user.daily_quota:
+            # 被拒请求不消耗额度：抵消本次自增（刚 INCRBY 的计数必然归本次所有，
+            # 直接 DECRBY 即可；退还失败不影响拒绝）。管理员当日上调配额后立即生效
+            try:
+                await redis.decrby(key, weight)
+            except Exception as e:
+                logger.warning(f"用户配额被拒请求退还失败 user_id={user.id}: {e}")
+            used = count - weight
+            logger.warning(
+                f"用户配额触发: user_id={user.id}, used={used}, "
+                f"need={weight}, quota={user.daily_quota}"
+            )
+            detail = (
+                f"已达今日使用配额（{user.daily_quota} 次/天），请联系管理员调整"
+                if weight == 1
+                else f"今日剩余额度 {max(user.daily_quota - used, 0)} 次，本次需 {weight} 次（每个模型计一次），请减少模型数量或明天再试"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=detail,
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"用户配额 Redis 异常（本次放行，配额暂不生效）: {e}")
 
-    used = await _count_today_records(user.id, db)
-    if used >= user.daily_quota:
-        logger.warning(f"用户配额触发: user_id={user.id}, used={used}, quota={user.daily_quota}")
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"已达今日使用配额（{user.daily_quota} 次/天），请联系管理员调整",
-        )
 
-
-async def check_user_quota_n_times(user, db: AsyncSession, n: int) -> None:
+async def refund_user_daily_quota(user, weight: int = 1) -> None:
     """
-    多模型对比场景的配额预检：一次请求消耗 n 倍额度（n 个模型并发调用）。
-    剩余额度不足以覆盖 n 次时拒绝，避免对比请求半途超额。
+    退还用户日配额预扣（服务端失败 / 对比场景部分模型失败）：
+    用户没拿到结果的部分不消耗当日额度。
+    未配置配额（daily_quota=None）的用户从未预扣，键不存在时 Lua 直接返回 0。
     """
-    if user is None or user.daily_quota is None or n <= 1:
-        return check_user_quota(user, db) if n > 0 else None
-
-    used = await _count_today_records(user.id, db)
-    remaining = user.daily_quota - used
-    if remaining < n:
-        logger.warning(f"用户配额不足（对比模式）: user_id={user.id}, used={used}, quota={user.daily_quota}, need={n}")
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"今日剩余额度 {max(remaining, 0)} 次，多模型对比需 {n} 次（每个模型计一次），请减少模型数量或明天再试",
-        )
+    if user is None or weight <= 0:
+        return
+    try:
+        redis = get_redis()
+        await redis.eval(_REFUND_DAILY_LUA, 1, _daily_key("user_daily", str(user.id)), weight)
+    except Exception as e:
+        logger.error(f"退还用户日配额 Redis 异常: {e}")
 
 
 def _api_key_daily_redis_key(api_key) -> str:
     """密钥日计数 Redis key（业务时区 Asia/Shanghai 自然日，与用户配额口径一致）"""
-    today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
-    return f"textmirror:apikey_daily:{api_key.id}:{today}"
+    return _daily_key("apikey_daily", str(api_key.id))
 
 
 async def check_upload_rate_limit(request: Request, user=None) -> None:
@@ -194,8 +224,14 @@ async def charge_api_key_daily(api_key, weight: int = 1) -> None:
         if await redis.ttl(daily_key) < 0:
             await redis.expire(daily_key, 172800)
         if api_key.daily_quota is not None and daily_count > api_key.daily_quota:
+            # 被拒请求不消耗额度：抵消本次自增（退还失败不影响拒绝）
+            try:
+                await redis.decrby(daily_key, weight)
+            except Exception as e:
+                logger.warning(f"密钥配额被拒请求退还失败 key_id={api_key.id}: {e}")
             logger.warning(
-                f"密钥日配额触发: key_id={api_key.id}, used={daily_count}, quota={api_key.daily_quota}"
+                f"密钥日配额触发: key_id={api_key.id}, used={daily_count - weight}, "
+                f"need={weight}, quota={api_key.daily_quota}"
             )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -242,7 +278,7 @@ _REFUND_DAILY_LUA = (
 async def refund_api_key_daily_usage(api_key, weight: int = 1) -> None:
     """
     退还密钥日配额计数（服务端失败 / 对比场景部分模型失败）：
-    用户没拿到结果的部分不消耗当日额度（用户配额 ProofreadRecord 只记成功，无需处理）。
+    用户没拿到结果的部分不消耗当日额度（用户配额预扣的退还走 refund_user_daily_quota）。
     """
     if weight <= 0:
         return
