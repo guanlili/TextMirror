@@ -46,7 +46,7 @@ celery_app.conf.task_eager_propagates = True
 
 @pytest.fixture(autouse=True)
 def _patch_refund_for_fakeredis(monkeypatch):
-    """fakeredis 不支持 Lua EVAL，退款改用原子性要求较低的 DECRBY。"""
+    """fakeredis 不支持 Lua EVAL，退款改用原子性要求较低的 DECRBY（下限钳 0）。"""
     from app.core import rate_limit as rate_limit_module
     from app.core.redis import get_redis
 
@@ -55,17 +55,41 @@ def _patch_refund_for_fakeredis(monkeypatch):
             return
         try:
             redis = get_redis()
-            await redis.decrby(rate_limit_module._api_key_daily_redis_key(api_key_obj), weight)
+            new = await redis.decrby(rate_limit_module._api_key_daily_redis_key(api_key_obj), weight)
+            if new < 0:
+                await redis.set(rate_limit_module._api_key_daily_redis_key(api_key_obj), 0)
         except Exception as e:
             rate_limit_module.logger.error(f"退还密钥日配额 Redis 异常: {e}")
 
-    monkeypatch.setattr(rate_limit_module, "refund_api_key_daily_usage", _async_refund)
-    # open/open_polish 在模块导入时直接绑定 refund_api_key_daily_usage，必须同时 patch 各命名空间
-    from app.api.v1 import open as open_module
-    from app.api.v1 import open_polish as open_polish_module
+    async def _async_refund_user(user_obj, weight: int = 1) -> None:
+        if weight <= 0 or user_obj is None:
+            return
+        try:
+            redis = get_redis()
+            key = rate_limit_module._daily_key("user_daily", str(user_obj.id))
+            new = await redis.decrby(key, weight)
+            if new < 0:
+                await redis.set(key, 0)
+        except Exception as e:
+            rate_limit_module.logger.error(f"退还用户日配额 Redis 异常: {e}")
 
-    monkeypatch.setattr(open_module, "refund_api_key_daily_usage", _async_refund)
-    monkeypatch.setattr(open_polish_module, "refund_api_key_daily_usage", _async_refund)
+    monkeypatch.setattr(rate_limit_module, "refund_api_key_daily_usage", _async_refund)
+    monkeypatch.setattr(rate_limit_module, "refund_user_daily_quota", _async_refund_user)
+    # 多数 API 模块用 `from ... import refund_...` 直接绑定函数名，必须同时 patch 各命名空间
+    from app.api.v1 import document as document_module
+    from app.api.v1 import open as open_module
+    from app.api.v1 import open_common as open_common_module
+    from app.api.v1 import open_documents as open_documents_module
+    from app.api.v1 import open_polish as open_polish_module
+    from app.api.v1 import polish as polish_module
+    from app.api.v1 import proofread as proofread_module
+
+    for mod in (
+        open_module, open_polish_module, open_documents_module, open_common_module,
+        proofread_module, polish_module, document_module,
+    ):
+        monkeypatch.setattr(mod, "refund_api_key_daily_usage", _async_refund, raising=False)
+        monkeypatch.setattr(mod, "refund_user_daily_quota", _async_refund_user, raising=False)
 
 
 @pytest.fixture(autouse=True)

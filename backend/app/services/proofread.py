@@ -527,14 +527,23 @@ def scan_words_deterministic(text: str,
 def merge_issues(llm_issues: List[Dict[str, Any]],
                  scanned_issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    合并确定性扫描结果与 LLM 结果：按 (original, type) 去重，扫描结果优先保底
-    （LLM 对同一问题的解释更自然，优先保留 LLM 版本，扫描版补位）
+    合并确定性扫描结果与 LLM 结果：LLM 对同一问题的解释更自然，优先保留
+    LLM 版本，扫描版补位。去重两级：
+    1. (original, type) 精确相等
+    2. 同 type 且扫描版 original 被 LLM 版本包含——LLM 常带上下文引用
+       （报「三个环节:」而规则层报裸「:」），包含即同一问题，不重复补位
     """
     llm_keys = {(i.get("original"), i.get("type")) for i in llm_issues}
     merged = list(llm_issues)
     for s in scanned_issues:
-        if (s["original"], s["type"]) not in llm_keys:
-            merged.append(s)
+        if (s["original"], s["type"]) in llm_keys:
+            continue
+        if s["original"] and any(
+            s["original"] in (i.get("original") or "") and i.get("type") == s["type"]
+            for i in llm_issues
+        ):
+            continue
+        merged.append(s)
     # 严重度排序：error → warning → info
     order = {"error": 0, "warning": 1, "info": 2}
     merged.sort(key=lambda i: order.get(i.get("severity", "warning"), 1))

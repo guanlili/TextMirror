@@ -11,7 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user_optional
-from app.core.rate_limit import check_guest_rate_limit, check_user_quota, reject_guest_if_disabled
+from app.core.rate_limit import (
+    charge_user_daily_quota,
+    check_guest_rate_limit,
+    refund_user_daily_quota,
+    reject_guest_if_disabled,
+)
 from app.models.proofread import ProofreadRecord
 from app.schemas.proofread import (
     ProofreadIssue,
@@ -49,7 +54,7 @@ async def text_proofread(
             )
         await check_guest_rate_limit(http_request, daily_limit=guest_policy["daily_limit"])
     else:
-        await check_user_quota(current_user, db)
+        await charge_user_daily_quota(current_user)
 
     timer = AuditTimer()
     timer.start()
@@ -72,6 +77,8 @@ async def text_proofread(
             input_text=request.text, extra_params=audit_extra,
             status="failed", error_message=str(e), duration_ms=timer.elapsed_ms(),
         )
+        # 没拿到结果不消耗额度
+        await refund_user_daily_quota(current_user)
         # 指定的模型配置无效：明确告知（通常是配置被删除/停用）
         detail = str(e) if request.config_id is not None else "校对服务暂时不可用，请稍后重试"
         raise HTTPException(
@@ -86,6 +93,7 @@ async def text_proofread(
             input_text=request.text, extra_params=audit_extra,
             status="failed", error_message=str(e), duration_ms=timer.elapsed_ms(),
         )
+        await refund_user_daily_quota(current_user)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="校对过程发生错误，请稍后重试",
@@ -189,10 +197,6 @@ async def text_proofread_compare(
     if current_user is None:
         await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
-    else:
-        # 对比模式并发调用 N 个模型，消耗 N 倍额度：按模型数预检配额
-        from app.core.rate_limit import check_user_quota_n_times
-        await check_user_quota_n_times(current_user, db, len(request.config_ids))
 
     # 加载模型配置（仅启用的可参与对比）
     from sqlalchemy import select as _select
@@ -208,18 +212,32 @@ async def text_proofread_compare(
     if len(configs) < 2:
         raise HTTPException(status_code=400, detail="所选模型配置不足 2 个有效项（已停用的配置不可用）")
 
+    # 对比一次消耗 N 倍额度（N=有效模型数，重复/无效 config_id 不重复计量）：原子预扣
+    if current_user is not None:
+        await charge_user_daily_quota(current_user, len(configs))
+
     timer = AuditTimer()
     timer.start()
 
     from app.services.model_compare import run_proofread_compare
-    raw_items, consensus, only_in = await run_proofread_compare(
-        text=request.text,
-        domain=request.domain,
-        config_ids=request.config_ids,
-        configs=configs,
-        user_id=current_user.id if current_user else None,
-    )
+    try:
+        raw_items, consensus, only_in = await run_proofread_compare(
+            text=request.text,
+            domain=request.domain,
+            config_ids=request.config_ids,
+            configs=configs,
+            user_id=current_user.id if current_user else None,
+        )
+    except Exception:
+        # 整体异常（模型加载等前置失败）：全额退还预扣
+        await refund_user_daily_quota(current_user, len(configs))
+        raise
     items = [ModelProofreadResult(**i) for i in raw_items]
+
+    # 失败模型不消耗额度（与密钥日配额按成功数结算同口径）
+    failed = sum(1 for i in items if not i.success)
+    if failed > 0:
+        await refund_user_daily_quota(current_user, failed)
 
     # 落带权重的对比记录：配额从「只预检不消耗」改为真正计量（与开放 API 同口径）。
     # 游客不落（游客配额走 IP 限流）；全部失败不落（零消耗）；
