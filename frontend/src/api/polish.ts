@@ -89,6 +89,33 @@ export function getAvailableModelsApi(): Promise<{ models: AvailableModel[] }> {
   return request.get('/polish/models')
 }
 
+// 模型列表缓存：三个页面（文本校对/文档校对/润色）共用，避免每次进页重拉；
+// 管理端改配置后调用 invalidate 立即失效
+let modelsCache: { data: { models: AvailableModel[] }; at: number } | null = null
+let modelsInflight: Promise<{ models: AvailableModel[] }> | null = null
+const MODELS_CACHE_TTL_MS = 60_000
+
+/** 获取可用模型列表（60s 缓存 + 并发去重） */
+export function getAvailableModelsCached(): Promise<{ models: AvailableModel[] }> {
+  if (modelsCache && Date.now() - modelsCache.at < MODELS_CACHE_TTL_MS) {
+    return Promise.resolve(modelsCache.data)
+  }
+  if (!modelsInflight) {
+    modelsInflight = getAvailableModelsApi()
+      .then(data => {
+        modelsCache = { data, at: Date.now() }
+        return data
+      })
+      .finally(() => { modelsInflight = null })
+  }
+  return modelsInflight
+}
+
+/** 失效模型列表缓存（管理端增删改模型配置后调用） */
+export function invalidateAvailableModelsCache(): void {
+  modelsCache = null
+}
+
 /** 多模型对比：单模型结果 */
 export interface ModelCompareItem {
   config_id: number

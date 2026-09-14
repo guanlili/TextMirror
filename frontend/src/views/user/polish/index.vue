@@ -267,7 +267,7 @@ import { sanitizeMarkdownHtml } from '@/utils/sanitize'
 import { htmlToPlainText, copyRichTextBySelection, compactRichHtml } from '@/utils/clipboard'
 import {
   getPolishStylesApi,
-  getAvailableModelsApi,
+  getAvailableModelsCached,
   textPolishApi,
   textPolishStreamApi,
   polishCompareApi,
@@ -384,7 +384,7 @@ onMounted(async () => {
 
   // 多模型对比：加载已启用模型列表
   try {
-    const res = await getAvailableModelsApi()
+    const res = await getAvailableModelsCached()
     availableModels.value = res.models
   } catch { /* 模型列表加载失败时对比功能不可用 */ }
 
@@ -403,6 +403,7 @@ async function runCompareStream(text: string, style: string, configIds: number[]
   const buffers: Record<number, string> = {}
   let gotAny = false
   let failed = false
+  let gotEnd = false
 
   const { promise, abort } = polishCompareStreamApi({ text, style, config_ids: configIds }, (evt) => {
     if (evt.event === 'meta' && evt.models) {
@@ -415,6 +416,10 @@ async function runCompareStream(text: string, style: string, configIds: number[]
         success: true,
         elapsed_ms: 0,
       }))
+      return
+    }
+    if (evt.event === 'end') {
+      gotEnd = true
       return
     }
     const cid = evt.config_id
@@ -440,11 +445,16 @@ async function runCompareStream(text: string, style: string, configIds: number[]
 
   try {
     await promise
+    if (gotAny && !gotEnd) {
+      ElMessage.warning('连接中断，部分模型结果可能不完整')
+    }
   } catch (e: unknown) {
     // 卸载中断向上抛出，调用方吞掉并跳过同步回退
     if ((e as Error)?.name === 'AbortError') throw e
     if (!gotAny) {
       failed = true
+    } else {
+      ElMessage.warning('连接中断，部分模型结果可能不完整')
     }
   } finally {
     compareAbort = null
@@ -493,12 +503,17 @@ async function runPolishStream(text: string, style: string): Promise<boolean> {
   const doneLevels = new Set<string>()
   let gotAny = false
   let failed = false
+  let gotEnd = false
 
   streaming.value = true
   streamAborted.value = false
   const { promise, abort } = textPolishStreamApi({ text, style }, (evt) => {
     if (evt.event === 'meta') {
       currentStyleName.value = evt.style_name || currentStyleName.value
+      return
+    }
+    if (evt.event === 'end') {
+      gotEnd = true
       return
     }
     const lv = evt.level || ''
@@ -532,6 +547,10 @@ async function runPolishStream(text: string, style: string): Promise<boolean> {
 
   try {
     await promise
+    // 流正常关闭但没收到 end 事件 = 连接被中途截断，已收到的内容可能不完整
+    if (gotAny && !gotEnd && !streamAborted.value) {
+      ElMessage.warning('连接中断，结果可能不完整，建议重新生成')
+    }
   } catch (e: unknown) {
     if ((e as Error)?.name === 'AbortError') {
       streamAborted.value = true
@@ -540,6 +559,8 @@ async function runPolishStream(text: string, style: string): Promise<boolean> {
       if (!gotAny) {
         failed = true
         ElMessage.error((e as Error)?.message || '润色失败，请稍后重试')
+      } else {
+        ElMessage.warning('连接中断，结果可能不完整，建议重新生成')
       }
     }
   } finally {

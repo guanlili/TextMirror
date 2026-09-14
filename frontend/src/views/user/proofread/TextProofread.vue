@@ -343,7 +343,7 @@
               <span class="text-count">{{ currentText.length }} 字</span>
             </div>
           </template>
-          <div class="original-text" v-html="highlightedText"></div>
+          <div ref="originalTextRef" class="original-text" v-html="highlightedText"></div>
         </el-card>
 
         <!-- 右栏：问题列表 -->
@@ -449,19 +449,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { sanitizeDocumentHtml } from '@/utils/sanitize'
 import { textProofreadApi, proofreadCompareApi, type ProofreadCompareResponse } from '@/api/proofread'
-import { getAvailableModelsApi, type AvailableModel } from '@/api/polish'
+import { getAvailableModelsCached, type AvailableModel } from '@/api/polish'
 import {
   escapeHtml,
-  severityHighlight,
   severityColor,
   severityLabel,
   typeLabel,
   computeSensitiveDeletion,
   downloadTextFile,
+  highlightIssues,
   type CompareIssue,
 } from '@/utils/proofread'
 import { useProofreadReview } from '@/composables/useProofreadReview'
@@ -498,7 +498,7 @@ onMounted(async () => {
     sessionStorage.removeItem('tm_rerun_text')
   }
   try {
-    const res = await getAvailableModelsApi()
+    const res = await getAvailableModelsCached()
     modelOptions.value = res.models
     const active = res.models.find(m => m.is_active)
     selectedModelId.value = active ? active.id : (res.models[0]?.id ?? null)
@@ -614,13 +614,15 @@ async function handleAcceptByStrategy(level: 'consensus' | 'high' | 'all') {
       '一键应用',
       { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
     )
-    for (const item of targets) {
+    // 长原文优先应用：避免短词先替换拆散长词
+    const ordered = [...targets].sort((a, b) => b.issue.original.length - a.issue.original.length)
+    for (const item of ordered) {
       if (item.issue.suggestion) {
-        currentText.value = currentText.value.replace(item.issue.original, item.issue.suggestion)
+        currentText.value = currentText.value.replaceAll(item.issue.original, item.issue.suggestion)
       } else {
         const del = computeSensitiveDeletion(currentText.value, item.issue.original)
         if (!del) continue
-        currentText.value = currentText.value.replace(del.target, '')
+        currentText.value = currentText.value.replaceAll(del.target, '')
         item.issue._deletedText = del.target
         item.issue._undoAnchor = del.anchor
       }
@@ -639,10 +641,10 @@ function comparePendingCountOf(r: { issues: CompareIssue[] }): number {
   return r.issues.filter(i => !i._accepted && !i._ignored).length
 }
 
-/** 对比视图：接受单条修改（同步应用到全文预览；共识问题在其他模型页同步状态） */
+/** 对比视图：接受单条修改（replaceAll：同一错词多处出现全部修正；同步应用到全文预览） */
 function acceptCompareIssue(issue: CompareIssue) {
   if (issue.original && issue.suggestion) {
-    currentText.value = currentText.value.replace(issue.original, issue.suggestion)
+    currentText.value = currentText.value.replaceAll(issue.original, issue.suggestion)
   }
   issue._accepted = true
   syncCompareIssueState(issue)
@@ -660,7 +662,7 @@ function ignoreCompareIssue(issue: CompareIssue) {
 function deleteCompareIssue(issue: CompareIssue) {
   const del = computeSensitiveDeletion(currentText.value, issue.original)
   if (!del) return
-  currentText.value = currentText.value.replace(del.target, '')
+  currentText.value = currentText.value.replaceAll(del.target, '')
   issue._accepted = true
   issue._deletedText = del.target
   issue._undoAnchor = del.anchor
@@ -685,7 +687,7 @@ function syncCompareIssueState(source: CompareIssue) {
 /** 对比视图：撤销单条 */
 function undoCompareIssue(issue: CompareIssue) {
   if (issue._accepted && issue.original && issue.suggestion) {
-    currentText.value = currentText.value.replace(issue.suggestion, issue.original)
+    currentText.value = currentText.value.replaceAll(issue.suggestion, issue.original)
   } else if (issue._accepted && issue._deletedText !== undefined) {
     const anchor = issue._undoAnchor ?? 0
     const pos = Math.min(anchor, currentText.value.length)
@@ -711,13 +713,15 @@ async function handleCompareAcceptAll() {
       '一键修改',
       { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
     )
-    for (const issue of pending) {
+    // 长原文优先应用：避免短词先替换拆散长词
+    const ordered = [...pending].sort((a, b) => b.original.length - a.original.length)
+    for (const issue of ordered) {
       if (issue.suggestion) {
-        currentText.value = currentText.value.replace(issue.original, issue.suggestion)
+        currentText.value = currentText.value.replaceAll(issue.original, issue.suggestion)
       } else {
         const del = computeSensitiveDeletion(currentText.value, issue.original)
         if (!del) continue
-        currentText.value = currentText.value.replace(del.target, '')
+        currentText.value = currentText.value.replaceAll(del.target, '')
         issue._deletedText = del.target
         issue._undoAnchor = del.anchor
       }
@@ -739,23 +743,35 @@ const domainLabel = computed(() => {
   return map[domain.value] || '通用'
 })
 
-// 高亮原文（支持鼠标悬停联动）
+// 高亮原文：只依赖 issues/currentText（悬停样式由 watcher 局部切换 mark 的 class，
+// 不再整篇重算 escape+替换+DOMPurify——长文档下每次 mouseenter 全文重算必卡）
+const originalTextRef = ref<HTMLElement>()
 const highlightedText = computed(() => {
-  let text = escapeHtml(currentText.value)
-  // 按原文片段进行高亮标记
-  const activeIssues = issues.value.filter(i => !i._accepted && !i._ignored)
-  for (const issue of activeIssues) {
-    if (!issue.original) continue
-    const globalIdx = issues.value.indexOf(issue)
-    const escaped = escapeHtml(issue.original)
-    if (!text.includes(escaped)) continue
-    const isHover = activeIssueIndex.value === globalIdx
-    const color = isHover ? '#fef3c7' : severityHighlight(issue.severity)
-    const border = isHover ? 'box-shadow:0 0 0 2px #f59e0b;font-weight:600;' : ''
-    const mark = `<mark data-issue-idx="${globalIdx}" style="background:${color};padding:2px 3px;border-radius:3px;cursor:pointer;transition:all .2s;${border}" title="[${typeLabel(issue.type)}] ${escapeHtml(issue.suggestion)}">${escaped}</mark>`
-    text = text.replace(escaped, mark)
+  const entries = issues.value
+    .map((issue, index) => ({ index, issue }))
+    .filter(({ issue }) => !issue._accepted && !issue._ignored && issue.original)
+    .map(({ index, issue }) => ({
+      index,
+      original: issue.original,
+      severity: issue.severity,
+      type: issue.type,
+      suggestion: issue.suggestion,
+    }))
+  const marked = highlightIssues(escapeHtml(currentText.value), entries, (e, escaped) => (
+    `<mark data-issue-idx="${e.index}" class="hl-mark hl-${e.severity}" `
+    + `title="[${typeLabel(e.type)}] ${escapeHtml(e.suggestion)}">${escaped}</mark>`
+  ))
+  return sanitizeDocumentHtml(marked.replace(/\n/g, '<br/>'))
+})
+
+// 悬停联动：切换对应 mark 的 is-hover 类（O(1) DOM 操作；同一问题多处出现全部高亮）
+watch(activeIssueIndex, (idx) => {
+  const root = originalTextRef.value
+  if (!root) return
+  root.querySelectorAll('mark.is-hover').forEach(el => el.classList.remove('is-hover'))
+  if (idx >= 0) {
+    root.querySelectorAll(`mark[data-issue-idx="${idx}"]`).forEach(el => el.classList.add('is-hover'))
   }
-  return sanitizeDocumentHtml(text.replace(/\n/g, '<br/>'))
 })
 
 // 开始校对
@@ -1009,6 +1025,23 @@ function goBack() {
   color: var(--color-text);
   white-space: pre-wrap;
   word-break: break-all;
+
+  :deep(mark.hl-mark) {
+    padding: 2px 3px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  :deep(mark.hl-error) { background: #fee2e2; }
+  :deep(mark.hl-warning) { background: #fef3c7; }
+  :deep(mark.hl-info) { background: #dbeafe; }
+
+  :deep(mark.is-hover) {
+    background: #fde68a;
+    box-shadow: 0 0 0 2px #f59e0b;
+    font-weight: 600;
+  }
 }
 
 .issues-header {

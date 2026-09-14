@@ -136,7 +136,7 @@
               <span class="text-count">{{ originalText.length }} 字</span>
             </div>
           </template>
-          <div class="original-text" v-html="highlightedText"></div>
+          <div ref="originalTextRef" class="original-text" v-html="highlightedText"></div>
         </el-card>
 
         <!-- 右栏：问题列表（逐条审改） -->
@@ -241,7 +241,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, type UploadFile } from 'element-plus'
 import { sanitizeDocumentHtml } from '@/utils/sanitize'
 import {
@@ -249,15 +249,15 @@ import {
   type DocumentProofreadResponse,
 } from '@/api/document'
 import { asyncDocumentProofreadApi, streamTaskStatus, cancelTaskApi, type TaskStatus } from '@/api/tasks'
-import { getAvailableModelsApi, type AvailableModel } from '@/api/polish'
+import { getAvailableModelsCached, type AvailableModel } from '@/api/polish'
 import {
   escapeHtml,
-  severityHighlight,
   severityColor,
   severityLabel,
   typeLabel,
   replaceTextInHtml,
   downloadTextFile,
+  highlightIssues,
   type CompareIssue,
 } from '@/utils/proofread'
 import { useProofreadReview } from '@/composables/useProofreadReview'
@@ -330,7 +330,7 @@ const {
   },
   onDeleteWord: (target) => {
     if (currentHtml.value) {
-      currentHtml.value = currentHtml.value.replace(target, '')
+      currentHtml.value = currentHtml.value.replaceAll(target, '')
     }
   },
   onUndoReplace: (suggestion, original) => {
@@ -348,23 +348,40 @@ const statusText = computed(() => {
   return '开始校对'
 })
 
+// 高亮原文：只依赖 issues/currentText/currentHtml（悬停样式由 watcher 局部切换 mark
+// 的 class——此前每次 mouseenter 都整篇重算替换+DOMPurify，长文档必卡）
+const originalTextRef = ref<HTMLElement>()
 const highlightedText = computed(() => {
   // 优先使用格式化 HTML（保留 Word 排版），回退到纯文本
   let html = currentHtml.value
   if (!html) {
     html = escapeHtml(currentText.value).replace(/\n/g, '<br/>')
   }
-  const activeIssues = issues.value.filter(i => !i._accepted && !i._ignored)
-  for (const issue of activeIssues) {
-    if (!issue.original) continue
-    const globalIdx = issues.value.indexOf(issue)
-    const isHover = activeIssueIndex.value === globalIdx
-    const color = isHover ? '#fef3c7' : severityHighlight(issue.severity)
-    const border = isHover ? 'box-shadow:0 0 0 2px #f59e0b;' : ''
-    const markHtml = `<mark class="highlight-mark" style="background:${color};${border}padding:1px 3px;border-radius:2px;cursor:pointer;" title="[${typeLabel(issue.type)}] ${escapeHtml(issue.suggestion)}">${escapeHtml(issue.original)}</mark>`
-    html = replaceTextInHtml(html, issue.original, markHtml)
+  const entries = issues.value
+    .map((issue, index) => ({ index, issue }))
+    .filter(({ issue }) => !issue._accepted && !issue._ignored && issue.original)
+    .map(({ index, issue }) => ({
+      index,
+      original: issue.original,
+      severity: issue.severity,
+      type: issue.type,
+      suggestion: issue.suggestion,
+    }))
+  const marked = highlightIssues(html, entries, (e, escaped) => (
+    `<mark data-issue-idx="${e.index}" class="highlight-mark hl-${e.severity}" `
+    + `title="[${typeLabel(e.type)}] ${escapeHtml(e.suggestion)}">${escaped}</mark>`
+  ))
+  return sanitizeDocumentHtml(marked)
+})
+
+// 悬停联动：切换对应 mark 的 is-hover 类（O(1) DOM 操作；同一问题多处出现全部高亮）
+watch(activeIssueIndex, (idx) => {
+  const root = originalTextRef.value
+  if (!root) return
+  root.querySelectorAll('mark.is-hover').forEach(el => el.classList.remove('is-hover'))
+  if (idx >= 0) {
+    root.querySelectorAll(`mark[data-issue-idx="${idx}"]`).forEach(el => el.classList.add('is-hover'))
   }
-  return sanitizeDocumentHtml(html)
 })
 
 // 辅助函数
@@ -438,7 +455,7 @@ function createIdempotencyKey(): string {
 
 async function loadModelOptions() {
   try {
-    const res = await getAvailableModelsApi()
+    const res = await getAvailableModelsCached()
     modelOptions.value = res.models
     if (selectedModelId.value === null) {
       const active = res.models.find(m => m.is_active)
@@ -893,6 +910,22 @@ function resetAll() {
   line-height: 1.8;
   color: var(--color-text);
   word-break: break-all;
+
+  :deep(mark.highlight-mark) {
+    padding: 1px 3px;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+
+  :deep(mark.hl-error) { background: #fee2e2; }
+  :deep(mark.hl-warning) { background: #fef3c7; }
+  :deep(mark.hl-info) { background: #dbeafe; }
+
+  :deep(mark.is-hover) {
+    background: #fde68a;
+    box-shadow: 0 0 0 2px #f59e0b;
+    font-weight: 600;
+  }
 
   :deep(p) {
     margin: 0.3em 0;

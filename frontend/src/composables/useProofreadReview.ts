@@ -62,9 +62,16 @@ export function useProofreadReview(options: ProofreadReviewOptions = {}) {
   const acceptedCount = computed(() => issues.value.filter(i => i._accepted).length)
   const pendingCount = computed(() => issues.value.filter(i => !i._accepted && !i._ignored).length)
 
+  // 问题 → 全局索引（联动高亮用；WeakMap 避免 O(n²) 的 indexOf 反查）
+  const issueIndexMap = computed(() => {
+    const map = new WeakMap<ReviewIssue, number>()
+    issues.value.forEach((issue, idx) => map.set(issue, idx))
+    return map
+  })
+
   // 获取问题在全局列表中的索引（用于联动高亮）
   function getGlobalIndex(issue: ReviewIssue): number {
-    return issues.value.indexOf(issue)
+    return issueIndexMap.value.get(issue) ?? -1
   }
 
   // 审校建议反馈上报（fire-and-forget：失败不打扰用户）
@@ -81,14 +88,21 @@ export function useProofreadReview(options: ProofreadReviewOptions = {}) {
     }).catch(() => {})
   }
 
-  // 接受单条修改
+  // 接受单条修改（replaceAll：同一错词多处出现全部修正，此前只改首处会静默漏改）
   function acceptIssue(issue: ReviewIssue) {
     if (issue.original && issue.suggestion) {
-      currentText.value = currentText.value.replace(issue.original, issue.suggestion)
+      currentText.value = currentText.value.replaceAll(issue.original, issue.suggestion)
       options.onAcceptReplace?.(issue.original, issue.suggestion)
     }
     issue._accepted = true
-    reportFeedback([issue], 'accept')
+    // LLM 常把同一错词报成多条：文本已按 replaceAll 全量替换，
+    // 同原文同建议的其余问题实际已解决，一并标记（同 suggestion 才并，防误杀不同意见）
+    const duplicates = issues.value.filter(i =>
+      i !== issue && !i._accepted && !i._ignored
+      && i.original === issue.original && i.suggestion === issue.suggestion
+    )
+    for (const dup of duplicates) dup._accepted = true
+    reportFeedback([issue, ...duplicates], 'accept')
   }
 
   // 忽略
@@ -101,7 +115,7 @@ export function useProofreadReview(options: ProofreadReviewOptions = {}) {
   function deleteIssue(issue: ReviewIssue) {
     const del = computeSensitiveDeletion(currentText.value, issue.original)
     if (!del) return
-    currentText.value = currentText.value.replace(del.target, '')
+    currentText.value = currentText.value.replaceAll(del.target, '')
     options.onDeleteWord?.(del.target)
     issue._accepted = true
     // 记录删除内容与词首位置，撤销时按锚点插回
@@ -113,7 +127,7 @@ export function useProofreadReview(options: ProofreadReviewOptions = {}) {
   // 撤销
   function undoIssue(issue: ReviewIssue) {
     if (issue._accepted && issue.original && issue.suggestion) {
-      currentText.value = currentText.value.replace(issue.suggestion, issue.original)
+      currentText.value = currentText.value.replaceAll(issue.suggestion, issue.original)
       options.onUndoReplace?.(issue.suggestion, issue.original)
     } else if (issue._accepted && issue._deletedText !== undefined) {
       // 删除类撤销：把删掉的词（含标点）插回原位——按删除时的锚点定位
@@ -146,15 +160,17 @@ export function useProofreadReview(options: ProofreadReviewOptions = {}) {
         { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
       )
       const accepted: ReviewIssue[] = []
-      for (const issue of actionable) {
+      // 长原文优先应用：避免短词先替换拆散长词（如「权力」改写「权力机关」）
+      const ordered = [...actionable].sort((a, b) => b.original.length - a.original.length)
+      for (const issue of ordered) {
         if (issue.suggestion) {
-          currentText.value = currentText.value.replace(issue.original, issue.suggestion)
+          currentText.value = currentText.value.replaceAll(issue.original, issue.suggestion)
           options.onAcceptReplace?.(issue.original, issue.suggestion)
         } else {
           // 敏感词：删除（含紧邻标点），记录撤销锚点
           const del = computeSensitiveDeletion(currentText.value, issue.original)
           if (!del) continue
-          currentText.value = currentText.value.replace(del.target, '')
+          currentText.value = currentText.value.replaceAll(del.target, '')
           options.onDeleteWord?.(del.target)
           issue._deletedText = del.target
           issue._undoAnchor = del.anchor
