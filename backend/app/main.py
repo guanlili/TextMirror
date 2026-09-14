@@ -3,9 +3,10 @@ TextMirror 智能文档审校平台 - FastAPI 应用入口
 """
 import os
 import sys
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
@@ -70,6 +71,28 @@ def _open_http_exception_handler(request, exc):
     return JSONResponse(status_code=exc.status_code, content={"detail": detail}, headers=getattr(exc, "headers", None))
 
 
+# 慢请求阈值：超过打 warning（duration_ms 只覆盖 LLM 动作，此前请求级耗时无埋点，
+# 线上「某接口慢」只能翻容器日志逐条看）
+SLOW_REQUEST_MS = int(os.getenv("SLOW_REQUEST_MS", "3000"))
+
+
+async def _slow_request_logging_middleware(request: Request, call_next):
+    """请求级耗时观测：慢请求告警 + 5xx 聚合日志（不含请求体，无敏感信息）"""
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        logger.error(f"[http] {request.method} {request.url.path} 500 in {elapsed_ms}ms (unhandled)")
+        raise
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    if response.status_code >= 500:
+        logger.error(f"[http] {request.method} {request.url.path} {response.status_code} in {elapsed_ms}ms")
+    elif elapsed_ms >= SLOW_REQUEST_MS:
+        logger.warning(f"[http] slow {request.method} {request.url.path} {response.status_code} in {elapsed_ms}ms")
+    return response
+
+
 def create_app() -> FastAPI:
     """创建 FastAPI 应用实例"""
     app = FastAPI(
@@ -82,6 +105,8 @@ def create_app() -> FastAPI:
     )
 
     # ---- 中间件配置 ----
+    # 请求级耗时观测（注册顺序先于 CORS：日志中间件包最外层，CORS 预检也计入）
+    app.middleware("http")(_slow_request_logging_middleware)
     # CORS 跨域
     app.add_middleware(
         CORSMiddleware,

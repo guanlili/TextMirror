@@ -68,7 +68,11 @@ export function createUserApi(data: {
   return request.post('/admin/users', data)
 }
 
-export function updateUserApi(id: number, data: Record<string, any>): Promise<AdminUserItem> {
+export function updateUserApi(id: number, data: Partial<{
+  employee_id: string; username: string; password: string; role_id: number;
+  phone: string; gender: string; department: string; daily_quota: number;
+  remark: string; is_active: boolean
+}>): Promise<AdminUserItem> {
   return request.put(`/admin/users/${id}`, data)
 }
 
@@ -96,7 +100,9 @@ export function createRoleApi(data: { name: string; code: string; description?: 
   return request.post('/admin/roles', data)
 }
 
-export function updateRoleApi(id: number, data: Record<string, any>): Promise<RoleItem> {
+export function updateRoleApi(id: number, data: Partial<{
+  name: string; code: string; description: string; permission_ids: number[]; is_active: boolean
+}>): Promise<RoleItem> {
   return request.put(`/admin/roles/${id}`, data)
 }
 
@@ -152,7 +158,10 @@ export function batchCreateGlobalWordsApi(data: {
   return request.post('/admin/global-dict/batch', data)
 }
 
-export function updateGlobalWordApi(id: number, data: Record<string, any>): Promise<GlobalWordItem> {
+export function updateGlobalWordApi(id: number, data: Partial<{
+  word: string; type: string; replacement: string; category: string;
+  severity: string; remark: string; is_active: boolean
+}>): Promise<GlobalWordItem> {
   return request.put(`/admin/global-dict/${id}`, data)
 }
 
@@ -242,7 +251,11 @@ export function createLLMConfigApi(data: {
   return request.post('/admin/llm-config', data)
 }
 
-export function updateLLMConfigApi(id: number, data: Record<string, any>): Promise<LLMConfigItem> {
+export function updateLLMConfigApi(id: number, data: Partial<{
+  name: string; provider: string; api_base: string; api_key: string; model: string;
+  temperature: number; max_tokens: number; timeout: number; max_retries: number;
+  remark: string; is_enabled: boolean
+}>): Promise<LLMConfigItem> {
   return request.put(`/admin/llm-config/${id}`, data)
 }
 

@@ -30,6 +30,21 @@ export default defineConfig({
       '@': resolve(__dirname, 'src'),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // echarts（仅 admin 仪表盘）/ marked（仅润色页）按需进路由 chunk 之外再分家；
+        // element-plus 变动少独立成 chunk——发版只重下业务 chunk，缓存命中率高
+        manualChunks(id: string) {
+          if (id.includes('echarts') || id.includes('zrender')) return 'echarts'
+          if (id.includes('marked') || id.includes('dompurify')) return 'markdown'
+          if (id.includes('element-plus') || id.includes('@element-plus')) return 'element-plus'
+          if (id.includes('vue') || id.includes('pinia') || id.includes('@vue/')) return 'vue-vendor'
+          return undefined
+        },
+      },
+    },
+  },
   server: {
     port: 3022,
     proxy: {
