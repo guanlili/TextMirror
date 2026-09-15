@@ -29,10 +29,11 @@
       <template #header>
         <div class="card-header">
           <span class="card-title">全局词库管理</span>
-          <div style="display: flex; gap: 8px;">
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
             <el-badge :value="suggestionCount" :hidden="suggestionCount === 0" type="warning">
               <el-button size="small" @click="openSuggestions"><el-icon><MagicStick /></el-icon>优化建议</el-button>
             </el-badge>
+            <el-button v-if="canManageQualityFeedback" size="small" aria-label="打开质量反馈审阅台" @click="showQualityFeedback = true">质量反馈</el-button>
             <el-button type="primary" size="small" @click="openAddDialog"><el-icon><Plus /></el-icon>添加词条</el-button>
             <el-button size="small" @click="showBatchDialog = true">批量导入</el-button>
           </div>
@@ -192,6 +193,9 @@
         </template>
       </div>
     </el-drawer>
+    <el-drawer v-if="canManageQualityFeedback" v-model="showQualityFeedback" title="质量反馈" size="min(980px, 100vw)" destroy-on-close>
+      <QualityFeedbackAdmin v-if="showQualityFeedback" />
+    </el-drawer>
   </div>
 </template>
 
@@ -206,6 +210,12 @@ import {
   getDictSuggestionsApi,
 } from '@/api/admin'
 import { getErrorDetail } from '@/utils/request'
+import { useUserStore } from '@/stores/user'
+import QualityFeedbackAdmin from '@/components/QualityFeedbackAdmin.vue'
+
+const userStore = useUserStore()
+const canManageQualityFeedback = computed(() => userStore.hasPermission('admin:global_dict:edit'))
+const showQualityFeedback = ref(false)
 
 const typeLabelMap: Record<string, string> = { sensitive: '敏感词', banned: '禁词', correction: '纠错词条', whitelist: '放行词' }
 const typeTagMap: Record<string, '' | 'success' | 'warning' | 'info' | 'danger'> = { sensitive: 'danger', banned: 'warning', correction: '', whitelist: 'success' }
@@ -399,7 +409,7 @@ async function handleBatchImport() {
       .stat-label { font-size: 13px; color: #999; margin-top: 2px; }
     }
   }
-  .card-header { display: flex; align-items: center; justify-content: space-between; .card-title { font-size: 16px; font-weight: 600; color: #333; } }
+  .card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; .card-title { font-size: 16px; font-weight: 600; color: #333; } }
 }
 .sug-section-title {
   font-size: 14px; font-weight: 600; margin: 14px 0 8px;

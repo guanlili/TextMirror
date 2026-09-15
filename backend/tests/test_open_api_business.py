@@ -14,9 +14,10 @@ from app.models.api_key import ApiKey
 from app.models.dictionary import Dictionary, DictionaryEntry, WhitelistWord
 from app.models.global_word import GlobalWord
 from app.models.llm_config import LLMConfig
+from app.models.proofread import ProofreadRecord
 from app.models.role import Role
 from app.models.user import User
-from app.services.proofread import scan_words_deterministic
+from app.services.proofread import InvalidModelConfigError, scan_words_deterministic
 
 
 @pytest.fixture
@@ -254,7 +255,7 @@ async def test_open_proofread_no_refund_for_invalid_config(client, db, user, api
     _, key_obj = api_key
     with patch(
         "app.api.v1.open.proofread_text",
-        side_effect=RuntimeError("指定的模型配置不存在或已停用 (id=999)"),
+        side_effect=InvalidModelConfigError("指定的模型配置不存在或已停用 (id=999)"),
     ):
         resp = await client.post(
             "/api/v1/open/proofread",
@@ -301,6 +302,10 @@ async def test_open_compare_partial_failure_refunds_failed_models(client, db, us
             headers=auth,
         )
     assert resp.status_code == 200
+    record = await db.get(ProofreadRecord, resp.json()["record_id"])
+    assert record is not None and record.user_id == user.id and record.api_key_id == key_obj.id
+    assert record.quota_weight == 1 and record.review_state is None
+    assert record.result["results"] == resp.json()["results"]
     # 2 个模型先扣 2，失败 1 个退 1，最终为 1
     count = await redis_module.redis_client.get(_daily_key(key_obj))
     assert count is not None and int(count) == 1

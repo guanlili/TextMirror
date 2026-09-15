@@ -39,9 +39,10 @@ async def run_proofread_compare(
             )
             return {
                 **base,
-                "issues": r["issues"],
-                "total_issues": r["total_issues"],
+                **r,
+                "config_id": r.get("config_id", config.id),
                 "success": True,
+                "complete": (r.get("coverage") or {}).get("status") == "complete",
                 "elapsed_ms": int((time.perf_counter() - t0) * 1000),
             }
         except Exception as e:
@@ -50,6 +51,10 @@ async def run_proofread_compare(
             return {
                 **base,
                 "success": False,
+                "complete": False,
+                "coverage": getattr(e, "coverage", None),
+                "domain": domain,
+                "depth": "standard",
                 "error": f"模型 {config.name} 调用失败，请检查该配置的密钥与模型名（详情见服务端日志）",
                 "elapsed_ms": int((time.perf_counter() - t0) * 1000),
             }
@@ -63,7 +68,8 @@ async def run_proofread_compare(
 def cross_model_stats(items: List[dict]) -> Tuple[List[str], Dict[int, List[str]]]:
     """
     交叉统计：original 完全一致的问题算「共识」，仅单一模型发现的算「独有」。
-    成功模型 ≥2 才有意义，否则返回空。
+    获得结果的模型 ≥2 才有意义，否则返回空。partial 的已发现问题可参与，
+    这里仅统计观察到的共识/独有，不代表未报告的问题已被完整排除。
     """
     consensus: List[str] = []
     only_in: Dict[int, List[str]] = {}
@@ -89,15 +95,18 @@ def cross_model_stats(items: List[dict]) -> Tuple[List[str], Dict[int, List[str]
 
 def dedupe_compare_issues(successes: List[dict]) -> List[dict]:
     """
-    对比落库用：各成功模型的问题按 (original, suggestion) 去重。
+    对比落库用：按 (start, end, type, suggestion) 去重，保留重复原文的不同位置。
 
-    同一错误被多个模型发现只保留一条，附加 found_by（发现它的模型名列表）
-    与 consensus_count（模型数）——历史详情不重复，还能看出哪些是多模型共识。
+    旧的无坐标问题仅按原文/分片/类型/建议合并，附加 found_by（发现它的模型名列表）。
     """
     seen: dict = {}
     for item in successes:
         for issue in item.get("issues", []):
-            key = (issue.get("original", ""), issue.get("suggestion", ""))
+            if issue.get("start") is not None and issue.get("end") is not None:
+                key = (issue["start"], issue["end"], issue.get("type"), issue.get("suggestion", ""))
+            else:
+                key = (None, issue.get("chunk_index"), issue.get("original", ""),
+                       issue.get("type"), issue.get("suggestion", ""))
             if key in seen:
                 entry = seen[key]
                 if item["config_name"] not in entry["found_by"]:

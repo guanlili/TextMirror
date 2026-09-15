@@ -21,7 +21,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import async_session_factory, get_db
 from app.core.dependencies import get_current_user_optional
 from app.core.file_security import (
-    build_download_url,
     safe_upload_path,
     sanitize_filename,
     verify_download_signature,
@@ -30,10 +29,10 @@ from app.core.rate_limit import (
     charge_user_daily_quota,
     check_guest_rate_limit,
     check_upload_rate_limit,
-    refund_user_daily_quota,
     reject_guest_if_disabled,
 )
 from app.core.security import derive_guest_task_access_token, hash_scoped_idempotency_key
+from app.core.task_quota import refund_document_quota
 from app.models.proofread import ProofreadRecord
 from app.models.uploaded_document import UploadedDocument
 from app.schemas.document import (
@@ -41,14 +40,11 @@ from app.schemas.document import (
     DocumentProofreadResponse,
     DocumentUploadResponse,
 )
+from app.schemas.review import DocumentReviewExportRequest
 from app.services.audit_log import record_audit_log
-from app.services.document import (
-    extract_html_from_file,
-    extract_text_from_file,
-    generate_corrected_docx,
-    generate_corrected_txt,
-)
+from app.services.document import extract_html_from_file, extract_text_from_file
 from app.services.proofread import proofread_text
+from app.services.review import export_review_file
 from app.services.upload import UploadRejected, remove_upload_silently, store_upload
 from app.tasks.proofread_task import async_proofread_document
 
@@ -176,6 +172,31 @@ async def _load_document_info(file_id: str, db: AsyncSession) -> dict:
     }
     _cache_put(file_id, file_info)
     return file_info
+
+
+@router.post("/{file_id}/export", summary="导出上传文档的采纳项（无需校对调用）")
+async def export_document_review(
+    file_id: str,
+    request: DocumentReviewExportRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
+):
+    if current_user is None:
+        from app.services.guest_policy import get_guest_policy
+        await reject_guest_if_disabled(http_request)
+        if not (await get_guest_policy())["allow_upload"]:
+            raise HTTPException(403, "当前未开放游客文档功能，请登录后使用")
+    file_info = await _load_document_info(file_id, db)
+    # 复用现有策略；apikey/legacy 文档绝不因 user_id 为空而当作游客文档。
+    await _check_document_ownership(file_info, current_user, db)
+    if request.format == "docx" and not os.path.isfile(file_info["file_path"]):
+        raise HTTPException(410, "源文件已删除或过期；请导出 TXT")
+    return await export_review_file(
+        file_info["text"], request.issues, request.format, file_info["filename"],
+        original_path=file_info["file_path"] if request.format == "docx" else None,
+        file_ext=file_info["file_ext"],
+    )
 
 
 @router.post("/upload", response_model=DocumentUploadResponse, summary='上传文档并提取文本')
@@ -330,15 +351,16 @@ async def document_proofread(
     # 加载文档（先校验记录存在且未删除，再复用缓存正文）
     file_info = await _load_document_info(request.file_id, db)
 
-    # 游客限流（游客模式关闭时拒绝；登录用户预扣当日配额，任务失败由 worker 退还）
+    # 归属校验先于预扣，未获授权的请求不消耗额度。
+    await _check_document_ownership(file_info, current_user, db)
+
+    quota_key = None
+    refund_id = str(uuid.uuid4())
     if current_user is None:
         await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
     else:
-        await charge_user_daily_quota(current_user)
-
-    # 归属校验：登录用户的文档仅本人（及管理员）可校对
-    await _check_document_ownership(file_info, current_user, db)
+        quota_key = await charge_user_daily_quota(current_user)
 
     text = file_info["text"]
     filename = file_info["filename"]
@@ -350,11 +372,12 @@ async def document_proofread(
             domain=request.domain,
             config_id=request.config_id,
             user_id=current_user.id if current_user else None,
+            depth=request.depth,
         )
     except RuntimeError as e:
         import traceback
         logger.error(f"文档校对服务异常: {e}\n{traceback.format_exc()}")
-        await refund_user_daily_quota(current_user)
+        await refund_document_quota(refund_id, quota_key)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="校对服务暂时不可用，请稍后重试",
@@ -362,26 +385,11 @@ async def document_proofread(
     except Exception as e:
         import traceback
         logger.error(f"文档校对未知错误: {type(e).__name__}: {e}\n{traceback.format_exc()}")
-        await refund_user_daily_quota(current_user)
+        await refund_document_quota(refund_id, quota_key)
         raise HTTPException(status_code=500, detail="校对过程发生错误")
 
-    # 生成修订文档
+    # Web 审阅前不再自动采纳全部建议；用户决定后通过私有 export 接口下载。
     corrected_url = None
-    try:
-        file_ext = file_info["file_ext"]
-        file_path = file_info["file_path"]
-
-        if file_ext in (".docx", ".txt"):
-            corrected_filename = sanitize_filename(f"校对修订_{filename}")
-            corrected_path = safe_upload_path(request.file_id, corrected_filename)
-            if file_ext == ".docx":
-                await asyncio.to_thread(generate_corrected_docx, file_path, result["issues"], corrected_path)
-            else:
-                await asyncio.to_thread(generate_corrected_txt, text, result["issues"], corrected_path)
-            corrected_url = build_download_url(request.file_id, corrected_filename)
-
-    except Exception as e:
-        logger.warning(f"生成修订文档失败（不影响校对结果）: {e}")
 
     # 保存校对记录
     record_id = None
@@ -389,7 +397,8 @@ async def document_proofread(
         record = ProofreadRecord(
             user_id=current_user.id,
             type="document",
-            original_text=text[:10000],
+            source_file_id=request.file_id,
+            original_text=text,
             check_types=json.dumps(request.check_types or []),
             domain=request.domain,
             result=result,
@@ -431,6 +440,10 @@ async def document_proofread(
         domain=result["domain"],
         record_id=record_id,
         corrected_download_url=corrected_url,
+        coverage=result.get("coverage"),
+        depth=result.get("depth", "standard"),
+        config_id=result.get("config_id"),
+        check_types=result.get("check_types", []),
     )
 
 
@@ -486,14 +499,15 @@ async def document_proofread_async(
                         logger.warning(f"幂等重试投递失败: {e}")
                 return _build_async_task_response(existing)
 
+    task_uuid = str(uuid.uuid4())
+    quota_key = None
     if current_user is None:
         await reject_guest_if_disabled(http_request)
         await check_guest_rate_limit(http_request)
     else:
-        # 预扣当日配额；任务最终失败/取消由 worker 统一退还
-        await charge_user_daily_quota(current_user)
+        # 保存实际预扣日；不限额/Redis 未扣成功均为 None。
+        quota_key = await charge_user_daily_quota(current_user)
 
-    task_uuid = str(uuid.uuid4())
     access_token_hash = None
     if owner_kind == "guest":
         access_token_hash = hashlib.sha256(
@@ -515,6 +529,9 @@ async def document_proofread_async(
                 "domain": request.domain,
                 "config_id": request.config_id,
                 "check_types": request.check_types,
+                "depth": request.depth,
+                "review_before_export": True,
+                "quota_key": quota_key,
             },
         )
         db.add(db_task)
@@ -523,12 +540,18 @@ async def document_proofread_async(
             await db.refresh(db_task)
         except IntegrityError:
             await db.rollback()
+            # 并发幂等提交的输家也有预扣，按其自己的 UUID 退还，不影响胜者。
+            await refund_document_quota(task_uuid, quota_key)
             if scoped_idempotency_key:
                 existing = (await db.execute(
                     select(ProofreadTask).where(ProofreadTask.idempotency_key == scoped_idempotency_key)
                 )).scalar_one_or_none()
                 if existing:
                     return _build_async_task_response(existing)
+            raise
+        except Exception:
+            await db.rollback()
+            await refund_document_quota(task_uuid, quota_key)
             raise
         db_task_pk_id = db_task.id
 
@@ -540,15 +563,16 @@ async def document_proofread_async(
     except Exception as e:
         logger.error(f"异步任务投递失败: {e}")
         async with async_session_factory() as db:
-            await db.execute(
+            failed = await db.execute(
                 update(ProofreadTask)
                 .where(ProofreadTask.id == db_task_pk_id, ProofreadTask.status == "PENDING")
                 .values(status="FAILURE", error_code="DISPATCH_FAILED", message="任务投递失败，请重试")
             )
             await db.commit()
-        # 投递失败任务未执行：退还预扣额度
-        # （幂等重试会重新排队该任务，为避免双重计费不再重新预扣）
-        await refund_user_daily_quota(current_user)
+        # broker 确认丢失时任务可能已执行；只有 CAS 成功才退。
+        # 保留现有幂等重投不再扣费策略，重投后取消/失败也只能退同一笔预扣。
+        if failed.rowcount:
+            await refund_document_quota(task_uuid, quota_key)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="任务队列暂时不可用，请稍后重试",

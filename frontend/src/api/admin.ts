@@ -18,6 +18,37 @@ export function getDashboardStatsApi(): Promise<DashboardStats> {
   return request.get('/admin/dashboard/stats')
 }
 
+export interface ModelUsageItem {
+  business: string
+  operation: string
+  config_id: number | null
+  config_name: string
+  model: string
+  calls: number
+  errors: number
+  incomplete: number
+  cancelled: number
+  unknown_usage_calls: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  search_queries: number
+  average_ms: number
+}
+
+export interface ModelUsageSummary {
+  days: number
+  tracked_since: string | null
+  calls: number
+  total_tokens: number
+  unknown_usage_calls: number
+  items: ModelUsageItem[]
+}
+
+export function getModelUsageApi(days = 30): Promise<ModelUsageSummary> {
+  return request.get('/admin/dashboard/model-usage', { params: { days } })
+}
+
 export interface TrendPoint {
   date: string
   count: number

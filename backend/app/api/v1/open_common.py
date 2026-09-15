@@ -108,10 +108,10 @@ async def internal_exception_handler(request: Request, exc: Exception):
     )
 
 
-async def _charge_user_quota_contract(user, n: int = 1) -> None:
-    """用户每日配额原子预扣，429 转换为 code+message 契约（n>1 为多模型对比权重）"""
+async def _charge_user_quota_contract(user, n: int = 1) -> str | None:
+    """返回实际预扣 key，429 转换为 code+message 契约（n>1 为多模型对比权重）。"""
     try:
-        await charge_user_daily_quota(user, n)
+        return await charge_user_daily_quota(user, n)
     except HTTPException as e:
         if e.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
             raise HTTPException(

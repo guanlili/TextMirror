@@ -378,6 +378,7 @@ async def polish_text(text: str, style: str = "formal") -> Dict[str, Any]:
 
     # 获取大模型 Provider
     provider = await get_llm_provider()
+    provider.usage_business = "polish"
 
     # 三个版本的 key，按顺序对应：轻量、标准、深度
     version_keys = ["light", "standard", "deep"]
@@ -482,6 +483,7 @@ async def polish_text_stream(text: str, style: str = "formal"):
     max_tokens = max(4096, min(estimated_tokens, 16384))
 
     provider = await get_llm_provider()
+    provider.usage_business = "polish"
 
     version_keys = ["light", "standard", "deep"]
     # 各版本累计文本与队列：队列元素为 ("delta", str) / ("done", None) / ("error", str)

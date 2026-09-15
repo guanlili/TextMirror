@@ -57,7 +57,8 @@ _HALFWIDTH_COLON_RE = re.compile(r"(?<=[\u4e00-\u9fa5])[;:]")
 _HALFWIDTH_MAP = str.maketrans({",": "，", "!": "！", "?": "？", ";": "；", ":": "："})
 
 
-def _issue(original: str, suggestion: str, explanation: str, severity: str = "warning", issue_type: str = "punctuation") -> Dict[str, Any]:
+def _issue(original: str, suggestion: str, explanation: str, severity: str = "warning", issue_type: str = "punctuation",
+           *, start: int, end: int) -> Dict[str, Any]:
     return {
         "original": original,
         "type": issue_type,
@@ -66,6 +67,8 @@ def _issue(original: str, suggestion: str, explanation: str, severity: str = "wa
         "severity": severity,
         "chunk_index": 0,
         "source": "format_rule",
+        "start": start,
+        "end": end,
     }
 
 
@@ -86,13 +89,13 @@ def check_dates(text: str) -> List[Dict[str, Any]]:
         if mo < 1 or mo > 12:
             issues.append(_issue(
                 m.group(0), m.group(0),
-                f"月份非法：{mo}月不存在（1-12月）", "error",
+                f"月份非法：{mo}月不存在（1-12月）", "error", start=m.start(), end=m.end(),
             ))
         elif d < 1 or d > _days_in_month(y, mo):
             max_d = _days_in_month(y, mo)
             issues.append(_issue(
                 m.group(0), m.group(0),
-                f"日期非法：{y}年{mo}月最多{max_d}天", "error",
+                f"日期非法：{y}年{mo}月最多{max_d}天", "error", start=m.start(), end=m.end(),
             ))
     # 分隔符混合：2025.1-3（. 和 - 混用）
     for m in _DATE_MIXED_SEP_RE.finditer(text):
@@ -101,7 +104,7 @@ def check_dates(text: str) -> List[Dict[str, Any]]:
         if len(seps) > 1:
             issues.append(_issue(
                 s, s,
-                "日期分隔符混用（如 . 与 - 混用），建议统一为一种", "warning",
+                "日期分隔符混用（如 . 与 - 混用），建议统一为一种", "warning", start=m.start(), end=m.end(),
             ))
     return issues
 
@@ -123,7 +126,7 @@ def check_phones(text: str) -> List[Dict[str, Any]]:
                 continue
         issues.append(_issue(
             num, num,
-            f"号码位数异常：{len(num)}位（手机号应为11位，请核对）", "warning",
+            f"号码位数异常：{len(num)}位（手机号应为11位，请核对）", "warning", start=m.start(1), end=m.end(1),
         ))
     return issues
 
@@ -143,7 +146,7 @@ def check_id_cards(text: str) -> List[Dict[str, Any]]:
         except ValueError:
             issues.append(_issue(
                 id_num, id_num,
-                "身份证出生日期段非法", "error",
+                "身份证出生日期段非法", "error", start=m.start(), end=m.end(),
             ))
             continue
         # 校验位
@@ -151,7 +154,7 @@ def check_id_cards(text: str) -> List[Dict[str, Any]]:
         if codes[total % 11] != id_num[17].upper():
             issues.append(_issue(
                 id_num, id_num,
-                "身份证校验位不匹配，号码可能有误", "warning",
+                "身份证校验位不匹配，号码可能有误", "warning", start=m.start(), end=m.end(),
             ))
     return issues
 
@@ -165,6 +168,7 @@ def check_amounts(text: str) -> List[Dict[str, Any]]:
             issues.append(_issue(
                 m.group(0), m.group(0),
                 f"金额量级冗余：{val}万元建议写作 {val // 10000}亿元（或直接用完整数字）", "warning",
+                start=m.start(), end=m.end(),
             ))
     return issues
 
@@ -173,12 +177,13 @@ def check_sequence_style(text: str) -> List[Dict[str, Any]]:
     """同级列表编号样式混用：（一）（二）与 1. 2. 混用。两组各≥2 项才报。"""
     issues: List[Dict[str, Any]] = []
     cn_items = _SEQ_CN_RE.findall(text)
-    ar_items = _SEQ_AR_RE.findall(text)
+    ar_items = list(_SEQ_AR_RE.finditer(text))
     if len(cn_items) >= 2 and len(ar_items) >= 2:
+        m = ar_items[0]
         issues.append(_issue(
-            (ar_items[0] if ar_items else "").strip() or "编号",
-            (ar_items[0] if ar_items else "").strip() or "编号",
+            m.group(0), m.group(0),
             "列表编号样式混用：中文编号（一、二、）与阿拉伯数字编号（1. 2.）混用，建议统一", "warning",
+            start=m.start(), end=m.end(),
         ))
     return issues
 
@@ -207,7 +212,7 @@ def check_confusable_collocations(text: str) -> List[Dict[str, Any]]:
         if any(start < t_end and t_start < end for t_start, t_end in taken):
             continue
         taken.append((start, end))
-        issues.append(_issue(wrong, right, note, "warning", "typo"))
+        issues.append(_issue(wrong, right, note, "warning", "typo", start=start, end=end))
     issues.sort(key=lambda i: text.find(i["original"]))
     return issues
 
@@ -221,7 +226,7 @@ def check_halfwidth_punct(text: str) -> List[Dict[str, Any]]:
             fixed = run.translate(_HALFWIDTH_MAP)
             issues.append(_issue(
                 run, fixed,
-                f"中文语句中的半角标点「{run}」应为全角「{fixed}」", "warning",
+                f"中文语句中的半角标点「{run}」应为全角「{fixed}」", "warning", start=m.start(), end=m.end(),
             ))
     issues.sort(key=lambda i: text.find(i["original"]))
     return issues

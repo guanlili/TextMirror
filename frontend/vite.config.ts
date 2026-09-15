@@ -36,6 +36,7 @@ export default defineConfig({
         // echarts（仅 admin 仪表盘）/ marked（仅润色页）按需进路由 chunk 之外再分家；
         // element-plus 变动少独立成 chunk——发版只重下业务 chunk，缓存命中率高
         manualChunks(id: string) {
+          if (!id.includes('/node_modules/')) return undefined
           if (id.includes('echarts') || id.includes('zrender')) return 'echarts'
           if (id.includes('marked') || id.includes('dompurify')) return 'markdown'
           if (id.includes('element-plus') || id.includes('@element-plus')) return 'element-plus'

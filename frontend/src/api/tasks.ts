@@ -5,6 +5,7 @@
  * SSE：fetch + ReadableStream，支持 Authorization 头 + access_token 查询参数
  */
 import request from '@/utils/request'
+import type { CollaborationReport } from '@/api/collaboration'
 
 export interface TaskStatus {
   task_id: string
@@ -14,6 +15,7 @@ export interface TaskStatus {
   step?: string
   result?: unknown
   error?: string
+  collaboration?: CollaborationReport | null
 }
 
 export interface SubmitResponse {
@@ -44,6 +46,7 @@ export function asyncDocumentProofreadApi(
     check_types?: string[]
     domain?: string
     config_id?: number
+    depth?: string
   },
   options: {
     idempotencyKey?: string

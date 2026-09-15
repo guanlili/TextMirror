@@ -196,6 +196,7 @@ function handleLogout() {
 .admin-content-wrapper {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .admin-header {
@@ -248,7 +249,7 @@ function handleLogout() {
 /* ===== 移动端响应式 ===== */
 @media (max-width: 768px) {
   .admin-aside {
-    position: fixed;
+    position: sticky;
     top: 0;
     left: 0;
     z-index: 200;
@@ -256,7 +257,11 @@ function handleLogout() {
   }
 
   .admin-header {
-    padding: 0 12px;
+    height: auto;
+    min-height: 60px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
   }
 
   .admin-main {

@@ -4,7 +4,15 @@
 前缀导致总额句漏配、「小计」不在总额词表）与两个正向命中锁定在此；
 称谓混用须上报文中实际出现的简称完整串，不能是截断的前缀。
 """
-from app.services.consistency import check_amount_summation, check_naming_consistency
+import pytest
+
+from app.services.consistency import (
+    check_amount_consistency,
+    check_amount_summation,
+    check_naming_consistency,
+    check_sequence_continuity,
+)
+from app.services.proofread import locate_issues
 
 
 def _sums(text: str) -> list:
@@ -67,3 +75,64 @@ def test_naming_existing_behavior_unchanged():
 
 def test_naming_no_mixed_usage_silent():
     assert _names("北京华宇信息技术有限公司负责系统开发，北京华宇信息技术有限公司组织终验。") == []
+
+
+@pytest.mark.parametrize("padding", [0, 65])
+def test_amount_consistency_repeated_spans_respect_truncation(padding):
+    segment = "贰佰万元" + " " * padding + "（￥200000元）"
+    prefix = "金额："
+    text = prefix + segment + "；" + segment
+    issues = check_amount_consistency(text)
+    assert [issue["original"] for issue in issues] == [segment[:60], segment[:60]]
+    assert [issue["start"] for issue in issues] == [len(prefix), len(prefix) + len(segment) + 1]
+    for issue in issues:
+        assert issue["end"] - issue["start"] == min(60, len(segment))
+        assert text[issue["start"]:issue["end"]] == issue["original"]
+    assert locate_issues(text, issues) == issues
+
+
+def test_sum_spans_only_flag_repeated_totals_with_mismatched_context():
+    correct = "设备200万元，材料300万元，合计500万元。"
+    incorrect = "设备100万元，材料200万元，合计500万元。"
+    text = correct + incorrect + incorrect
+    issues = check_amount_summation(text)
+    first = len(correct) + incorrect.index("合计")
+    assert [issue["start"] for issue in issues] == [first, first + len(incorrect)]
+    for issue in issues:
+        assert text[issue["start"]:issue["end"]] == issue["original"] == "合计500万元"
+    assert locate_issues(text, issues) == issues
+
+
+@pytest.mark.parametrize("standalone_count", [0, 1, 2])
+def test_naming_spans_exclude_every_recognized_full_name(standalone_count):
+    full = "北京华宇信息技术有限公司"
+    other_full = "上海华宇信息技术有限公司"
+    prefix = f"{full}负责开发。{other_full}负责验收。{full}提供支持。"
+    standalone = "华宇信息技术负责运维。"
+    text = prefix + standalone * standalone_count
+    issues = check_naming_consistency(text)
+    assert [issue["start"] for issue in issues] == [
+        len(prefix) + i * len(standalone) for i in range(standalone_count)
+    ]
+    for issue in issues:
+        assert text[issue["start"]:issue["end"]] == issue["original"] == "华宇信息技术"
+        assert issue["suggestion"] == full
+    assert locate_issues(text, issues) == issues
+
+
+def test_naming_still_requires_repeated_full_name():
+    assert check_naming_consistency("北京华宇信息技术有限公司负责开发。华宇信息技术负责运维。") == []
+
+
+@pytest.mark.parametrize("text", [
+    "第一条。第一款。第二条。第四条。第一条。第二条。第四条。",
+    "第1条。第1项。第2条。第4条。第1条。第2条。第4条。",
+])
+def test_sequence_spans_follow_filtered_number_match_pairs(text):
+    issues = check_sequence_continuity(text)
+    original = "第四条" if "第四条" in text else "第4条"
+    assert [issue["start"] for issue in issues] == [text.index(original), text.rindex(original)]
+    for issue in issues:
+        assert text[issue["start"]:issue["end"]] == issue["original"] == original
+        assert "从 2 跳到 4" in issue["explanation"]
+    assert locate_issues(text, issues) == issues

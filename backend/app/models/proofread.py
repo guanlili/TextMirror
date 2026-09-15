@@ -52,6 +52,16 @@ class ProofreadRecord(BaseModel):
     source_filename: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True, comment="源文件名(文档校对)"
     )
+    source_file_id: Mapped[Optional[str]] = mapped_column(
+        String(100), ForeignKey("uploaded_documents.file_id", ondelete="SET NULL"),
+        nullable=True, comment="可靠关联的上传源文件，旧记录不猜测关联",
+    )
+    review_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0", comment="审阅 CAS 修订号",
+    )
+    review_state: Mapped[Optional[dict]] = mapped_column(
+        JSON, nullable=True, comment="审阅草稿及最多20个不可变版本",
+    )
     quota_weight: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1",
         comment="配额消耗权重(多模型对比=成功模型数,其余=1)"

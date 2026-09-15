@@ -13,6 +13,7 @@ from sqlalchemy import select, update
 
 from app.core.database import async_session_factory
 from app.core.dependencies import get_current_user_optional
+from app.core.task_quota import document_quota_key, refund_document_quota
 
 router = APIRouter(prefix="/tasks", tags=["异步任务"])
 
@@ -100,8 +101,33 @@ def _build_status_payload(task_id: str, db_task) -> dict:
         response["result"] = payload
     elif display_status in ("FAILURE", "CANCELLED", "REVOKED"):
         response["error"] = db_task.error_code or "task_failed"
+    if (db_task.result_json or {}).get("collaboration"):
+        from app.schemas.collaboration import CollaborationReport
+
+        response["collaboration"] = CollaborationReport.model_validate(
+            db_task.result_json["collaboration"],
+        ).model_dump(mode="json")
 
     return response
+
+
+async def _refund_terminal_document_task(task):
+    # 重复取消/终态查询可补偿暂时的 Redis 故障；不处理协作或成功任务。
+    if task is not None and task.status in ("CANCELLED", "FAILURE"):
+        await refund_document_quota(task.task_id, document_quota_key(task))
+
+
+async def _refresh_collaboration_task(task):
+    if task is not None and (task.params_json or {}).get("kind") == "collaboration":
+        from starlette.concurrency import run_in_threadpool
+
+        from app.models.proofread_task import ProofreadTask
+        from app.tasks.collaboration_task import expire_collaboration_task
+
+        await run_in_threadpool(expire_collaboration_task, task.id)
+        async with async_session_factory() as db:
+            return await db.get(ProofreadTask, task.id)
+    return task
 
 
 @router.get("/{task_id}", summary='查询异步任务状态')
@@ -124,7 +150,8 @@ async def get_task_status(
     if db_task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    return _build_status_payload(task_id, db_task)
+    await _refund_terminal_document_task(db_task)
+    return _build_status_payload(task_id, await _refresh_collaboration_task(db_task))
 
 
 @router.get("/{task_id}/stream", summary='任务状态 SSE 推送')
@@ -178,37 +205,35 @@ async def stream_task_status(
         idle_seconds = 0.0
         heartbeat_seconds = 0.0
         interval = 1.0
-        async with async_session_factory() as db:
-            while idle_seconds < 600:
-                if await http_request.is_disconnected():
+        while idle_seconds < 600:
+            if await http_request.is_disconnected():
+                return
+            async with async_session_factory() as db:
+                fresh_task = await db.scalar(select(ProofreadTask).where(ProofreadTask.task_id == task_id))
+            if fresh_task is None:
+                return
+            fresh_task = await _refresh_collaboration_task(fresh_task)
+            await _refund_terminal_document_task(fresh_task)
+            payload = _build_status_payload(task_id, fresh_task)
+            changed = payload != last_payload
+            if changed:
+                last_payload = payload
+                idle_seconds = 0.0
+                heartbeat_seconds = 0.0
+                interval = 1.0
+                yield f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+                if payload["status"] in ("SUCCESS", "FAILURE", "REVOKED", "CANCELLED"):
                     return
-
-                db.expire_all()
-                result = await db.execute(
-                    select(ProofreadTask).where(ProofreadTask.task_id == task_id)
-                )
-                fresh_task = result.scalar_one_or_none()
-
-                payload = _build_status_payload(task_id, fresh_task)
-                changed = payload != last_payload
-                if changed:
-                    last_payload = payload
-                    idle_seconds = 0.0
+            else:
+                idle_seconds += interval
+                heartbeat_seconds += interval
+                if heartbeat_seconds >= 15:
                     heartbeat_seconds = 0.0
-                    interval = 1.0
-                    yield f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
-                    if payload["status"] in ("SUCCESS", "FAILURE", "REVOKED", "CANCELLED"):
-                        return
-                else:
-                    idle_seconds += interval
-                    heartbeat_seconds += interval
-                    if heartbeat_seconds >= 15:
-                        heartbeat_seconds = 0.0
-                        yield ": heartbeat\n\n"
+                    yield ": heartbeat\n\n"
 
-                await asyncio.sleep(interval)
-                if not changed:
-                    interval = min(interval + 1.0, 5.0)
+            await asyncio.sleep(interval)
+            if not changed:
+                interval = min(interval + 1.0, 5.0)
 
     return StreamingResponse(
         event_stream(),
@@ -245,6 +270,7 @@ async def cancel_task(
 
     TERMINAL = {"SUCCESS", "FAILURE", "CANCELLED", "REVOKED"}
     if db_task.status in TERMINAL:
+        await _refund_terminal_document_task(db_task)
         return {"message": "任务已结束", "task_id": task_id}
 
     async with async_session_factory() as db:
@@ -253,9 +279,16 @@ async def cancel_task(
         )
         fresh = result.scalar_one_or_none()
         if fresh is None or fresh.status in TERMINAL:
+            await _refund_terminal_document_task(fresh)
             return {"message": "任务已结束", "task_id": task_id}
 
         if fresh.status == "PENDING":
+            result_json = fresh.result_json
+            is_collaboration = (fresh.params_json or {}).get("kind") == "collaboration"
+            if is_collaboration and (result_json or {}).get("collaboration"):
+                from app.tasks.collaboration_task import terminal_report
+
+                result_json = {"collaboration": terminal_report(result_json["collaboration"], "CANCELLED", "用户取消")}
             result = await db.execute(
                 update(ProofreadTask)
                 .where(
@@ -267,11 +300,20 @@ async def cancel_task(
                     cancel_requested=True,
                     error_code="USER_CANCELLED",
                     message="用户取消",
+                    result_json=result_json,
                     finished_at=datetime.now(timezone.utc),
                 )
             )
             if result.rowcount:
                 await db.commit()
+                if is_collaboration:
+                    from starlette.concurrency import run_in_threadpool
+
+                    from app.tasks.collaboration_task import refund_collaboration_quota
+
+                    await run_in_threadpool(refund_collaboration_quota, task_id, fresh.params_json.get("quota_key"))
+                else:
+                    await refund_document_quota(task_id, document_quota_key(fresh))
                 try:
                     from app.celery_app import celery_app
                     celery_app.control.revoke(task_id, terminate=False)
@@ -284,6 +326,7 @@ async def cancel_task(
                 select(ProofreadTask).where(ProofreadTask.task_id == task_id)
             )).scalar_one_or_none()
             if fresh is None or fresh.status in TERMINAL:
+                await _refund_terminal_document_task(fresh)
                 return {"message": "任务已结束", "task_id": task_id}
 
         cancel_request = await db.execute(

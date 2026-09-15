@@ -34,9 +34,9 @@ from app.schemas.open import (
     OpenCompareResponse,
     OpenModelsResponse,
 )
-from app.schemas.proofread import ProofreadIssue, TextProofreadRequest, TextProofreadResponse
+from app.schemas.proofread import TextProofreadRequest, TextProofreadResponse
 from app.services.audit_log import AuditTimer, record_audit_log
-from app.services.proofread import proofread_text
+from app.services.proofread import InvalidModelConfigError, proofread_text
 
 router = APIRouter(tags=["开放API"])
 
@@ -99,7 +99,7 @@ async def open_proofread(
             input_text=request.text, extra_params=audit_extra,
             status="failed", error_message=str(e), duration_ms=timer.elapsed_ms(),
         )
-        if request.config_id is not None:
+        if isinstance(e, InvalidModelConfigError):
             # 用户指定了无效 config_id：用户错误，不退还密钥额度
             # （用户配额口径是「无结果不消耗」，预扣照退）
             await refund_user_daily_quota(user)
@@ -139,25 +139,13 @@ async def open_proofread(
         type="text",
         original_text=request.text,
         check_types=json.dumps(request.check_types or []),
-        domain=request.domain,
+        domain=result["domain"],
         result=result,
         total_issues=result["total_issues"],
         token_usage=result["usage"],
     )
     db.add(record)
     await db.flush()
-
-    issues = [
-        ProofreadIssue(
-            original=item.get("original", ""),
-            type=item.get("type", "unknown"),
-            suggestion=item.get("suggestion", ""),
-            explanation=item.get("explanation", ""),
-            severity=item.get("severity", "warning"),
-            chunk_index=item.get("chunk_index", 0),
-        )
-        for item in result["issues"]
-    ]
 
     record_audit_log(
         http_request, "api_proofread", user=user,
@@ -168,15 +156,7 @@ async def open_proofread(
         duration_ms=timer.elapsed_ms(),
     )
 
-    return TextProofreadResponse(
-        issues=issues,
-        total_issues=result["total_issues"],
-        chunks_count=result["chunks_count"],
-        usage=result["usage"],
-        domain=result["domain"],
-        check_types=result["check_types"],
-        record_id=record.id,
-    )
+    return TextProofreadResponse(**result, record_id=record.id)
 
 
 
@@ -295,6 +275,7 @@ async def open_proofread_compare(
     # 预检通过后配额实际不消耗），用量统计归属到调用密钥。权重=成功模型数，
     # 与密钥日配额（按成功数结算）同口径；全部失败不落（用户配额零消耗）。
     # 问题按 (original, suggestion) 去重——同一错误多模型发现只留一条（带 found_by）
+    record_id = None
     successes = [i for i in items if i.success]
     if successes:
         from app.services.model_compare import dedupe_compare_issues
@@ -303,23 +284,30 @@ async def open_proofread_compare(
             {"config_name": i.config_name, "issues": [issue.model_dump() for issue in i.issues]}
             for i in successes
         ])
-        db.add(ProofreadRecord(
+        record = ProofreadRecord(
             user_id=user.id,
             api_key_id=api_key.id if api_key is not None else None,
             type="text",
             original_text=request.text,
             check_types=json.dumps([]),
-            domain=request.domain,
+            domain=successes[0].domain,
             result={
                 "compare": True,
                 "models": [i.config_name for i in items],
+                "results": [i.model_dump() for i in items],
+                "domain": successes[0].domain,
+                "depth": successes[0].depth,
+                "consensus_originals": consensus,
+                "only_in": only_in,
                 "issues": merged_issues,
                 "issues_per_model": {str(i.config_id): i.total_issues for i in items},
             },
             total_issues=len(merged_issues),
             quota_weight=len(successes),
-        ))
+        )
+        db.add(record)
         await db.flush()
+        record_id = record.id
 
     record_audit_log(
         http_request, "api_proofread_compare", user=user,
@@ -328,7 +316,7 @@ async def open_proofread_compare(
         duration_ms=timer.elapsed_ms(),
     )
 
-    return OpenCompareResponse(results=items, consensus_originals=consensus, only_in=only_in)
+    return OpenCompareResponse(record_id=record_id, results=items, consensus_originals=consensus, only_in=only_in)
 
 
 

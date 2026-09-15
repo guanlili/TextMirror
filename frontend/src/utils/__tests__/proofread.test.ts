@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { highlightIssues, replaceTextInHtml } from '../proofread'
+import { highlightIssues, replaceTextInHtml, proofreadModeHints, proofreadDomainHints, proofreadDepthHints } from '../proofread'
+
+describe('proofreading setting hints', () => {
+  it.each([
+    ['single', proofreadModeHints], ['compare', proofreadModeHints], ['collaboration', proofreadModeHints],
+    ['auto', proofreadDomainHints], ['general', proofreadDomainHints], ['official', proofreadDomainHints], ['legal', proofreadDomainHints],
+    ['quick', proofreadDepthHints], ['standard', proofreadDepthHints], ['deep', proofreadDepthHints],
+  ] as const)('provides a brief explanation for %s', (value, hints) => {
+    expect(hints[value].length).toBeGreaterThan(10)
+    expect(hints[value].length).toBeLessThanOrEqual(80)
+  })
+  it('explains scope and tradeoffs without guaranteeing correctness', () => {
+    expect(proofreadDepthHints.quick).toContain('不调用 AI')
+    expect(proofreadDepthHints.deep).toContain('耗时和用量')
+    expect(proofreadDomainHints.legal).toContain('不替代专业法律意见')
+    expect(proofreadModeHints.compare).toContain('分别检查同一原文')
+    expect(proofreadModeHints.collaboration).toContain('分工检查')
+  })
+})
 
 describe('highlightIssues', () => {
   const mark = (e: { severity: string; type: string; suggestion: string }, escaped: string) =>

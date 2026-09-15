@@ -19,6 +19,7 @@ import app.models.user  # noqa
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.file_security import build_download_url, safe_upload_path, sanitize_filename
+from app.core.task_quota import document_quota_key, refund_document_quota_sync
 
 _run_async_state = threading.local()
 
@@ -83,23 +84,6 @@ def _refund_key_daily_quota(api_key_id: int) -> None:
         r.close()
     except Exception as e:
         logger.warning(f"[退款] 密钥日配额退还失败 key_id={api_key_id}: {e}")
-
-
-def _refund_user_daily_quota_sync(user_id: int, weight: int = 1) -> None:
-    """同步 Redis 退还登录用户日配额预扣（失败不抛出，仅记日志）。
-    用户配额按「无结果不消耗」口径：任务最终失败/取消一律退还。"""
-    if weight <= 0:
-        return
-    try:
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-
-        r = _get_sync_redis()
-        today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
-        r.eval(_REFUND_LUA, 1, f"textmirror:user_daily:{user_id}:{today}", weight)
-        r.close()
-    except Exception as e:
-        logger.warning(f"[退款] 用户日配额退还失败 user_id={user_id}: {e}")
 
 
 def _get_sync_engine():
@@ -189,13 +173,12 @@ class ProofreadDocumentTask(celery_app.Task):
                 db_task = session.get(ProofreadTask, db_task_id)
                 if db_task is None:
                     return
-                # 用户取消已在任务体内退还用户额度
+                # 成功任务的迟到失败通知不能退还用户预扣。
+                if db_task.status != "SUCCESS":
+                    refund_document_quota_sync(db_task.task_id, document_quota_key(db_task))
+                # 取消不退密钥额度；用户预扣按同一任务标记补偿，重复通知无害。
                 if db_task.status == "CANCELLED":
                     return
-                # 用户配额按「无结果不消耗」口径：最终失败必退（含无效配置——
-                # 该口径与失败不落库的旧行为一致）
-                if db_task.owner_user_id:
-                    _refund_user_daily_quota_sync(db_task.owner_user_id)
                 # 集成方指定无效配置：密钥额度不退（用户错误）
                 if db_task.error_code == "INVALID_CONFIG":
                     return
@@ -288,6 +271,9 @@ def async_proofread_document(self, db_task_id: int):
             )
             if claim.rowcount != 1:
                 session.rollback()
+                skipped_task = session.get(ProofreadTask, db_task_id)
+                if skipped_task is not None and skipped_task.status in ("CANCELLED", "FAILURE"):
+                    refund_document_quota_sync(skipped_task.task_id, document_quota_key(skipped_task))
                 logger.info(f"[Task {celery_task_id}] 任务非 {expected_status}，跳过")
                 return {"skipped": True, "task_id": celery_task_id}
             session.commit()
@@ -321,12 +307,15 @@ def async_proofread_document(self, db_task_id: int):
             params = db_task.params_json or {}
             domain = params.get("domain", "general")
             config_id = params.get("config_id")
+            depth = params.get("depth", "standard")
             user_id = db_task.owner_user_id
             file_id = doc_record.file_id
             filename = doc_record.filename
             file_path = doc_record.file_path
             file_ext = doc_record.file_ext
             check_types = params.get("check_types")
+            # 取消异常退出 session 后 ORM 属性可能过期，先保存退款上下文。
+            refund_task_id, quota_key = db_task.task_id, document_quota_key(db_task)
 
             logger.info(
                 f"[Task {celery_task_id}] 开始异步校对: db_task_id={db_task_id} "
@@ -350,7 +339,7 @@ def async_proofread_document(self, db_task_id: int):
                 from app.services.proofread import proofread_text
                 result = _run_async(proofread_text(
                     text=text, domain=domain, config_id=config_id, user_id=user_id,
-                    on_progress=_on_proofread_progress,
+                    depth=depth, on_progress=_on_proofread_progress,
                 ))
             except Exception as e:
                 logger.error(f"[Task {celery_task_id}] 校对失败: {e}")
@@ -383,7 +372,8 @@ def async_proofread_document(self, db_task_id: int):
 
             corrected_url = None
             try:
-                if file_path and file_ext and file_ext in (".docx", ".txt"):
+                # 新 Web 任务显式标记先审阅；开放 API（含 Bearer 用户）及旧任务保留修订件。
+                if not params.get("review_before_export", False) and file_path and file_ext in (".docx", ".txt"):
                     from app.services.document import generate_corrected_docx, generate_corrected_txt
                     corrected_filename = sanitize_filename(f"校对修订_{filename}")
                     corrected_path = safe_upload_path(file_id, corrected_filename)
@@ -408,7 +398,8 @@ def async_proofread_document(self, db_task_id: int):
                         user_id=user_id,
                         api_key_id=db_task.owner_api_key_id,
                         type="document",
-                        original_text=text[:10000],
+                        source_file_id=file_id,
+                        original_text=text,
                         check_types=json.dumps(check_types or []),
                         domain=domain,
                         result=result,
@@ -433,6 +424,10 @@ def async_proofread_document(self, db_task_id: int):
                 "domain": result["domain"],
                 "record_id": record_id,
                 "corrected_download_url": corrected_url,
+                "coverage": result.get("coverage"),
+                "depth": result.get("depth", "standard"),
+                "config_id": result.get("config_id"),
+                "check_types": result.get("check_types", []),
             }
 
             from datetime import datetime, timezone
@@ -464,8 +459,7 @@ def async_proofread_document(self, db_task_id: int):
     except _CancelledError:
         logger.info(f"[Task {celery_task_id}] 任务已被用户取消")
         # 取消=零产出：退还预扣的用户日配额（密钥额度按既有口径不退）
-        if user_id:
-            _refund_user_daily_quota_sync(user_id)
+        refund_document_quota_sync(refund_task_id, quota_key)
         return {"cancelled": True, "task_id": celery_task_id}
 
 

@@ -2,8 +2,21 @@
  * TextMirror 校对历史 API
  */
 import request from '@/utils/request'
+import type { ReviewIssue } from '@/utils/review'
 
-export interface HistoryItem {
+export interface HistoryReviewMetadata {
+  mode: 'single' | 'compare' | 'collaboration' | null
+  coverage_status: 'complete' | 'partial' | 'unknown'
+  review_summary: {
+    total: number
+    accepted: number
+    ignored: number
+    pending: number
+    failed_models: number
+  }
+}
+
+export interface HistoryItem extends HistoryReviewMetadata {
   id: number
   type: string
   domain: string
@@ -21,7 +34,8 @@ export interface HistoryListResponse {
   page_size: number
 }
 
-export interface HistoryDetail {
+export interface HistoryDetail extends HistoryReviewMetadata {
+  issues: ReviewIssue[]
   id: number
   type: string
   domain: string
@@ -29,7 +43,7 @@ export interface HistoryDetail {
   modified_text?: string
   check_types?: string
   result?: {
-    issues: Array<{
+    issues?: Array<{
       original: string
       type: string
       suggestion: string

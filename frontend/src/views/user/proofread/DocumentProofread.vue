@@ -37,11 +37,12 @@
           </div>
           <div class="setting-row">
             <span class="setting-label">领域选择：</span>
-            <el-radio-group v-model="domain">
+            <el-radio-group v-model="domain" aria-describedby="document-domain-help">
               <el-radio value="general">通用</el-radio>
               <el-radio value="official">公文</el-radio>
               <el-radio value="legal">法律</el-radio>
             </el-radio-group>
+            <p id="document-domain-help" class="setting-help" aria-live="polite">{{ proofreadDomainHints[domain] }}</p>
           </div>
           <div v-if="modelOptions.length > 1" class="setting-row">
             <span class="setting-label">校对模型：</span>
@@ -50,6 +51,7 @@
               size="default"
               style="max-width: 320px;"
               placeholder="默认当前模型"
+              aria-describedby="document-model-help"
             >
               <el-option
                 v-for="m in modelOptions"
@@ -58,6 +60,7 @@
                 :value="m.id"
               />
             </el-select>
+            <p id="document-model-help" class="setting-help">默认使用标记“当前”的模型；不同模型的速度、效果和用量不同。</p>
           </div>
           <el-button type="primary" size="large" :loading="uploading || proofreading" @click="handleStartProofread">
             <el-icon><Edit /></el-icon>
@@ -74,7 +77,7 @@
           <el-steps :active="stepIndex" align-center style="width: 480px; max-width: 100%; margin-bottom: 20px;">
             <el-step title="上传提取" description="解析文档文本" />
             <el-step title="AI 校对" description="大模型逐片检查" />
-            <el-step title="生成修订" description="产出修订文档" />
+            <el-step title="整理结果" description="准备人工审阅" />
             <el-step title="保存完成" description="写入历史记录" />
           </el-steps>
           <el-icon class="processing-icon" :size="40"><Loading /></el-icon>
@@ -98,14 +101,36 @@
 
     <!-- 步骤三：双栏对照结果 -->
     <div v-else-if="step === 'result'" class="result-section">
+      <ReviewWorkspace
+        :record-id="recordId"
+        :source-text="sourceText"
+        :issues="issues"
+        :coverage="coverage"
+        :domain="domain"
+        :depth="depth"
+        :config-id="selectedModelId"
+        :saved-review="savedReview"
+        @saved="handleReviewSaved"
+        @restore="handleReviewRestore"
+      />
+      <QualityFeedbackDialog ref="qualityFeedback" :record-id="recordId" :source-text="sourceText" />
+      <FactCheckPanel :record-id="recordId" :source-text="sourceText" @started="router.replace({ query: { ...route.query, review: String($event) } })" />
+      <ProofreadCoverage
+        v-model:coverage="coverage"
+        :source-text="sourceText"
+        :domain="domain"
+        :depth="depth"
+        :config-id="selectedModelId"
+        @issues="mergeIssues"
+      />
       <!-- 顶部操作栏 -->
       <div class="result-toolbar">
-        <el-button @click="resetAll">
+        <el-button @click="handleReupload">
           <el-icon><Back /></el-icon>重新上传
         </el-button>
         <div class="toolbar-info">
           <el-tag><el-icon><Document /></el-icon>&nbsp;{{ resultFilename }}</el-tag>
-          <el-tag type="success">共 {{ issues.length }} 个问题</el-tag>
+          <el-tag :type="isPartial ? 'warning' : 'success'">{{ isPartial ? '部分完成 · ' : '' }}共 {{ issues.length }} 个问题</el-tag>
           <el-tag type="info">{{ acceptedCount }} 已接受</el-tag>
           <el-tag type="warning">{{ pendingCount }} 待处理</el-tag>
         </div>
@@ -117,10 +142,11 @@
             <el-icon><Download /></el-icon>导出修订文本
           </el-button>
           <el-button
-            v-if="correctedDownloadUrl"
+            v-if="sourceFileId || recordId !== null"
+            :loading="exporting"
             @click="downloadCorrected"
           >
-            下载修订文档
+            {{ wordExportLabel }}
           </el-button>
           <el-button @click="handleExportReport">导出问题报告</el-button>
         </div>
@@ -128,15 +154,21 @@
 
       <!-- 双栏对照区域 -->
       <div class="result-columns">
-        <!-- 左栏：原文（带高亮标注） -->
         <el-card class="column-card original-column">
           <template #header>
             <div class="column-header">
-              <span>文档原文</span>
-              <span class="text-count">{{ originalText.length }} 字</span>
+              <span>文档审阅</span>
+              <span class="text-count">{{ sourceCharacters.length }} 字</span>
             </div>
           </template>
-          <div ref="originalTextRef" class="original-text" v-html="highlightedText"></div>
+          <ReviewPreview
+            :source-text="sourceText"
+            :current-text="currentText"
+            :issues="issues"
+            :patches="patches"
+            :active-index="activeIssueIndex"
+            :original-html="originalHtml"
+          />
         </el-card>
 
         <!-- 右栏：问题列表（逐条审改） -->
@@ -205,6 +237,7 @@
                 </el-tag>
               </div>
               <div class="issue-body">
+                <div class="issue-context">{{ issueContext(issue) }}</div>
                 <div class="issue-diff">
                   <span class="text text-del" :title="issue.original">{{ issue.original }}</span>
                   <el-icon class="arrow-icon"><Right /></el-icon>
@@ -217,11 +250,17 @@
               </div>
               <div class="issue-actions" v-if="!issue._accepted && !issue._ignored">
                 <el-button v-if="issue.suggestion" type="primary" size="small" @click="acceptIssue(issue)">
-                  <el-icon><Check /></el-icon>接受修改
+                  <el-icon><Check /></el-icon>仅修改此处
                 </el-button>
                 <el-button v-else-if="issue.type === 'sensitive' && issue.original" type="warning" size="small" @click="deleteIssue(issue)">
-                  <el-icon><Delete /></el-icon>删除该词
+                  <el-icon><Delete /></el-icon>仅删除此处
                 </el-button>
+                <el-button
+                  v-if="issue.suggestion || (issue.type === 'sensitive' && issue.original)"
+                  size="small"
+                  title="仅处理已报告且原文、建议相同的位置"
+                  @click="acceptMatching(issue)"
+                >全文同类</el-button>
                 <el-button size="small" @click="ignoreIssue(issue)">
                   <el-icon><Close /></el-icon>忽略
                 </el-button>
@@ -229,10 +268,11 @@
               <div class="issue-status" v-else>
                 <el-tag v-if="issue._accepted" type="success" size="small">已接受</el-tag>
                 <el-tag v-if="issue._ignored" type="info" size="small">已忽略</el-tag>
+                <el-button v-if="issue._ignored" text size="small" :disabled="recordId === null" @click="qualityFeedback?.open(issue)">补充原因（可选）</el-button>
                 <el-button text size="small" @click="undoIssue(issue)">撤销</el-button>
               </div>
             </div>
-            <el-empty v-if="filteredIssues.length === 0" description="没有发现问题" />
+            <el-empty v-if="filteredIssues.length === 0" :description="emptyIssuesText" />
           </div>
         </el-card>
       </div>
@@ -241,26 +281,35 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { ElMessage, type UploadFile } from 'element-plus'
-import { sanitizeDocumentHtml } from '@/utils/sanitize'
-import {
-  uploadDocumentApi,
-  type DocumentProofreadResponse,
-} from '@/api/document'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox, type UploadFile } from 'element-plus'
+import { uploadDocumentApi, type DocumentProofreadResponse } from '@/api/document'
 import { asyncDocumentProofreadApi, streamTaskStatus, cancelTaskApi, type TaskStatus } from '@/api/tasks'
 import { getAvailableModelsCached, type AvailableModel } from '@/api/polish'
+import type { ProofreadCoverage as Coverage } from '@/api/proofread'
 import {
-  escapeHtml,
-  severityColor,
-  severityLabel,
-  typeLabel,
-  replaceTextInHtml,
-  downloadTextFile,
-  highlightIssues,
-  type CompareIssue,
-} from '@/utils/proofread'
-import { useProofreadReview } from '@/composables/useProofreadReview'
+  getReviewApi,
+  saveReviewApi,
+  exportReviewApi,
+  exportDocumentReviewApi,
+  getReviewErrorDetail,
+  type ReviewResponse,
+  type ReviewRestorePayload,
+} from '@/api/review'
+import { severityColor, severityLabel, typeLabel, downloadTextFile, proofreadDomainHints } from '@/utils/proofread'
+import { reviewStateFingerprint } from '@/utils/review'
+import { formatSize } from '@/utils/format'
+import { useProofreadReview, type ReviewIssue } from '@/composables/useProofreadReview'
+import ReviewPreview from '@/components/ReviewPreview.vue'
+import ProofreadCoverage from '@/components/ProofreadCoverage.vue'
+import ReviewWorkspace from '@/components/ReviewWorkspace.vue'
+import QualityFeedbackDialog from '@/components/QualityFeedbackDialog.vue'
+import FactCheckPanel from '@/components/FactCheckPanel.vue'
+
+const qualityFeedback = ref<InstanceType<typeof QualityFeedbackDialog> | null>(null)
+const route = useRoute()
+const router = useRouter()
 
 // 步骤状态
 const step = ref<'upload' | 'processing' | 'result'>('upload')
@@ -286,29 +335,39 @@ let activeRunId = 0
 const modelOptions = ref<AvailableModel[]>([])
 const selectedModelId = ref<number | null>(null)
 
-onMounted(() => {
-  void restoreTaskSnapshot()
+onMounted(async () => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  const id = reviewQueryId()
+  if (id !== null) await restoreSavedReview(id)
+  else void restoreTaskSnapshot()
   void loadModelOptions()
 })
 
 onUnmounted(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
   invalidateTaskRun()
 })
 
 // 设置
 const domain = ref('general')
+const depth = ref('standard')
 
-// 结果数据
+// 原文及原始排版只在上传/恢复时设置，采纳决策不修改它们。
 const originalText = ref('')
-const currentHtml = ref('')
+const originalHtml = ref('')
 const resultFilename = ref('')
-const correctedDownloadUrl = ref('')
+const sourceFileId = ref('')
+const coverage = ref<Coverage | null>(null)
+const savedReview = ref<ReviewResponse | null>(null)
+const savedFingerprint = ref('')
+const exporting = ref(false)
 
-// 审阅共享逻辑：问题列表 / 修订文本 / 接受·忽略·删除·撤销 / 反馈上报
-// （文档校对特有差异：同步维护格式化 HTML 视图；撤销删除时锚点越界按钳位处理）
+const review = useProofreadReview()
 const {
+  sourceText,
   issues,
   currentText,
+  patches,
   filterType,
   activeIssueIndex,
   recordId,
@@ -316,76 +375,143 @@ const {
   acceptedCount,
   pendingCount,
   getGlobalIndex,
+  initialize,
+  mergeIssues,
+  serializeIssues,
   acceptIssue,
+  acceptMatching,
   ignoreIssue,
   deleteIssue,
   undoIssue,
   handleAcceptAll,
-} = useProofreadReview({
-  clampUndoAnchor: true,
-  onAcceptReplace: (original, suggestion) => {
-    if (currentHtml.value) {
-      currentHtml.value = replaceTextInHtml(currentHtml.value, original, escapeHtml(suggestion))
-    }
-  },
-  onDeleteWord: (target) => {
-    if (currentHtml.value) {
-      currentHtml.value = currentHtml.value.replaceAll(target, '')
-    }
-  },
-  onUndoReplace: (suggestion, original) => {
-    if (currentHtml.value) {
-      currentHtml.value = replaceTextInHtml(currentHtml.value, suggestion, escapeHtml(original))
-    }
-  },
-})
+} = review
 
 // 计算属性
 const statusText = computed(() => {
   if (cancelling.value) return '正在取消...'
   if (uploading.value) return '上传中...'
   if (proofreading.value) return 'AI 校对中...'
+  if (step.value === 'processing') return '正在恢复审阅...'
   return '开始校对'
 })
 
-// 高亮原文：只依赖 issues/currentText/currentHtml（悬停样式由 watcher 局部切换 mark
-// 的 class——此前每次 mouseenter 都整篇重算替换+DOMPurify，长文档必卡）
-const originalTextRef = ref<HTMLElement>()
-const highlightedText = computed(() => {
-  // 优先使用格式化 HTML（保留 Word 排版），回退到纯文本
-  let html = currentHtml.value
-  if (!html) {
-    html = escapeHtml(currentText.value).replace(/\n/g, '<br/>')
-  }
-  const entries = issues.value
-    .map((issue, index) => ({ index, issue }))
-    .filter(({ issue }) => !issue._accepted && !issue._ignored && issue.original)
-    .map(({ index, issue }) => ({
-      index,
-      original: issue.original,
-      severity: issue.severity,
-      type: issue.type,
-      suggestion: issue.suggestion,
-    }))
-  const marked = highlightIssues(html, entries, (e, escaped) => (
-    `<mark data-issue-idx="${e.index}" class="highlight-mark hl-${e.severity}" `
-    + `title="[${typeLabel(e.type)}] ${escapeHtml(e.suggestion)}">${escaped}</mark>`
-  ))
-  return sanitizeDocumentHtml(marked)
+const sourceCharacters = computed(() => Array.from(sourceText.value))
+const isPartial = computed(() => coverage.value?.status === 'partial')
+const sourceFingerprint = computed(() => reviewStateFingerprint(issues.value, coverage.value))
+const hasUnsavedChanges = computed(() => step.value === 'result'
+  && sourceFingerprint.value !== savedFingerprint.value)
+const wordExportLabel = computed(() => sourceFileId.value && /\.docx$/i.test(resultFilename.value)
+  ? '导出已采纳 Word（保留排版）'
+  : '导出 Word（纯文本）')
+const emptyIssuesText = computed(() => {
+  if (isPartial.value) return '审校尚未完成，当前范围暂无此类问题，不代表全文无误'
+  return filterType.value ? '没有符合筛选条件的问题' : '没有发现问题'
 })
 
-// 悬停联动：切换对应 mark 的 is-hover 类（O(1) DOM 操作；同一问题多处出现全部高亮）
-watch(activeIssueIndex, (idx) => {
-  const root = originalTextRef.value
-  if (!root) return
-  root.querySelectorAll('mark.is-hover').forEach(el => el.classList.remove('is-hover'))
-  if (idx >= 0) {
-    root.querySelectorAll(`mark[data-issue-idx="${idx}"]`).forEach(el => el.classList.add('is-hover'))
-  }
-})
+function issueContext(issue: ReviewIssue): string {
+  const { start, end } = issue
+  if (start == null || end == null || start < 0 || end <= start) return '位置未确定，请人工核对'
+  const chars = sourceCharacters.value
+  const before = chars.slice(Math.max(0, start - 12), start).join('')
+  const after = chars.slice(end, end + 12).join('')
+  return `第 ${start + 1} 字 · ${start > 12 ? '…' : ''}${before}【${issue.original}】${after}${end + 12 < chars.length ? '…' : ''}`
+}
 
-// 辅助函数
-import { formatSize } from '@/utils/format'
+function reviewQueryId(): number | null {
+  const raw = route.query.review
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return null
+  const id = Number(raw)
+  return Number.isSafeInteger(id) && id > 0 ? id : null
+}
+
+async function restoreSavedReview(id: number) {
+  const runId = startTaskRun()
+  step.value = 'processing'
+  processingInfo.value = '正在读取已保存审阅，不会重新调用 AI 校对'
+  try {
+    const response = await getReviewApi(id, { signal: abortController.value?.signal })
+    if (!isCurrentRun(runId)) return
+    if (response.record_id !== id) throw new Error('返回的审阅记录不匹配')
+    originalText.value = response.original_text
+    originalHtml.value = ''
+    recordId.value = response.record_id
+    sourceFileId.value = response.source_file_id || ''
+    resultFilename.value = response.source_filename || 'document'
+    domain.value = response.domain
+    depth.value = response.depth || 'standard'
+    selectedModelId.value = response.config_id ?? null
+    coverage.value = response.coverage ?? null
+    savedReview.value = response
+    review.restore(response.original_text, response.issues)
+    savedFingerprint.value = reviewStateFingerprint(response.issues, response.coverage)
+    progress.value = 100
+    stepKey.value = 'save'
+    step.value = 'result'
+    invalidateTaskRun()
+  } catch (error) {
+    if (!isCurrentRun(runId) || isAbortError(error)) return
+    resetAll()
+    ElMessage.error(`恢复审阅失败：${getReviewErrorDetail(error)}`)
+  }
+}
+
+async function handleReviewSaved(response: ReviewResponse) {
+  if (response.record_id !== recordId.value || response.original_text !== sourceText.value) return
+  if (savedReview.value && response.revision < savedReview.value.revision) return
+  savedReview.value = response
+  // 基线来自服务端响应，保存请求期间新增的操作仍视为未保存。
+  savedFingerprint.value = reviewStateFingerprint(response.issues, response.coverage)
+  await syncReviewQuery(response.record_id)
+}
+
+async function syncReviewQuery(id: number | null): Promise<boolean> {
+  if (route.query.review === (id === null ? undefined : String(id))) return true
+  const query = { ...route.query }
+  delete query.review
+  if (id !== null) query.review = String(id)
+  try {
+    // 地址同步不触发恢复，不覆盖更新地址期间的采纳/忽略操作。
+    const failure = await router.replace({ query })
+    if (failure) throw failure
+    return true
+  } catch {
+    ElMessage.warning('地址更新失败，有记录的结果可从校对历史继续审阅')
+    return false
+  }
+}
+
+function handleReviewRestore(snapshot: ReviewRestorePayload) {
+  review.restore(sourceText.value, snapshot.issues)
+  coverage.value = snapshot.coverage
+}
+
+async function confirmDiscardChanges(): Promise<boolean> {
+  if (!hasUnsavedChanges.value) return true
+  try {
+    await ElMessageBox.confirm('当前有未保存的审阅修改，离开后将丢失。是否继续？', '未保存修改', {
+      type: 'warning', confirmButtonText: '放弃修改', cancelButtonText: '继续审阅',
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+onBeforeRouteLeave(() => confirmDiscardChanges())
+
+function handleBeforeUnload(event: { preventDefault(): void; returnValue: string }) {
+  if (!hasUnsavedChanges.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+async function handleReupload() {
+  if (!await confirmDiscardChanges()) return
+  resetAll()
+  const query = { ...route.query }
+  delete query.review
+  await router.replace({ query })
+}
 
 function handleFileChange(file: UploadFile) {
   if (file.raw) selectedFile.value = file.raw
@@ -404,6 +530,7 @@ interface TaskSnapshot {
   fileId: string
   filename: string
   domain: string
+  depth?: string
   configId?: number
   accessToken?: string
   originalText: string
@@ -457,7 +584,7 @@ async function loadModelOptions() {
   try {
     const res = await getAvailableModelsCached()
     modelOptions.value = res.models
-    if (selectedModelId.value === null) {
+    if (selectedModelId.value === null && step.value === 'upload') {
       const active = res.models.find(m => m.is_active)
       selectedModelId.value = active ? active.id : (res.models[0]?.id ?? null)
     }
@@ -473,17 +600,17 @@ function applyTaskProgress(status: TaskStatus, runId: number) {
   if (status.message) processingInfo.value = status.message
 }
 
-function completeTask(taskResult: TaskStatus, fallbackFilename: string, runId: number) {
+async function completeTask(taskResult: TaskStatus, fallbackFilename: string, runId: number) {
   if (!isCurrentRun(runId)) return
 
   uploading.value = false
   proofreading.value = false
   cancelling.value = false
-  clearSnapshot()
   currentTaskId.value = ''
   accessToken.value = ''
 
   if (taskResult.status !== 'SUCCESS') {
+    clearSnapshot()
     step.value = 'upload'
     stepKey.value = 'upload'
     progress.value = 0
@@ -497,11 +624,9 @@ function completeTask(taskResult: TaskStatus, fallbackFilename: string, runId: n
     return
   }
 
-  const result = taskResult.result as {
-    filename?: string; issues?: CompareIssue[]; total_issues?: number;
-    corrected_download_url?: string; record_id?: number | null
-  }
-  if (!result || !result.issues) {
+  const result = taskResult.result as Partial<DocumentProofreadResponse> | undefined
+  if (!result || !Array.isArray(result.issues)) {
+    clearSnapshot()
     step.value = 'upload'
     stepKey.value = 'upload'
     progress.value = 0
@@ -511,31 +636,31 @@ function completeTask(taskResult: TaskStatus, fallbackFilename: string, runId: n
     return
   }
 
-  const proofreadRes: DocumentProofreadResponse = {
-    filename: result.filename || fallbackFilename,
-    issues: result.issues,
-    total_issues: result.total_issues ?? result.issues.length,
-    corrected_download_url: result.corrected_download_url || '',
-    record_id: result.record_id ?? undefined,
-  } as DocumentProofreadResponse
-
-  recordId.value = proofreadRes.record_id ?? null
-  resultFilename.value = proofreadRes.filename
-  correctedDownloadUrl.value = proofreadRes.corrected_download_url || ''
-  issues.value = proofreadRes.issues.map((issue) => ({
-    ...issue,
-    _accepted: false,
-    _ignored: false,
-  }))
+  recordId.value = result.record_id ?? null
+  resultFilename.value = result.filename || fallbackFilename
+  sourceFileId.value = result.file_id || sourceFileId.value
+  domain.value = result.domain || domain.value
+  depth.value = result.depth || 'standard'
+  if (result.config_id !== undefined) selectedModelId.value = result.config_id
+  coverage.value = result.coverage ?? null
+  savedReview.value = null
+  initialize(originalText.value, result.issues)
+  savedFingerprint.value = sourceFingerprint.value
   progress.value = 100
   stepKey.value = 'save'
   step.value = 'result'
+  const bound = await syncReviewQuery(recordId.value)
+  if (!isCurrentRun(runId)) return
+  // 有记录但导航失败时仍可从任务快照恢复；匿名结果不生成虚假的 review id。
+  if (bound || recordId.value === null) clearSnapshot()
   invalidateTaskRun()
 
-  if (proofreadRes.total_issues === 0) {
+  if (isPartial.value) {
+    ElMessage.warning(`审校尚未完成，已发现 ${issues.value.length} 个问题；未审范围请补查，不能视为全文无误`)
+  } else if (issues.value.length === 0) {
     ElMessage.success('文档没有发现任何问题')
   } else {
-    ElMessage.info(`共发现 ${proofreadRes.total_issues} 个问题，请逐条审阅`)
+    ElMessage.info(`共发现 ${issues.value.length} 个问题，请逐条审阅`)
   }
 }
 
@@ -549,7 +674,7 @@ async function trackTask(snapshot: TaskSnapshot, runId: number) {
       accessToken: snapshot.accessToken,
       signal: abortController.value?.signal,
     })
-    completeTask(taskResult, snapshot.filename, runId)
+    await completeTask(taskResult, snapshot.filename, runId)
   } catch (error: unknown) {
     if (!isCurrentRun(runId) || isAbortError(error)) return
     uploading.value = false
@@ -563,6 +688,7 @@ async function submitTaskSnapshot(snapshot: TaskSnapshot, runId: number) {
   const submitRes = await asyncDocumentProofreadApi({
     file_id: snapshot.fileId,
     domain: snapshot.domain,
+    depth: snapshot.depth || 'standard',
     config_id: snapshot.configId,
   }, {
     idempotencyKey: snapshot.idempotencyKey,
@@ -583,10 +709,12 @@ async function restoreTaskSnapshot() {
   if (!snapshot) return
 
   originalText.value = snapshot.originalText || ''
-  currentText.value = snapshot.originalText || ''
-  currentHtml.value = snapshot.currentHtml || ''
+  initialize(originalText.value, [])
+  originalHtml.value = snapshot.currentHtml || ''
+  sourceFileId.value = snapshot.fileId
   domain.value = snapshot.domain || 'general'
-  if (snapshot.configId !== undefined) selectedModelId.value = snapshot.configId
+  depth.value = snapshot.depth || 'standard'
+  selectedModelId.value = snapshot.configId ?? null
   resultFilename.value = snapshot.filename || ''
   accessToken.value = snapshot.accessToken || ''
   currentTaskId.value = snapshot.taskId || ''
@@ -632,6 +760,18 @@ async function handleStartProofread() {
     cancelling.value = false
     progress.value = 20
     processingInfo.value = '正在上传文件并提取文本...'
+    recordId.value = null
+    savedReview.value = null
+    if (!await syncReviewQuery(null)) {
+      if (!isCurrentRun(runId)) return
+      uploading.value = false
+      step.value = 'upload'
+      progress.value = 0
+      processingInfo.value = ''
+      invalidateTaskRun()
+      return
+    }
+    if (!isCurrentRun(runId)) return
 
     const uploadRes = await uploadDocumentApi(selectedFile.value, abortController.value?.signal)
     if (!isCurrentRun(runId)) return
@@ -642,14 +782,17 @@ async function handleStartProofread() {
     stepKey.value = 'proofread'
     processingInfo.value = `文本提取完成，共 ${uploadRes.text_length} 字，正在提交校对任务...`
     originalText.value = uploadRes.extracted_text
-    currentText.value = uploadRes.extracted_text
-    currentHtml.value = uploadRes.extracted_html || ''
+    initialize(originalText.value, [])
+    originalHtml.value = uploadRes.extracted_html || ''
+    sourceFileId.value = uploadRes.file_id
+    resultFilename.value = uploadRes.filename
 
     snapshot = {
       idempotencyKey: createIdempotencyKey(),
       fileId: uploadRes.file_id,
       filename: uploadRes.filename,
       domain: domain.value,
+      depth: depth.value,
       configId: selectedModelId.value ?? undefined,
       originalText: uploadRes.extracted_text,
       currentHtml: uploadRes.extracted_html || '',
@@ -699,31 +842,105 @@ async function handleCancel() {
   }
 }
 
-// 下载修订文档
-function downloadCorrected() {
-  if (correctedDownloadUrl.value) {
-    window.open(correctedDownloadUrl.value, '_blank')
+async function confirmPartialExport(): Promise<boolean> {
+  if (!isPartial.value) return true
+  try {
+    await ElMessageBox.confirm('审校仅部分完成，仍有未检查范围。本次只导出已采纳修改，不代表全文已校对。是否继续？', '部分完成导出', {
+      type: 'warning', confirmButtonText: '导出已采纳部分', cancelButtonText: '继续审阅',
+    })
+    return true
+  } catch {
+    return false
   }
 }
 
-// 导出修订文本
-function handleExportText() {
-  downloadTextFile(currentText.value, `修订_${resultFilename.value || 'document'}.txt`)
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  try {
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+  } finally {
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+}
+
+// 导出请求发起时的已采纳快照，绝不下载任务生成的“全采纳”静态文件。
+async function downloadCorrected() {
+  if (exporting.value || (!sourceFileId.value && recordId.value === null)) return
+  const runId = activeRunId
+  exporting.value = true
+  let stage = '保存'
+  try {
+    if (!await confirmPartialExport() || !isCurrentRun(runId)) return
+    const id = recordId.value
+    const fileId = sourceFileId.value
+    const capturedIssues = serializeIssues()
+    const capturedCoverage: Coverage | null = coverage.value ? JSON.parse(JSON.stringify(coverage.value)) : null
+    const filename = `${isPartial.value ? '部分审校_' : ''}已采纳_${(resultFilename.value || 'document').replace(/\.[^.]+$/, '')}.docx`
+    let blob: Blob
+    if (id !== null) {
+      const response = await saveReviewApi(id, {
+        revision: savedReview.value?.revision ?? 0,
+        issues: capturedIssues,
+        coverage: capturedCoverage,
+        depth: depth.value,
+        config_id: selectedModelId.value,
+      })
+      if (!isCurrentRun(runId)) return
+      if (response.record_id !== id || response.original_text !== sourceText.value) {
+        throw new Error('返回的审阅与当前文档不一致，已停止导出')
+      }
+      await handleReviewSaved(response)
+      if (!isCurrentRun(runId)) return
+      stage = '导出'
+      blob = await exportReviewApi(id, { revision: response.revision, format: 'docx' })
+    } else {
+      stage = '导出'
+      blob = await exportDocumentReviewApi(fileId, { issues: capturedIssues, format: 'docx' })
+    }
+    if (!isCurrentRun(runId)) return
+    downloadBlob(blob, filename)
+    ElMessage.success('已导出请求发起时的已采纳修改；后续操作需再次导出')
+  } catch (error) {
+    if (!isCurrentRun(runId)) return
+    ElMessage.error(`${stage}失败，未导出：${getReviewErrorDetail(error)}`)
+  } finally {
+    if (isCurrentRun(runId)) exporting.value = false
+  }
+}
+
+// 纯文本始终从原文和已采纳补丁派生，不包含未采纳建议。
+async function handleExportText() {
+  const runId = activeRunId
+  if (!await confirmPartialExport() || !isCurrentRun(runId)) return
+  downloadTextFile(currentText.value, `${isPartial.value ? '部分审校_' : ''}修订_${resultFilename.value || 'document'}.txt`)
   ElMessage.success('修订文本已导出')
 }
 
-// 导出问题报告
+// 即使零问题，也允许导出明确标注未审范围的部分完成报告。
 function handleExportReport() {
-  if (issues.value.length === 0) return
   const lines = [
     `文档校对报告 - ${resultFilename.value}`,
+    isPartial.value ? '审校状态: partial（部分完成），不能视为全文无误' : coverage.value ? '审校状态: 已完成' : '审校状态: 未记录覆盖范围，无法确认全文完成',
     `共发现 ${issues.value.length} 个问题`,
     `已接受: ${acceptedCount.value}  已忽略: ${issues.value.filter(i => i._ignored).length}  待处理: ${pendingCount.value}`,
     '',
   ]
+  if (coverage.value) {
+    lines.push(`完成范围: ${coverage.value.completed_chunks}/${coverage.value.total_chunks} 段`)
+    for (const chunk of coverage.value.failed_chunks) {
+      lines.push(`未审范围: 第 ${chunk.start + 1}–${chunk.end} 字（${chunk.error_code}）`)
+    }
+    lines.push('')
+  }
   issues.value.forEach((issue, i) => {
     const status = issue._accepted ? '[已接受]' : issue._ignored ? '[已忽略]' : '[待处理]'
     lines.push(`${i + 1}. ${status} [${typeLabel(issue.type)}] ${severityLabel(issue.severity)}`)
+    lines.push(`   位置: ${issueContext(issue)}`)
     lines.push(`   原文: ${issue.original}`)
     lines.push(`   建议: ${issue.suggestion}`)
     if (issue.explanation) lines.push(`   说明: ${issue.explanation}`)
@@ -743,11 +960,15 @@ function resetAll() {
   proofreading.value = false
   cancelling.value = false
   originalText.value = ''
-  currentText.value = ''
-  currentHtml.value = ''
+  initialize('', [])
+  originalHtml.value = ''
   resultFilename.value = ''
-  correctedDownloadUrl.value = ''
-  issues.value = []
+  sourceFileId.value = ''
+  coverage.value = null
+  depth.value = 'standard'
+  savedReview.value = null
+  savedFingerprint.value = ''
+  exporting.value = false
   progress.value = 0
   processingInfo.value = ''
   filterType.value = ''
@@ -760,6 +981,18 @@ function resetAll() {
 </script>
 
 <style scoped lang="scss">
+.setting-help {
+  flex-basis: 100%;
+  margin: 0;
+  padding-left: 80px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 768px) {
+  .setting-help { flex-basis: auto; padding-left: 0; }
+}
 .document-proofread-page {
   max-width: 1400px;
   margin: 0 auto;
@@ -821,6 +1054,8 @@ function resetAll() {
   .setting-row {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
+    row-gap: 6px;
     margin-bottom: 12px;
     .setting-label {
       width: 80px;
@@ -905,57 +1140,16 @@ function resetAll() {
   }
 }
 
-.original-text {
-  font-size: 14px;
-  line-height: 1.8;
-  color: var(--color-text);
-  word-break: break-all;
+.result-section > .review-workspace {
+  margin-bottom: 16px;
+}
 
-  :deep(mark.highlight-mark) {
-    padding: 1px 3px;
-    border-radius: 2px;
-    cursor: pointer;
-  }
-
-  :deep(mark.hl-error) { background: #fee2e2; }
-  :deep(mark.hl-warning) { background: #fef3c7; }
-  :deep(mark.hl-info) { background: #dbeafe; }
-
-  :deep(mark.is-hover) {
-    background: #fde68a;
-    box-shadow: 0 0 0 2px #f59e0b;
-    font-weight: 600;
-  }
-
-  :deep(p) {
-    margin: 0.3em 0;
-  }
-
-  :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
-    margin: 0.5em 0 0.3em;
-    font-weight: 600;
-  }
-
-  :deep(h1) { font-size: 22pt; }
-  :deep(h2) { font-size: 18pt; }
-  :deep(h3) { font-size: 14pt; }
-  :deep(h4) { font-size: 12pt; }
-
-  :deep(table) {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 8px 0;
-  }
-
-  :deep(td), :deep(th) {
-    border: 1px solid #ccc;
-    padding: 6px 8px;
-  }
-
-  :deep(strong) { font-weight: 700; }
-  :deep(em) { font-style: italic; }
-  :deep(u) { text-decoration: underline; }
-  :deep(s) { text-decoration: line-through; }
+.issue-context {
+  margin-bottom: 8px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .issues-header {
@@ -1102,6 +1296,7 @@ function resetAll() {
   .issue-actions, .issue-status {
     margin-top: 10px;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
 

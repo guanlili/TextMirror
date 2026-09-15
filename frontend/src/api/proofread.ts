@@ -7,9 +7,26 @@ export interface ProofreadIssue {
   original: string
   type: string
   suggestion: string
-  explanation: string
+  explanation?: string
   severity: string
+  chunk_index?: number
+  start?: number | null
+  end?: number | null
+}
+
+export interface FailedProofreadChunk {
   chunk_index: number
+  start: number
+  end: number
+  text: string
+  error_code: string
+}
+
+export interface ProofreadCoverage {
+  status: 'complete' | 'partial'
+  total_chunks: number
+  completed_chunks: number
+  failed_chunks: FailedProofreadChunk[]
 }
 
 export interface TextProofreadResponse {
@@ -20,6 +37,9 @@ export interface TextProofreadResponse {
   domain: string
   check_types: string[]
   record_id?: number
+  depth?: string
+  config_id?: number | null
+  coverage?: ProofreadCoverage | null
 }
 
 /**
@@ -58,12 +78,16 @@ export interface ModelProofreadResult {
   issues: (ProofreadIssue & { _accepted?: boolean; _ignored?: boolean })[]
   total_issues: number
   success: boolean
-  error?: string
+  error?: string | null
   elapsed_ms: number
+  coverage?: ProofreadCoverage | null
+  depth?: string
+  domain?: string
 }
 
 /** 多模型对比响应 */
 export interface ProofreadCompareResponse {
+  record_id?: number | null
   results: ModelProofreadResult[]
   consensus_originals: string[]
   only_in: Record<string, string[]>

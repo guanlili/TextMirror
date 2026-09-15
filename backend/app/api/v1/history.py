@@ -12,9 +12,69 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.proofread import ProofreadRecord
 from app.schemas.history import HistoryDetailResponse, HistoryListItem, HistoryListResponse
+from app.schemas.review import ReviewExportRequest, ReviewResponse, ReviewVersionRequest, ReviewWriteRequest
 from app.services.audit_log import record_audit_log
+from app.services.review import (
+    export_review_file,
+    history_review_summary,
+    load_review_record,
+    load_review_source,
+    review_content,
+    review_response,
+    save_review,
+)
 
 router = APIRouter(prefix="/history", tags=["校对历史"])
+
+
+@router.get("/{record_id}/review", response_model=ReviewResponse, summary="读取审阅草稿和版本")
+async def get_review(record_id: int, db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
+    record = await load_review_record(db, record_id, current_user.id)
+    return review_response(record)
+
+
+@router.put("/{record_id}/review", response_model=ReviewResponse, summary="按修订号保存审阅草稿")
+async def put_review(
+    record_id: int, request: ReviewWriteRequest,
+    db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user),
+):
+    record = await load_review_record(db, record_id, current_user.id)
+    return await save_review(db, record, current_user.id, request)
+
+
+@router.post("/{record_id}/versions", response_model=ReviewResponse, summary="保存不可变审阅版本")
+async def create_review_version(
+    record_id: int, request: ReviewVersionRequest,
+    db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user),
+):
+    record = await load_review_record(db, record_id, current_user.id)
+    return await save_review(db, record, current_user.id, request, create_version=True, label=request.label)
+
+
+@router.post("/{record_id}/export", summary="下载已保存草稿或版本（仅采纳项）")
+async def export_history_review(
+    record_id: int, request: ReviewExportRequest,
+    db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user),
+):
+    record = await load_review_record(db, record_id, current_user.id)
+    if request.revision != record.review_revision:
+        raise HTTPException(409, "审阅版本已更新，请重新加载后重试")
+    review = review_response(record)
+    if request.version_id is not None:
+        version = next((version for version in review.versions if version.id == request.version_id), None)
+        if version is None:
+            raise HTTPException(404, "审阅版本不存在")
+        issues = version.issues
+    else:
+        if record.review_state is None:
+            raise HTTPException(422, "请先保存审阅草稿再导出")
+        issues = review.issues
+    source = await load_review_source(db, record, current_user.id) if request.format == "docx" else None
+    return await export_review_file(
+        record.original_text, issues, request.format, record.source_filename,
+        original_path=source.file_path if source is not None else None,
+        file_ext=source.file_ext if source is not None else "",
+    )
 
 
 @router.get("/usage", summary='获取今日使用量与配额')
@@ -51,40 +111,46 @@ async def list_history(
     current_user=Depends(get_current_user),
 ):
     """获取当前用户的校对历史列表"""
-    # 构建查询
-    base_query = select(ProofreadRecord).where(ProofreadRecord.user_id == current_user.id)
-
+    r = ProofreadRecord
+    filters = [r.user_id == current_user.id]
     if type:
-        base_query = base_query.where(ProofreadRecord.type == type)
+        filters.append(r.type == type)
     if domain:
-        base_query = base_query.where(ProofreadRecord.domain == domain)
+        filters.append(r.domain == domain)
 
-    # 统计总数
-    count_query = select(func.count()).select_from(
-        base_query.subquery()
-    )
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
-
-    # 分页查询
-    list_query = base_query.order_by(desc(ProofreadRecord.created_at))
-    list_query = list_query.offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(list_query)
-    records = result.scalars().all()
-
-    items = [
-        HistoryListItem(
-            id=r.id,
-            type=r.type,
-            domain=r.domain,
-            total_issues=r.total_issues,
-            text_preview=(r.original_text or "")[:100] + ("..." if r.original_text and len(r.original_text) > 100 else ""),
-            source_filename=r.source_filename,
-            token_usage=r.token_usage,
-            created_at=r.created_at,
-        )
-        for r in records
-    ]
+    total = (await db.execute(select(func.count()).select_from(r).where(*filters))).scalar() or 0
+    # 两次批量查询；只取预览与当前审阅字段，绝不加载正文、自动成稿或 review_state.versions。
+    list_query = select(
+        r.id, r.type, r.domain, r.total_issues, r.source_filename, r.token_usage, r.created_at,
+        func.substr(r.original_text, 1, 101).label("preview"),
+        r.result["issues"].label("result_issues"),
+        r.result["coverage"].label("result_coverage"),
+        r.result["compare"].as_boolean().label("result_compare"),
+        r.result["results"].label("result_models"),
+        r.result["collaboration"].label("collaboration"),
+        r.review_state["issues"].label("saved_issues"),
+        r.review_state["coverage"].label("saved_coverage"),
+        r.review_state["compare"].label("saved_compare"),
+    ).where(*filters).order_by(desc(r.created_at), desc(r.id)).offset((page - 1) * page_size).limit(page_size)
+    records = (await db.execute(list_query)).mappings().all()
+    items = []
+    for row in records:
+        result = {
+            "coverage": row["result_coverage"], "compare": row["result_compare"],
+            "results": row["result_models"], "collaboration": row["collaboration"],
+        }
+        if row["result_issues"] is not None:
+            result["issues"] = row["result_issues"]
+        state = None if row["saved_issues"] is None else {
+            "issues": row["saved_issues"], "coverage": row["saved_coverage"], "compare": row["saved_compare"],
+        }
+        preview = row["preview"] or ""
+        metadata = history_review_summary(result, state) if row["type"] in ("text", "document") else {}
+        items.append(HistoryListItem(
+            **{key: row[key] for key in ("id", "type", "domain", "total_issues", "source_filename", "token_usage", "created_at")},
+            text_preview=preview[:100] + ("..." if len(preview) > 100 else ""),
+            **metadata,
+        ))
 
     return HistoryListResponse(
         items=items,
@@ -118,7 +184,11 @@ async def get_history_detail(
         extra_params={"record_id": record_id, "record_type": record.type},
     )
 
+    content = review_content(record.result, record.review_state) if record.type in ("text", "document") else None
+    metadata = history_review_summary(record.result, record.review_state, content=content) if content is not None else {}
     return HistoryDetailResponse(
+        **metadata,
+        issues=content[0] if content is not None else [],
         id=record.id,
         type=record.type,
         domain=record.domain,

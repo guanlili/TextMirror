@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from app.schemas.proofread import ProofreadCoverage
+
 
 class DocumentUploadResponse(BaseModel):
     """文档上传响应"""
@@ -30,6 +32,7 @@ class DocumentProofreadRequest(BaseModel):
         None,
         description="指定模型配置ID（不填用管理后台设的当前模型）"
     )
+    depth: Literal["quick", "standard", "deep"] = "standard"
 
 
 class DocumentProofreadResponse(BaseModel):
@@ -43,3 +46,7 @@ class DocumentProofreadResponse(BaseModel):
     domain: str = "general"
     record_id: Optional[int] = None
     corrected_download_url: Optional[str] = None
+    coverage: Optional[ProofreadCoverage] = None
+    config_id: Optional[int] = None
+    depth: Literal["quick", "standard", "deep"] = "standard"
+    check_types: List[str] = Field(default_factory=list)

@@ -57,7 +57,8 @@ def _cn_to_number(cn: str) -> Optional[int]:
     return total + section + value
 
 
-def _issue(original: str, suggestion: str, explanation: str, severity: str = "warning") -> Dict[str, Any]:
+def _issue(original: str, suggestion: str, explanation: str, severity: str = "warning",
+           *, start: int, end: int) -> Dict[str, Any]:
     return {
         "original": original,
         "type": "logic",
@@ -66,6 +67,8 @@ def _issue(original: str, suggestion: str, explanation: str, severity: str = "wa
         "severity": severity,
         "chunk_index": 0,
         "source": "consistency",
+        "start": start,
+        "end": end,
     }
 
 
@@ -93,11 +96,12 @@ def check_amount_consistency(text: str) -> List[Dict[str, Any]]:
         if num_unit:
             num_val *= _CN_BIG_UNIT[num_unit]
         if cn_val != num_val and cn_val > 0:
+            original = m.group(0)[:60]
             issues.append(_issue(
-                m.group(0)[:60],
-                m.group(0)[:60],
+                original,
+                original,
                 f"金额大小写不一致：{cn_part}{cn_unit or ''}元 与 {num_part}{num_unit or ''} 数值不符",
-                "error",
+                "error", start=m.start(), end=m.start() + len(original),
             ))
     return issues
 
@@ -126,9 +130,11 @@ def check_naming_consistency(text: str) -> List[Dict[str, Any]]:
             name_counter[m.group()] += 1 if m.group() not in name_counter else 0
     # 直接改用集合 + 手动计数
     all_names = set()
+    full_name_spans = []
     for suf in suffixes:
         for m in re.finditer(r"[\u4e00-\u9fa5A-Za-z·]{2,16}" + suf, text):
             all_names.add(m.group())
+            full_name_spans.append(m.span())
 
     for full in all_names:
         if text.count(full) < 2 or len(full) < 6:
@@ -150,16 +156,18 @@ def check_naming_consistency(text: str) -> List[Dict[str, Any]]:
         for size in range(len(core), 2, -1):
             for i in range(len(core) - size + 1):
                 abbr = core[i: i + size]
-                total = text.count(abbr)
-                in_full = text.count(full) * full.count(abbr)
-                standalone = total - in_full
-                if standalone >= 1 and size >= 3:
-                    issues.append(_issue(
-                        abbr,
-                        full,
-                        f"称谓混用：「{abbr}」与全称「{full}」混用，建议统一称谓",
-                        "warning",
-                    ))
+                standalone = [
+                    m for m in re.finditer(re.escape(abbr), text)
+                    if not any(start <= m.start() and m.end() <= end for start, end in full_name_spans)
+                ]
+                if standalone:
+                    for m in standalone:
+                        issues.append(_issue(
+                            abbr,
+                            full,
+                            f"称谓混用：「{abbr}」与全称「{full}」混用，建议统一称谓",
+                            "warning", start=m.start(), end=m.end(),
+                        ))
                     break  # 每个全称只报最长的独立简称
             if issues and issues[-1]["original"] in core:
                 break
@@ -181,17 +189,20 @@ def check_sequence_continuity(text: str) -> List[Dict[str, Any]]:
             if m.group(2) != unit:
                 continue
             s = m.group(1)
-            nums.append(int(s) if s.isdigit() else _cn_to_number(s))
-        nums = [n for n in nums if n is not None]
+            num = int(s) if s.isdigit() else _cn_to_number(s)
+            if num is not None:
+                nums.append((num, m))
         if len(nums) >= 3:
             for i in range(1, len(nums)):
-                if nums[i] - nums[i - 1] > 1 and nums[i] > nums[i - 1]:
-                    missing = list(range(nums[i - 1] + 1, nums[i]))
+                previous = nums[i - 1][0]
+                num, m = nums[i]
+                if num - previous > 1 and num > previous:
+                    missing = list(range(previous + 1, num))
                     issues.append(_issue(
-                        seq_matches[i].group(0),
-                        seq_matches[i].group(0),
-                        f"编号断档：{unit}序列从 {nums[i-1]} 跳到 {nums[i]}（缺第{'、第'.join(str(x) for x in missing[:3])}{unit}）",
-                        "warning",
+                        m.group(0),
+                        m.group(0),
+                        f"编号断档：{unit}序列从 {previous} 跳到 {num}（缺第{'、第'.join(str(x) for x in missing[:3])}{unit}）",
+                        "warning", start=m.start(), end=m.end(),
                     ))
     return issues
 
@@ -288,6 +299,6 @@ def check_amount_summation(text: str) -> List[Dict[str, Any]]:
                 m.group(0),
                 m.group(0),
                 f"金额加总不符：前文各项合计 {s / 10000:.1f} 万元，与「{m.group(0)}」不符（差额 {abs(s - total_yuan) / 10000:.1f} 万元）",
-                "error",
+                "error", start=m.start(), end=m.end(),
             ))
     return issues
