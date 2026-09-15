@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user_optional
+from app.core.dependencies import get_current_user, get_current_user_optional, require_permission
 from app.core.rate_limit import (
     charge_user_daily_quota,
     check_guest_rate_limit,
@@ -18,15 +18,116 @@ from app.core.rate_limit import (
     reject_guest_if_disabled,
 )
 from app.models.proofread import ProofreadRecord
-from app.schemas.proofread import (
-    ProofreadIssue,
-    TextProofreadRequest,
-    TextProofreadResponse,
-)
+from app.schemas.collaboration import CollaborationCreate, CollaborationSubmit
+from app.schemas.proofread import TextProofreadRequest, TextProofreadResponse
 from app.services.audit_log import AuditTimer, record_audit_log
-from app.services.proofread import proofread_text
+from app.services.proofread import InvalidModelConfigError, proofread_text
 
 router = APIRouter(prefix="/proofread", tags=["校对"])
+
+
+@router.post("/collaborate", response_model=CollaborationSubmit, status_code=202, summary="提交角色协作审校（每任务一次额度）")
+async def collaborate(
+    data: CollaborationCreate, db: AsyncSession = Depends(get_db),
+    user=Depends(require_permission("proofread:text")),
+):
+    import hashlib
+    from uuid import uuid4
+
+    from sqlalchemy import select, update
+    from sqlalchemy.exc import IntegrityError
+    from starlette.concurrency import run_in_threadpool
+
+    from app.models.llm_config import LLMConfig
+    from app.models.proofread_task import ProofreadTask
+    from app.models.user import User
+    from app.services.collaboration import initial_report
+    from app.tasks.collaboration_task import (
+        ACTIVE,
+        async_collaboration,
+        expire_collaboration_task,
+        refund_collaboration_quota,
+    )
+
+    request_hash = hashlib.sha256(json.dumps(
+        data.model_dump(mode="json", exclude={"request_id"}), sort_keys=True, ensure_ascii=False,
+    ).encode()).hexdigest()
+    key = hashlib.sha256(f"collaboration:{user.id}:{data.request_id}".encode()).hexdigest()
+    await db.execute(select(User.id).where(User.id == user.id).with_for_update())
+    existing = await db.scalar(select(ProofreadTask).where(ProofreadTask.idempotency_key == key))
+    if existing:
+        if (existing.params_json or {}).get("request_hash") != request_hash:
+            raise HTTPException(409, "此请求 ID 已用于不同审校参数，请生成新的请求 ID")
+        return CollaborationSubmit(task_id=existing.task_id, message="已提交，请恢复任务进度")
+    active_query = select(ProofreadTask).where(
+        ProofreadTask.owner_user_id == user.id, ProofreadTask.owner_kind == "user",
+        ProofreadTask.params_json["kind"].as_string() == "collaboration", ProofreadTask.status.in_(ACTIVE),
+    )
+    for active in (await db.scalars(active_query)).all():
+        await run_in_threadpool(expire_collaboration_task, active.id)
+    if await db.scalar(active_query.execution_options(populate_existing=True)):
+        raise HTTPException(409, "已有协作审校正在执行，请先恢复进度或取消")
+    query = select(LLMConfig).where(LLMConfig.is_enabled.is_(True))
+    query = query.where(LLMConfig.id == data.config_id) if data.config_id else query.where(LLMConfig.is_active.is_(True))
+    config = await db.scalar(query)
+    from app.core.secret_crypto import decrypt_secret
+
+    if not config or not decrypt_secret(config.api_key).strip():
+        raise HTTPException(422, "所选模型不存在、已停用或缺少可用密钥，请检查模型配置")
+    task_id = str(uuid4())
+    quota_key = await charge_user_daily_quota(user)
+    task = ProofreadTask(
+        task_id=task_id, owner_kind="user", owner_user_id=user.id,
+        idempotency_key=key, status="PENDING", phase="collaboration", message="协作审校排队中",
+        params_json={"kind": "collaboration", "text": data.text, "domain": data.domain,
+                     "config_id": config.id, "request_hash": request_hash, "quota_key": quota_key},
+        result_json={"collaboration": initial_report(config.id, config.model)},
+    )
+    db.add(task)
+    try:
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        await run_in_threadpool(refund_collaboration_quota, task_id, quota_key)
+        if isinstance(exc, IntegrityError):
+            raise HTTPException(409, "请求已提交，请使用同一请求 ID 恢复任务") from None
+        raise
+    await db.refresh(task)
+    try:
+        await run_in_threadpool(async_collaboration.apply_async, args=[task.id], task_id=task_id, retry=False)
+    except Exception as exc:
+        from datetime import datetime, timezone
+
+        from app.tasks.collaboration_task import terminal_report
+
+        logger.warning("协作任务投递失败 task={} error={}", task.id, type(exc).__name__)
+        message = "任务队列暂时不可用，请稍后重新提交"
+        marked = await db.execute(update(ProofreadTask).where(
+            ProofreadTask.id == task.id, ProofreadTask.status == "PENDING",
+        ).values(status="FAILURE", error_code="QUEUE_UNAVAILABLE", message=message,
+                 result_json={"collaboration": terminal_report(task.result_json["collaboration"], "FAILURE", message)},
+                 finished_at=datetime.now(timezone.utc)))
+        await db.commit()
+        if marked.rowcount:
+            await run_in_threadpool(refund_collaboration_quota, task_id, quota_key)
+    return CollaborationSubmit(task_id=task_id, message="已提交协作审校")
+
+
+@router.get("/collaborate/{task_id}", summary="恢复本人协作任务的原文快照")
+async def collaboration_input(
+    task_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    from sqlalchemy import select
+
+    from app.models.proofread_task import ProofreadTask
+
+    task = await db.scalar(select(ProofreadTask).where(
+        ProofreadTask.task_id == task_id, ProofreadTask.owner_kind == "user",
+        ProofreadTask.owner_user_id == user.id, ProofreadTask.params_json["kind"].as_string() == "collaboration",
+    ))
+    if task is None:
+        raise HTTPException(404, "协作任务不存在")
+    return {"task_id": task_id, **{key: task.params_json[key] for key in ("text", "domain", "config_id")}}
 
 
 @router.post("/text", response_model=TextProofreadResponse, summary='文本在线校对')
@@ -80,9 +181,10 @@ async def text_proofread(
         # 没拿到结果不消耗额度
         await refund_user_daily_quota(current_user)
         # 指定的模型配置无效：明确告知（通常是配置被删除/停用）
-        detail = str(e) if request.config_id is not None else "校对服务暂时不可用，请稍后重试"
+        invalid_config = isinstance(e, InvalidModelConfigError)
+        detail = str(e) if invalid_config else "校对服务暂时不可用，请稍后重试"
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST if request.config_id is not None else status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=status.HTTP_400_BAD_REQUEST if invalid_config else status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=detail,
         )
     except Exception as e:
@@ -107,7 +209,7 @@ async def text_proofread(
             type="text",
             original_text=request.text,
             check_types=json.dumps(request.check_types or []),
-            domain=request.domain,
+            domain=result["domain"],
             result=result,
             total_issues=result["total_issues"],
             token_usage=result["usage"],
@@ -115,19 +217,6 @@ async def text_proofread(
         db.add(record)
         await db.flush()
         record_id = record.id
-
-    # 构建响应
-    issues = [
-        ProofreadIssue(
-            original=item.get("original", ""),
-            type=item.get("type", "unknown"),
-            suggestion=item.get("suggestion", ""),
-            explanation=item.get("explanation", ""),
-            severity=item.get("severity", "warning"),
-            chunk_index=item.get("chunk_index", 0),
-        )
-        for item in result["issues"]
-    ]
 
     # 记录审计日志（成功）
     output_summary = f"发现{result['total_issues']}个问题"
@@ -140,15 +229,7 @@ async def text_proofread(
         duration_ms=timer.elapsed_ms(),
     )
 
-    return TextProofreadResponse(
-        issues=issues,
-        total_issues=result["total_issues"],
-        chunks_count=result["chunks_count"],
-        usage=result["usage"],
-        domain=result["domain"],
-        check_types=result["check_types"],
-        record_id=record_id,
-    )
+    return TextProofreadResponse(**result, record_id=record_id)
 
 
 # ======================================================================
@@ -163,20 +244,20 @@ class ProofreadCompareRequest(BaseModel):
     config_ids: List[int] = Field(..., min_length=2, max_length=4, description="参与对比的模型配置ID")
 
 
-class ModelProofreadResult(BaseModel):
-    """单模型的校对结果"""
+class ModelProofreadResult(TextProofreadResponse):
+    """单模型结果；success 包含部分成功，complete 才表示完整审校。"""
     config_id: int
     config_name: str
     model: str
-    issues: List[ProofreadIssue] = []
-    total_issues: int = 0
     success: bool = True
+    complete: bool = False
     error: Optional[str] = None
     elapsed_ms: int = 0
 
 
 class ProofreadCompareResponse(BaseModel):
     """多模型校对对比响应"""
+    record_id: int | None = None
     results: List[ModelProofreadResult]
     # 交叉统计：original 完全一致的问题算「共识」
     consensus_originals: List[str] = Field(default_factory=list, description="所有成功模型均发现的问题原文")
@@ -242,6 +323,7 @@ async def text_proofread_compare(
     # 落带权重的对比记录：配额从「只预检不消耗」改为真正计量（与开放 API 同口径）。
     # 游客不落（游客配额走 IP 限流）；全部失败不落（零消耗）；
     # 问题按 (original, suggestion) 去重——同一错误多模型发现只留一条（带 found_by）
+    record_id = None
     if current_user:
         successes = [i for i in items if i.success]
         if successes:
@@ -251,22 +333,29 @@ async def text_proofread_compare(
                 {"config_name": i.config_name, "issues": [issue.model_dump() for issue in i.issues]}
                 for i in successes
             ])
-            db.add(ProofreadRecord(
+            record = ProofreadRecord(
                 user_id=current_user.id,
                 type="text",
                 original_text=request.text,
                 check_types=json.dumps([]),
-                domain=request.domain,
+                domain=successes[0].domain,
                 result={
                     "compare": True,
                     "models": [i.config_name for i in items],
+                    "results": [i.model_dump() for i in items],
+                    "domain": successes[0].domain,
+                    "depth": successes[0].depth,
+                    "consensus_originals": consensus,
+                    "only_in": only_in,
                     "issues": merged_issues,
                     "issues_per_model": {str(i.config_id): i.total_issues for i in items},
                 },
                 total_issues=len(merged_issues),
                 quota_weight=len(successes),
-            ))
+            )
+            db.add(record)
             await db.flush()
+            record_id = record.id
 
     record_audit_log(
         http_request, "proofread_compare", user=current_user,
@@ -280,6 +369,7 @@ async def text_proofread_compare(
     )
 
     return ProofreadCompareResponse(
+        record_id=record_id,
         results=items,
         consensus_originals=consensus,
         only_in=only_in,

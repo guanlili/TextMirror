@@ -13,10 +13,12 @@ from loguru import logger
 import app.models.api_key  # noqa
 import app.models.audit_log  # noqa
 import app.models.dictionary  # noqa
+import app.models.fact_check  # noqa
 import app.models.global_word  # noqa
 import app.models.issue_feedback  # noqa
 import app.models.llm_config  # noqa
 import app.models.proofread  # noqa
+import app.models.quality_feedback  # noqa
 import app.models.role  # noqa
 
 # 导入所有模型确保表元数据注册（勿删除）

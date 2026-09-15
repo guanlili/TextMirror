@@ -87,7 +87,7 @@ async def _count_today_records(user_id: int, db: AsyncSession) -> int:
     return int(result.scalar() or 0)
 
 
-async def charge_user_daily_quota(user, weight: int = 1) -> None:
+async def charge_user_daily_quota(user, weight: int = 1) -> str | None:
     """
     登录用户每日使用配额：原子预扣（先 INCRBY 后判断，Asia/Shanghai 自然日）。
 
@@ -106,8 +106,12 @@ async def charge_user_daily_quota(user, weight: int = 1) -> None:
         redis = get_redis()
         key = _daily_key("user_daily", str(user.id))
         count = await redis.incrby(key, weight)
-        if await redis.ttl(key) < 0:
-            await redis.expire(key, 172800)
+        try:
+            if await redis.ttl(key) < 0:
+                await redis.expire(key, 172800)
+        except Exception as e:
+            # INCRBY 已成功，TTL 故障不能丢失预扣凭据或跳过限额判断。
+            logger.warning(f"用户配额 TTL 设置失败 user_id={user.id}: {e}")
         if count > user.daily_quota:
             # 被拒请求不消耗额度：抵消本次自增（刚 INCRBY 的计数必然归本次所有，
             # 直接 DECRBY 即可；退还失败不影响拒绝）。管理员当日上调配额后立即生效
@@ -129,6 +133,7 @@ async def charge_user_daily_quota(user, weight: int = 1) -> None:
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=detail,
             )
+        return key
     except HTTPException:
         raise
     except Exception as e:

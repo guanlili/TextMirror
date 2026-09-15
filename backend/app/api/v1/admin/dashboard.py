@@ -1,16 +1,16 @@
 """
 TextMirror 管理后台仪表盘 API
 """
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
-from loguru import logger
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import require_permission
+from app.models.llm_usage import LLMUsage
 from app.models.proofread import ProofreadRecord
 from app.models.uploaded_document import UploadedDocument
 from app.models.user import User
@@ -58,15 +58,9 @@ async def get_dashboard_stats(
     # 总用户数
     total_users = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
 
-    # 总 token 用量（从 JSON 字段 token_usage->>'total_tokens' 聚合）
-    total_token_usage = 0
-    try:
-        token_result = await db.execute(
-            text("SELECT COALESCE(SUM((token_usage->>'total_tokens')::int), 0) FROM proofread_records WHERE token_usage IS NOT NULL")
-        )
-        total_token_usage = token_result.scalar() or 0
-    except Exception as e:
-        logger.warning(f"统计 token 用量失败: {e}")
+    total_token_usage = (await db.execute(
+        select(func.coalesce(func.sum(LLMUsage.total_tokens), 0))
+    )).scalar_one()
 
     # 文档统计：今日上传 + 总上传（1 条 SQL）
     doc_stats = (await db.execute(
@@ -86,6 +80,45 @@ async def get_dashboard_stats(
         "total_token_usage": total_token_usage,
         "today_document_count": today_document_count,
         "total_document_count": total_document_count,
+    }
+
+
+@router.get("/model-usage", summary="按业务和模型查看实际调用用量（非费用账单）")
+async def get_model_usage(
+    days: int = Query(30, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_permission("admin:access")),
+):
+    now = datetime.now(LOCAL_TZ)
+    start = (now - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    columns = [LLMUsage.business, LLMUsage.operation, LLMUsage.config_id, LLMUsage.config_name, LLMUsage.model]
+    rows = (await db.execute(
+        select(
+            *columns,
+            func.count().label("calls"),
+            func.count().filter(LLMUsage.outcome == "error").label("errors"),
+            func.count().filter(LLMUsage.outcome == "incomplete").label("incomplete"),
+            func.count().filter(LLMUsage.outcome == "cancelled").label("cancelled"),
+            func.count().filter(LLMUsage.total_tokens.is_(None)).label("unknown_usage_calls"),
+            func.coalesce(func.sum(LLMUsage.total_tokens), 0).label("total_tokens"),
+            func.coalesce(func.sum(LLMUsage.prompt_tokens), 0).label("prompt_tokens"),
+            func.coalesce(func.sum(LLMUsage.completion_tokens), 0).label("completion_tokens"),
+            func.coalesce(func.sum(LLMUsage.search_queries), 0).label("search_queries"),
+            func.avg(LLMUsage.elapsed_ms).label("average_ms"),
+        ).where(LLMUsage.created_at >= start.astimezone(timezone.utc), LLMUsage.created_at <= now.astimezone(timezone.utc))
+        .group_by(*columns).order_by(func.sum(LLMUsage.total_tokens).desc(), LLMUsage.business, LLMUsage.model)
+    )).mappings().all()
+    items = [{**row, "average_ms": round(float(row["average_ms"] or 0))} for row in rows]
+    tracked_since = (await db.execute(select(func.min(LLMUsage.created_at)))).scalar_one()
+    if tracked_since is not None and tracked_since.tzinfo is None:
+        tracked_since = tracked_since.replace(tzinfo=timezone.utc)
+    return {
+        "days": days,
+        "tracked_since": tracked_since,
+        "items": items,
+        "calls": sum(row["calls"] for row in items),
+        "total_tokens": sum(row["total_tokens"] for row in items),
+        "unknown_usage_calls": sum(row["unknown_usage_calls"] for row in items),
     }
 
 

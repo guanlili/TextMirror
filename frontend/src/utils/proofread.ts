@@ -3,6 +3,25 @@
  * TextProofread.vue / DocumentProofread.vue 共用（标签映射、高亮色、敏感词删除、导出等）
  */
 
+export const proofreadModeHints: Record<string, string> = {
+  single: '一个模型检查全文，适合日常审校；可按需要选择审校深度。',
+  compare: '2–4 个模型分别检查同一原文，对照共识与分歧；耗时和用量通常更多。',
+  collaboration: '语言与一致性角色分工检查，再复核疑点；适合需要查看审校过程的文本。',
+}
+
+export const proofreadDomainHints: Record<string, string> = {
+  auto: '按文本特征匹配通用、公文或法律规则；不确定时可选自动。',
+  general: '适合日常文章、邮件等文本，使用通用用词和表达规范。',
+  official: '适合通知、请示、报告等正式文稿，侧重公文用语、称谓和行文规范。',
+  legal: '适合合同、协议等法律文书，侧重术语和条款表达；不替代专业法律意见。',
+}
+
+export const proofreadDepthHints: Record<string, string> = {
+  quick: '只查词库、格式和规则，不调用 AI；适合快速初筛，复杂语病可能漏检。',
+  standard: '规则检查 + AI 审校，兼顾速度与覆盖范围，适合日常使用。',
+  deep: '加强分析并增加复查，适合重要文稿；耗时和用量通常更高。',
+}
+
 /** 敏感词删除时需一并移除的紧邻标点（避免悬空标点） */
 const TRAILING_PUNCT = '，。！？；、,'
 

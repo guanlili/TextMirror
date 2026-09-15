@@ -2,6 +2,7 @@
  * TextMirror 文档校对相关 API
  */
 import request from '@/utils/request'
+import type { ProofreadIssue, ProofreadCoverage } from './proofread'
 
 export interface DocumentUploadResponse {
   file_id: string
@@ -17,20 +18,16 @@ export interface DocumentUploadResponse {
 export interface DocumentProofreadResponse {
   file_id: string
   filename: string
-  issues: Array<{
-    original: string
-    type: string
-    suggestion: string
-    explanation: string
-    severity: string
-    chunk_index: number
-  }>
+  issues: ProofreadIssue[]
   total_issues: number
   chunks_count: number
   usage: Record<string, number>
   domain: string
   record_id?: number
   corrected_download_url?: string
+  depth?: string
+  config_id?: number | null
+  coverage?: ProofreadCoverage | null
 }
 
 /**
@@ -57,6 +54,7 @@ export function documentProofreadApi(data: {
   check_types?: string[]
   domain?: string
   config_id?: number
+  depth?: string
 }): Promise<DocumentProofreadResponse> {
   return request.post('/document/proofread', data)
 }

@@ -11,6 +11,7 @@ from app.api.v1.admin.documents import router as admin_documents_router
 from app.api.v1.admin.global_dict import router as admin_global_dict_router
 from app.api.v1.admin.llm_config import router as admin_llm_config_router
 from app.api.v1.admin.policy import router as admin_policy_router
+from app.api.v1.admin.quality_evaluation import router as admin_quality_evaluation_router
 from app.api.v1.admin.roles import router as admin_roles_router
 from app.api.v1.admin.settings import router as admin_settings_router
 from app.api.v1.admin.system_config import router as admin_system_config_router
@@ -19,11 +20,14 @@ from app.api.v1.api_keys import router as api_keys_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.dictionary import router as dictionary_router
 from app.api.v1.document import router as document_router
+from app.api.v1.fact_check import admin_router as admin_fact_check_router
+from app.api.v1.fact_check import router as fact_check_router
 from app.api.v1.feishu import router as feishu_router
 from app.api.v1.health import router as health_router
 from app.api.v1.history import router as history_router
 from app.api.v1.polish import router as polish_router
 from app.api.v1.proofread import router as proofread_router
+from app.api.v1.quality_feedback import router as quality_feedback_router
 from app.api.v1.site_info import router as site_info_router
 from app.api.v1.tasks import router as tasks_router
 from app.api.v1.whitelist import router as whitelist_router
@@ -40,6 +44,9 @@ api_router.include_router(feishu_router)
 
 # ---- 校对模块 ----
 api_router.include_router(proofread_router)
+api_router.include_router(quality_feedback_router)
+api_router.include_router(fact_check_router)
+api_router.include_router(admin_fact_check_router, prefix="/admin")
 
 # ---- AI润色模块 ----
 api_router.include_router(polish_router)
@@ -65,6 +72,7 @@ api_router.include_router(admin_dashboard_router, prefix="/admin")
 api_router.include_router(admin_roles_router, prefix="/admin")
 api_router.include_router(admin_users_router, prefix="/admin")
 api_router.include_router(admin_global_dict_router, prefix="/admin")
+api_router.include_router(admin_quality_evaluation_router, prefix="/admin")
 api_router.include_router(admin_llm_config_router, prefix="/admin")
 api_router.include_router(admin_settings_router, prefix="/admin")
 api_router.include_router(admin_audit_router, prefix="/admin")

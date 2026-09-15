@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.polish import PolishVersion
-from app.schemas.proofread import Domain, ProofreadIssue
+from app.schemas.proofread import Domain, TextProofreadResponse
 
 # ======================================================================
 # 多模型对比
@@ -49,20 +49,20 @@ class OpenCompareRequest(BaseModel):
     )
 
 
-class OpenCompareModelResult(BaseModel):
-    """单模型的审校结果"""
-    config_id: int = Field(..., description="模型配置ID")
+class OpenCompareModelResult(TextProofreadResponse):
+    """单模型结果；success 包含部分成功，complete 才表示完整审校。"""
+    config_id: int = Field(..., description="实际模型配置ID")
     config_name: str = Field(..., description="模型配置名称")
     model: str = Field(..., description="模型名称")
-    issues: List[ProofreadIssue] = Field(default_factory=list, description="问题列表")
-    total_issues: int = Field(default=0, description="问题总数")
-    success: bool = Field(default=True, description="该模型调用是否成功")
+    success: bool = Field(default=True, description="该模型是否获得可用结果（可为部分结果）")
+    complete: bool = Field(default=False, description="该模型是否完成全部分片")
     error: Optional[str] = Field(None, description="失败原因（success=false 时）")
     elapsed_ms: int = Field(default=0, description="耗时（毫秒）")
 
 
 class OpenCompareResponse(BaseModel):
     """多模型对比响应"""
+    record_id: int | None = Field(default=None, description="校对记录ID；全部模型失败时为空")
     results: List[OpenCompareModelResult] = Field(..., description="各模型审校结果")
     consensus_originals: List[str] = Field(
         default_factory=list, description="所有成功模型均发现的问题原文（共识）"

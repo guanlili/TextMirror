@@ -75,6 +75,25 @@ class TextProofreadRequest(BaseModel):
     )
 
 
+class FailedProofreadChunk(BaseModel):
+    """可通过现有计费文本接口补查的失败上下文（非免费重试）。"""
+
+    chunk_index: int = Field(..., ge=0)
+    start: int = Field(..., ge=0, description="原文 Unicode 码点起点（含），0-based")
+    end: int = Field(..., ge=0, description="原文 Unicode 码点终点（不含）")
+    text: str = Field(..., description="严格等于原文[start:end]，含前置重叠上下文")
+    error_code: Literal["MODEL_ERROR", "INVALID_RESPONSE"]
+
+
+class ProofreadCoverage(BaseModel):
+    """当前审校深度下的覆盖率；未知历史记录不能默认为 complete。"""
+
+    status: Literal["complete", "partial"]
+    total_chunks: int = Field(..., ge=0)
+    completed_chunks: int = Field(..., ge=0)
+    failed_chunks: List[FailedProofreadChunk] = Field(default_factory=list)
+
+
 class ProofreadIssue(BaseModel):
     """单个校对问题"""
     original: str = Field(..., description="原文片段")
@@ -83,6 +102,10 @@ class ProofreadIssue(BaseModel):
     explanation: str = Field(default="", description="解释")
     severity: str = Field(default="warning", description="严重程度: error/warning/info")
     chunk_index: int = Field(default=0, description="分片序号")
+    start: Optional[int] = Field(None, ge=0, description="原文 Unicode 码点起点（含），0-based")
+    end: Optional[int] = Field(None, ge=0, description="原文 Unicode 码点终点（不含）")
+    source: Optional[str] = Field(None, description="问题来源")
+    found_by: Optional[List[str]] = Field(None, description="发现该问题的模型")
 
 
 class TextProofreadResponse(BaseModel):
@@ -94,6 +117,9 @@ class TextProofreadResponse(BaseModel):
     domain: str = Field(default="general", description="领域")
     check_types: List[str] = Field(default_factory=list, description="校对类型")
     record_id: Optional[int] = Field(None, description="校对记录ID")
+    coverage: Optional[ProofreadCoverage] = Field(None, description="审校覆盖；历史缺失表示未知")
+    config_id: Optional[int] = Field(None, description="实际使用的模型配置ID")
+    depth: Literal["quick", "standard", "deep"] = "standard"
 
 
 class ProofreadRecordResponse(BaseModel):

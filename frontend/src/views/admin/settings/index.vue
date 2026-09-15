@@ -137,6 +137,7 @@
     </el-card>
 
     <!-- 审校领域规则已独立为「审校规则」页面（/admin/domain-rules） -->
+    <FactCheckSettings v-if="userStore.hasPermission('admin:settings:edit')" />
 
     <!-- 数据维护 -->
     <el-card style="margin-top: 16px;">
@@ -167,8 +168,11 @@ import {
   getAdminSiteConfigApi, updateAdminSiteConfigApi, uploadIconApi,
 } from '@/api/site'
 import { useSiteStore } from '@/stores/site'
+import { useUserStore } from '@/stores/user'
+import FactCheckSettings from '@/components/FactCheckSettings.vue'
 import { getErrorDetail } from '@/utils/request'
 
+const userStore = useUserStore()
 const siteStore = useSiteStore()
 const saving = ref(false)
 

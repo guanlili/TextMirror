@@ -19,6 +19,7 @@ import httpx
 from loguru import logger
 
 from app.services.llm.base import BaseLLMProvider, LLMResponse
+from app.services.llm.usage import meter_attempt, usage_operation
 
 # httpx.AsyncClient 绑定创建时的事件循环，不能跨循环复用：
 # Web 进程单循环可长期复用连接池；Celery 子进程任务间复用同一循环时同样受益；
@@ -166,27 +167,29 @@ class OpenAICompatProvider(BaseLLMProvider):
                     request_kwargs: Dict[str, object] = {"json": payload}
                     if timeout is not None:
                         request_kwargs["timeout"] = httpx.Timeout(timeout, connect=15)
-                    response = await self.client.post(endpoint, **request_kwargs)
-                    response.raise_for_status()
-                    data = response.json()
+                    async with meter_attempt(self) as event:
+                        response = await self.client.post(endpoint, **request_kwargs)
+                        response.raise_for_status()
+                        data = response.json()
+                        event["usage"] = data.get("usage")
 
-                    # 记忆已验证的 endpoint，后续调用与新实例直接复用
-                    self._verified_endpoint = endpoint
-                    _verified_endpoints[self.api_base] = endpoint
+                        self._verified_endpoint = endpoint
+                        _verified_endpoints[self.api_base] = endpoint
 
-                    choice = data["choices"][0]
-                    usage = data.get("usage", {})
-
-                    return LLMResponse(
-                        content=choice["message"]["content"],
-                        model=data.get("model", self.model),
-                        usage={
-                            "prompt_tokens": usage.get("prompt_tokens", 0),
-                            "completion_tokens": usage.get("completion_tokens", 0),
-                            "total_tokens": usage.get("total_tokens", 0),
-                        },
-                        finish_reason=choice.get("finish_reason"),
-                    )
+                        choice = data["choices"][0]
+                        usage = data.get("usage") or {}
+                        result = LLMResponse(
+                            content=choice["message"]["content"],
+                            model=data.get("model", self.model),
+                            usage={
+                                "prompt_tokens": usage.get("prompt_tokens", 0),
+                                "completion_tokens": usage.get("completion_tokens", 0),
+                                "total_tokens": usage.get("total_tokens", 0),
+                            },
+                            finish_reason=choice.get("finish_reason"),
+                        )
+                        event["outcome"] = "success" if result.finish_reason == "stop" else "incomplete"
+                        return result
 
                 except httpx.HTTPStatusError as e:
                     # 404 说明路径不对，尝试下一个 endpoint
@@ -234,6 +237,8 @@ class OpenAICompatProvider(BaseLLMProvider):
             "temperature": temperature,
             "stream": True,
         }
+        if self.provider_slug in {"openai", "deepseek", "qwen", "volcengine"}:
+            payload["stream_options"] = {"include_usage": True}
         if max_tokens:
             payload["max_tokens"] = max_tokens
 
@@ -245,7 +250,7 @@ class OpenAICompatProvider(BaseLLMProvider):
         for attempt in range(1, self.max_retries + 1):
             for endpoint in endpoints:
                 try:
-                    async with self.client.stream("POST", endpoint, json=payload) as response:
+                    async with meter_attempt(self, "stream") as event, self.client.stream("POST", endpoint, json=payload) as response:
                         if response.status_code == 404 and endpoint != endpoints[-1]:
                             continue
                         if response.status_code >= 400:
@@ -263,20 +268,30 @@ class OpenAICompatProvider(BaseLLMProvider):
                         self._verified_endpoint = endpoint
                         _verified_endpoints[self.api_base] = endpoint
 
+                        finish_reason = None
                         async for line in response.aiter_lines():
                             if not line.startswith("data: "):
                                 continue
                             data = line[len("data: "):].strip()
                             if data == "[DONE]":
+                                event["outcome"] = "success" if finish_reason == "stop" else "incomplete"
                                 return
                             try:
                                 chunk = json.loads(data)
                             except json.JSONDecodeError:
                                 continue
-                            delta = chunk.get("choices", [{}])[0].get("delta", {})
-                            content = delta.get("content")
+                            if chunk.get("usage"):
+                                event["usage"] = chunk["usage"]
+                            choices = chunk.get("choices") or []
+                            if not choices:
+                                continue
+                            choice = choices[0]
+                            if choice.get("finish_reason") is not None:
+                                finish_reason = choice["finish_reason"]
+                            content = (choice.get("delta") or {}).get("content")
                             if content:
                                 yield content
+                        event["outcome"] = "success" if finish_reason == "stop" else "incomplete"
                         return
 
                 except httpx.HTTPStatusError as e:
@@ -316,13 +331,14 @@ class OpenAICompatProvider(BaseLLMProvider):
         返回: {"success": bool, "model": str, "message": str, "usage": dict}
         """
         try:
-            response = await self.chat(
-                messages=[
-                    {"role": "user", "content": "请回复'连接正常'四个字，不要有其他内容。"}
-                ],
-                temperature=0,
-                max_tokens=20,
-            )
+            with usage_operation("connection_test"):
+                response = await self.chat(
+                    messages=[
+                        {"role": "user", "content": "请回复'连接正常'四个字，不要有其他内容。"}
+                    ],
+                    temperature=0,
+                    max_tokens=20,
+                )
             return {
                 "success": True,
                 "model": response.model,

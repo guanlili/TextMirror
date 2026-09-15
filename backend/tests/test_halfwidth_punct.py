@@ -1,12 +1,14 @@
-"""半角标点规则 + merge_issues 包含去重。
+"""格式规则坐标、半角标点规则 + merge_issues 包含去重。
 
 半角标点只抓「中文语句中」的无歧义形态（宁可漏报不可误报）：
 - 冒号/分号：前邻汉字即报（后随任意字符——「时间:14:30」「如下:\n」都是错）
 - 逗号/叹号/问号：还要求后随汉字/空白/结尾（后随拉丁/数字可能身处英文语境）
 - 数字间冒号（比分3:2）、千分位（3,500）、小数点均不命中
 """
-from app.services.format_rules import check_halfwidth_punct
-from app.services.proofread import merge_issues
+import pytest
+
+from app.services.format_rules import check_format_rules, check_halfwidth_punct, check_sequence_style
+from app.services.proofread import locate_issues, merge_issues
 
 
 def _hits(text: str) -> list:
@@ -89,3 +91,39 @@ def test_merge_no_llm_issues_all_scans_kept():
     scanned = [_scan_issue(":"), _scan_issue(",")]
     merged = merge_issues([], scanned)
     assert len(merged) == 2
+
+
+@pytest.mark.parametrize("segment,original", [
+    ("日期为2025年2月30日。", "2025年2月30日"),
+    ("日期为2025年13月1日。", "2025年13月1日"),
+    ("日期为2025.1-3。", "2025.1-3"),
+    ("电话：23456789。", "23456789"),
+    ("身份证：110105199902300021。", "110105199902300021"),
+    ("身份证：110105194912310021。", "110105194912310021"),
+    ("投资10000万元。", "10000万元"),
+    ("规定权力和义务。", "权力和义务"),
+    ("会议时间:14:30，比分3:2。", ":"),
+    ("好的, 收到。", ","),
+    ("真的吗!?", "!?"),
+])
+def test_format_scans_preserve_each_repeated_match_span(segment, original):
+    prefix = "说明。"
+    text = prefix + segment + "\n" + segment
+    issues = check_format_rules(text)
+    first = len(prefix) + segment.index(original)
+    expected_starts = [first, first + len(segment) + 1]
+    assert [issue["original"] for issue in issues] == [original, original]
+    assert [issue["start"] for issue in issues] == expected_starts
+    for issue in issues:
+        assert text[issue["start"]:issue["end"]] == issue["original"]
+    assert locate_issues(text, issues) == issues
+
+
+def test_sequence_style_span_does_not_expand_to_other_identical_markers():
+    text = "说明1.并非列表\n一、甲\n二、乙\n1.丙\n2.丁\n1.戊"
+    issues = check_sequence_style(text)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue["start"] == text.index("1.丙")
+    assert text[issue["start"]:issue["end"]] == issue["original"] == "1."
+    assert locate_issues(text, issues) == issues

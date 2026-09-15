@@ -40,14 +40,17 @@
         <el-table-column prop="domain" label="领域" width="80" align="center">
           <template #default="{ row }">{{ domainLabel(row.domain) }}</template>
         </el-table-column>
-        <el-table-column prop="total_issues" label="问题数" width="80" align="center">
+        <el-table-column label="审阅概况" min-width="240">
           <template #default="{ row }">
-            <template v-if="row.type === 'polish'">
-              <span style="font-size: 12px; color: var(--color-text-secondary);">-</span>
-            </template>
-            <template v-else>
-              <el-tag :type="row.total_issues > 0 ? 'danger' : 'success'" size="small">{{ row.total_issues }}</el-tag>
-            </template>
+            <span v-if="row.type === 'polish'" class="summary-text">—</span>
+            <div v-else class="review-summary">
+              <div class="summary-tags">
+                <el-tag type="info" size="small">{{ modeLabel(row.mode) }}</el-tag>
+                <el-tag :type="coverageTag(row.coverage_status)" size="small" effect="plain">{{ coverageLabel(row.coverage_status) }}</el-tag>
+              </div>
+              <div class="summary-text">已发现 {{ row.review_summary.total }} 项 · {{ decisionSummary(row) }}</div>
+              <div v-if="row.review_summary.failed_models" class="summary-warning">{{ row.review_summary.failed_models }} 个模型失败，不能视为零问题</div>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="Token" width="100" align="center">
@@ -60,8 +63,15 @@
             <span style="font-size: 12px; color: var(--color-text-secondary);">{{ formatTime(row.created_at) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="80" align="center">
+        <el-table-column label="操作" width="160" align="center">
           <template #default="{ row }">
+            <el-button
+              v-if="row.type === 'text' || row.type === 'document'"
+              type="primary"
+              link
+              size="small"
+              @click.stop="continueReview(row)"
+            >继续审阅</el-button>
             <el-popconfirm title="确定删除此记录？" @confirm.stop="handleDelete(row.id)">
               <template #reference>
                 <el-button type="danger" link size="small" @click.stop>删除</el-button>
@@ -85,21 +95,34 @@
     </el-card>
 
     <!-- 详情抽屉 -->
-    <el-drawer v-model="showDetail" :title="detail?.type === 'polish' ? '润色详情' : '校对详情'" size="600px" direction="rtl">
+    <el-drawer v-model="showDetail" :title="detail?.type === 'polish' ? '润色详情' : '校对详情'" size="min(600px, 100vw)" direction="rtl">
       <template v-if="detail">
         <div class="detail-meta">
           <el-tag :type="recordTypeTag(detail.type)">{{ recordTypeLabel(detail.type) }}</el-tag>
           <el-tag type="info">{{ detail.type === 'polish' ? polishStyleLabel(detail.domain) : domainLabel(detail.domain) }}</el-tag>
           <template v-if="detail.type !== 'polish'">
-            <el-tag :type="detail.total_issues > 0 ? 'danger' : 'success'">{{ detail.total_issues }} 个问题</el-tag>
+            <el-tag type="info">{{ modeLabel(detail.mode) }}</el-tag>
+            <el-tag :type="coverageTag(detail.coverage_status)" effect="plain">{{ coverageLabel(detail.coverage_status) }}</el-tag>
           </template>
           <span v-if="detail.source_filename" style="font-size: 13px; color: var(--color-text-secondary);">{{ detail.source_filename }}</span>
+        </div>
+
+        <div v-if="detail.type !== 'polish'" class="review-summary">
+          <div class="summary-text">已发现 {{ detail.review_summary.total }} 项 · {{ decisionSummary(detail) }}</div>
+          <div class="summary-text">按已保存审阅统计；未保存操作不计入。</div>
+          <div v-if="detail.review_summary.failed_models" class="summary-warning">{{ detail.review_summary.failed_models }} 个模型失败，不能视为零问题。</div>
         </div>
 
         <el-divider content-position="left">原文</el-divider>
         <div class="detail-text">{{ detail.original_text }}</div>
 
         <div class="rerun-bar">
+          <el-button
+            v-if="detail.type === 'text' || detail.type === 'document'"
+            type="primary"
+            size="small"
+            @click="continueReview(detail)"
+          >继续审阅</el-button>
           <el-button
             v-if="detail.type === 'polish'"
             type="primary"
@@ -134,12 +157,13 @@
 
         <!-- 校对问题列表 -->
         <template v-else>
-          <el-divider content-position="left">问题列表 ({{ detail.result?.issues?.length || 0 }})</el-divider>
+          <el-divider content-position="left">问题列表 ({{ detail.issues?.length || 0 }})</el-divider>
           <div class="detail-issues">
-            <div v-for="(issue, i) in (detail.result?.issues || [])" :key="i" class="issue-item">
+            <div v-for="(issue, i) in (detail.issues || [])" :key="i" class="issue-item">
               <div class="issue-head">
                 <el-tag :type="severityColor(issue.severity)" size="small">{{ typeLabel(issue.type) }}</el-tag>
                 <el-tag :type="severityColor(issue.severity)" size="small" effect="plain">{{ severityLabel(issue.severity) }}</el-tag>
+                <el-tag type="info" size="small" effect="plain">{{ issue._accepted ? '已采纳' : issue._ignored ? '已忽略' : '待处理' }}</el-tag>
               </div>
               <div class="issue-body">
                 <div><span class="label">原文：</span><span class="text-del">{{ issue.original }}</span></div>
@@ -147,7 +171,7 @@
                 <div v-if="issue.explanation"><span class="label">说明：</span><span class="text-muted">{{ issue.explanation }}</span></div>
               </div>
             </div>
-            <el-empty v-if="!detail.result?.issues?.length" description="无问题" :image-size="60" />
+            <el-empty v-if="!detail.issues?.length" :description="emptyIssuesLabel(detail.coverage_status)" :image-size="60" />
           </div>
         </template>
       </template>
@@ -161,7 +185,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   listHistoryApi, getHistoryDetailApi, deleteHistoryApi,
-  type HistoryItem, type HistoryDetail,
+  type HistoryItem, type HistoryDetail, type HistoryReviewMetadata,
 } from '@/api/history'
 import { typeLabel, severityColor, severityLabel } from '@/utils/proofread'
 
@@ -178,6 +202,34 @@ const showDetail = ref(false)
 const detail = ref<HistoryDetail | null>(null)
 
 onMounted(() => fetchList())
+
+function modeLabel(mode: HistoryReviewMetadata['mode']) {
+  return mode === 'compare' ? '对比' : mode === 'collaboration' ? '协作' : mode === 'single' ? '单模型' : '未记录模式'
+}
+function coverageLabel(status: HistoryReviewMetadata['coverage_status']) {
+  return status === 'complete' ? '覆盖完整' : status === 'partial' ? '部分完成' : '覆盖未知'
+}
+function coverageTag(status: HistoryReviewMetadata['coverage_status']) {
+  return status === 'complete' ? 'success' : status === 'partial' ? 'warning' : 'info'
+}
+function decisionSummary(record: HistoryReviewMetadata) {
+  const summary = record.review_summary
+  return `已采纳 ${summary.accepted} / 已忽略 ${summary.ignored} / 待处理 ${summary.pending}`
+}
+function emptyIssuesLabel(status: HistoryReviewMetadata['coverage_status']) {
+  if (status === 'partial') return '已完成范围暂无问题，仍有未完成审校'
+  if (status !== 'complete') return '暂无问题报告，未记录覆盖范围，无法确认全文完成'
+  return '没有发现问题，仍建议人工复核'
+}
+
+/** 只读取保存的审阅，不提取旧签名 URL，也不重新调用校对。 */
+function continueReview(record: Pick<HistoryItem, 'id' | 'type'>) {
+  if (record.type !== 'text' && record.type !== 'document') return
+  void router.push({
+    path: record.type === 'document' ? '/proofread/document' : '/proofread/text',
+    query: { review: String(record.id) },
+  })
+}
 
 /** 从历史记录复跑：原文带去润色页或文本校对页 */
 function rerun(kind: 'polish' | 'proofread') {
@@ -262,6 +314,10 @@ function polishStyleLabel(style: string): string {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 400px;
 }
 .filename-tag { margin-top: 4px; }
+.review-summary { display: grid; gap: 4px; }
+.summary-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.summary-text { font-size: 12px; color: var(--color-text-secondary); line-height: 1.7; overflow-wrap: anywhere; }
+.summary-warning { font-size: 12px; color: var(--el-color-warning-dark-2); }
 
 .pagination-wrap { margin-top: 16px; display: flex; justify-content: flex-end; }
 

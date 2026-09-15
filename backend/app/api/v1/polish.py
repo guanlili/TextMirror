@@ -307,14 +307,18 @@ class PolishCompareResponse(BaseModel):
 def _build_compare_provider(config):
     from app.core.secret_crypto import decrypt_secret
     from app.services.llm.openai_compat import OpenAICompatProvider
-    return OpenAICompatProvider(
+    provider = OpenAICompatProvider(
         api_key=decrypt_secret(config.api_key),
         api_base=config.api_base,
         model=config.model,
         timeout=config.timeout,
         max_retries=config.max_retries,
         provider_name=config.name,
+        provider_slug=config.provider,
     )
+    provider.config_id = config.id
+    provider.usage_business = "polish"
+    return provider
 
 
 def _require_style(style: str) -> dict:

@@ -1,193 +1,254 @@
-/**
- * 校对审阅共享逻辑（TextProofread.vue / DocumentProofread.vue 共用）
- *
- * 持有问题列表、修订文本等响应式状态，提供接受/忽略/删除/撤销/一键接受与反馈上报。
- * 组件间的细微差异（HTML 同步、撤销锚点越界策略）通过 options 参数化。
- */
-import { ref, computed, type Ref } from 'vue'
+/** 基于固定原文位置的审阅状态。页面只消费 currentText，不再通过 HTML 回调修改文本。 */
+import { ref, computed, toRaw, type Ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { submitIssueFeedbackApi } from '@/api/proofread'
-import { computeSensitiveDeletion } from '@/utils/proofread'
+import {
+  createReviewPatch,
+  expandReviewIssues,
+  getIssuePatch,
+  getReviewPatches,
+  isLocatedReviewIssue,
+  renderReviewText,
+  reviewIssueKey,
+  reviewPatchesOverlap,
+  sameReviewDecision,
+  serializeReviewIssues,
+  type ReviewIssue,
+  type ReviewPatch,
+} from '@/utils/review'
 
-/** 带审阅状态的校对问题 */
-export interface ReviewIssue {
-  original: string
-  type: string
-  suggestion: string
-  explanation: string
-  severity: string
-  chunk_index?: number
-  _accepted?: boolean
-  _ignored?: boolean
-  /** 删除该词操作的实际删除内容（含标点），供撤销恢复 */
-  _deletedText?: string
-  /** 删除时的词首位置，撤销按此插回 */
-  _undoAnchor?: number
-}
+export type { ReviewIssue, ReviewPatch } from '@/utils/review'
 
-/** 反馈上报所需的最小字段（兼容对比视图的问题对象） */
+/** 反馈上报所需的最小字段（兼容对比视图的问题对象）。 */
 export interface FeedbackItem {
   original: string
   suggestion?: string
   type?: string
 }
 
-export interface ProofreadReviewOptions {
-  /**
-   * 撤销删除时锚点越界的策略：
-   * true = 钳位到文末插入（文档校对）；false/缺省 = 越界则不恢复（文本校对）
-   */
-  clampUndoAnchor?: boolean
-  /** 接受建议替换后的额外同步（如文档校对的 HTML 视图） */
-  onAcceptReplace?: (original: string, suggestion: string) => void
-  /** 删除敏感词后的额外同步 */
-  onDeleteWord?: (target: string) => void
-  /** 撤销建议替换后的额外同步 */
-  onUndoReplace?: (suggestion: string, original: string) => void
-}
+const MANUAL_CHECK = '该问题无法安全定位或没有可应用的建议，请人工核对'
+const OVERLAP = '该修改与已接受的修改位置重叠，请先撤销冲突项'
 
-export function useProofreadReview(options: ProofreadReviewOptions = {}) {
+export function useProofreadReview() {
+  const sourceText = ref('')
   const issues: Ref<ReviewIssue[]> = ref([])
-  const currentText = ref('')
+  const patches = computed(() => getReviewPatches(sourceText.value, issues.value))
+  const currentText = computed(() => renderReviewText(sourceText.value, patches.value))
   const filterType = ref('')
   const activeIssueIndex = ref(-1)
   const recordId = ref<number | null>(null)
 
-  // 筛选后的问题列表
-  const filteredIssues = computed(() => {
-    if (!filterType.value) return issues.value
-    return issues.value.filter(i => i.type === filterType.value)
-  })
+  const filteredIssues = computed(() => filterType.value
+    ? issues.value.filter(issue => issue.type === filterType.value)
+    : issues.value)
+  const acceptedCount = computed(() => issues.value.filter(issue => issue._accepted).length)
+  const pendingCount = computed(() => issues.value.filter(issue => !issue._accepted && !issue._ignored).length)
 
-  const acceptedCount = computed(() => issues.value.filter(i => i._accepted).length)
-  const pendingCount = computed(() => issues.value.filter(i => !i._accepted && !i._ignored).length)
-
-  // 问题 → 全局索引（联动高亮用；WeakMap 避免 O(n²) 的 indexOf 反查）
+  // 仅为派生索引缓存；审阅决策和实际补丁全部保存在可序列化的 issues 上。
   const issueIndexMap = computed(() => {
     const map = new WeakMap<ReviewIssue, number>()
-    issues.value.forEach((issue, idx) => map.set(issue, idx))
+    issues.value.forEach((issue, index) => map.set(toRaw(issue), index))
     return map
   })
 
-  // 获取问题在全局列表中的索引（用于联动高亮）
   function getGlobalIndex(issue: ReviewIssue): number {
-    return issueIndexMap.value.get(issue) ?? -1
+    return issueIndexMap.value.get(toRaw(issue))
+      ?? issues.value.findIndex(item => reviewIssueKey(item) === reviewIssueKey(issue))
   }
 
-  // 审校建议反馈上报（fire-and-forget：失败不打扰用户）
+  function canonicalIssue(issue: ReviewIssue): ReviewIssue | undefined {
+    return issues.value[getGlobalIndex(issue)]
+  }
+
+  function setDecision(issue: ReviewIssue, accepted: boolean, ignored: boolean, patch?: ReviewPatch) {
+    for (const peer of issues.value) {
+      if (peer !== issue && !sameReviewDecision(peer, issue)) continue
+      peer._accepted = accepted
+      peer._ignored = ignored
+      if (patch) peer._patch = { ...patch }
+      else delete peer._patch
+    }
+  }
+
+  /** 替换原文和问题；原文在审阅操作期间保持不变。返回展开后的响应式问题对象。 */
+  function initialize(text: string, rawIssues: readonly ReviewIssue[]): ReviewIssue[] {
+    sourceText.value = text
+    issues.value = expandReviewIssues(text, rawIssues)
+    activeIssueIndex.value = -1
+    filterType.value = ''
+    return issues.value
+  }
+
+  /**
+   * 补查只增加报告，保留所有已有决策。
+   * 返回本次 reports 对应的 canonical 对象，可直接放入各 model.issues 共用。
+   */
+  function mergeIssues(rawIssues: readonly ReviewIssue[]): ReviewIssue[] {
+    const merged: ReviewIssue[] = []
+    for (const incoming of expandReviewIssues(sourceText.value, rawIssues)) {
+      const existing = issues.value.find(issue => reviewIssueKey(issue) === reviewIssueKey(incoming))
+      if (existing) {
+        merged.push(existing)
+        continue
+      }
+      const shared = issues.value.find(issue => sameReviewDecision(issue, incoming))
+      if (shared) {
+        incoming._accepted = shared._accepted
+        incoming._ignored = shared._ignored
+        if (shared._patch) incoming._patch = { ...shared._patch }
+      }
+      issues.value.push(incoming)
+      merged.push(issues.value[issues.value.length - 1])
+    }
+    return merged
+  }
+
+  // 审校建议反馈上报（fire-and-forget：失败不打扰用户）。
   function reportFeedback(items: FeedbackItem[], action: 'accept' | 'ignore') {
     if (!items.length) return
     submitIssueFeedbackApi({
       record_id: recordId.value ?? undefined,
-      items: items.map(i => ({
-        original: i.original,
-        suggestion: i.suggestion || undefined,
-        issue_type: i.type || undefined,
+      items: items.map(issue => ({
+        original: issue.original,
+        suggestion: issue.suggestion || undefined,
+        issue_type: issue.type || undefined,
         action,
       })),
     }).catch(() => {})
   }
 
-  // 接受单条修改（replaceAll：同一错词多处出现全部修正，此前只改首处会静默漏改）
-  function acceptIssue(issue: ReviewIssue) {
-    if (issue.original && issue.suggestion) {
-      currentText.value = currentText.value.replaceAll(issue.original, issue.suggestion)
-      options.onAcceptReplace?.(issue.original, issue.suggestion)
-    }
-    issue._accepted = true
-    // LLM 常把同一错词报成多条：文本已按 replaceAll 全量替换，
-    // 同原文同建议的其余问题实际已解决，一并标记（同 suggestion 才并，防误杀不同意见）
-    const duplicates = issues.value.filter(i =>
-      i !== issue && !i._accepted && !i._ignored
-      && i.original === issue.original && i.suggestion === issue.suggestion
-    )
-    for (const dup of duplicates) dup._accepted = true
-    reportFeedback([issue, ...duplicates], 'accept')
+  /** 不上报、不弹窗，供单条、批量和恢复共用。 */
+  function applyPatch(input: ReviewIssue, patch: ReviewPatch | null): { accepted?: ReviewIssue; error?: string } {
+    const issue = canonicalIssue(input)
+    if (!issue) return { error: MANUAL_CHECK }
+    if (issue._accepted || issue._ignored) return {}
+    if (!isLocatedReviewIssue(sourceText.value, issue) || !patch) return { error: MANUAL_CHECK }
+    if (patches.value.some(accepted => reviewPatchesOverlap(accepted, patch))) return { error: OVERLAP }
+    setDecision(issue, true, false, patch)
+    return { accepted: issue }
   }
 
-  // 忽略
-  function ignoreIssue(issue: ReviewIssue) {
-    issue._ignored = true
+  function acceptOne(input: ReviewIssue, deletion = false): boolean {
+    const issue = canonicalIssue(input)
+    const result = applyPatch(input, issue ? createReviewPatch(sourceText.value, issue, deletion) : null)
+    if (result.error) ElMessage.warning(result.error)
+    if (!result.accepted) return false
+    reportFeedback([result.accepted], 'accept')
+    return true
+  }
+
+  /** 仅接受此原文 occurrence；敏感词无建议时自动执行单处删除。 */
+  function acceptIssue(issue: ReviewIssue): boolean {
+    return acceptOne(issue)
+  }
+
+  function deleteIssue(issue: ReviewIssue): boolean {
+    return acceptOne(issue, true)
+  }
+
+  function ignoreIssue(input: ReviewIssue): boolean {
+    const issue = canonicalIssue(input)
+    if (!issue || issue._accepted || issue._ignored) return false
+    setDecision(issue, false, true)
     reportFeedback([issue], 'ignore')
+    return true
   }
 
-  // 删除敏感词（违禁词的自动修复 = 删除，连同紧邻标点避免悬空标点）
-  function deleteIssue(issue: ReviewIssue) {
-    const del = computeSensitiveDeletion(currentText.value, issue.original)
-    if (!del) return
-    currentText.value = currentText.value.replaceAll(del.target, '')
-    options.onDeleteWord?.(del.target)
-    issue._accepted = true
-    // 记录删除内容与词首位置，撤销时按锚点插回
-    issue._deletedText = del.target
-    issue._undoAnchor = del.anchor
-    reportFeedback([issue], 'accept')
+  /** 去掉该位置/建议的决策和补丁；其余补丁仍基于 immutable source 重建。 */
+  function undoIssue(input: ReviewIssue): boolean {
+    const issue = canonicalIssue(input)
+    if (!issue || (!issue._accepted && !issue._ignored)) return false
+    setDecision(issue, false, false)
+    return true
   }
 
-  // 撤销
-  function undoIssue(issue: ReviewIssue) {
-    if (issue._accepted && issue.original && issue.suggestion) {
-      currentText.value = currentText.value.replaceAll(issue.suggestion, issue.original)
-      options.onUndoReplace?.(issue.suggestion, issue.original)
-    } else if (issue._accepted && issue._deletedText !== undefined) {
-      // 删除类撤销：把删掉的词（含标点）插回原位——按删除时的锚点定位
-      const deleted = issue._deletedText
-      if (options.clampUndoAnchor) {
-        const anchor = Math.min(issue._undoAnchor ?? 0, currentText.value.length)
-        currentText.value = currentText.value.slice(0, anchor) + deleted + currentText.value.slice(anchor)
-      } else {
-        const anchor = issue._undoAnchor
-        if (anchor !== undefined && anchor >= 0 && anchor <= currentText.value.length) {
-          currentText.value = currentText.value.slice(0, anchor) + deleted + currentText.value.slice(anchor)
-        }
-      }
-      issue._deletedText = undefined
-      issue._undoAnchor = undefined
+  function longestFirst(targets: readonly ReviewIssue[]): ReviewIssue[] {
+    const length = (issue: ReviewIssue) => isLocatedReviewIssue(sourceText.value, issue) ? issue.end - issue.start : 0
+    return [...targets].sort((a, b) => length(b) - length(a))
+  }
+
+  /** 用于对比分级批量；长 span 优先，返回实际新应用的补丁数量（不是报告数量）。 */
+  function applyIssues(targets: readonly ReviewIssue[]): number {
+    const accepted: ReviewIssue[] = []
+    const errors = new Set<string>()
+    for (const input of longestFirst(targets)) {
+      const issue = canonicalIssue(input)
+      const result = applyPatch(input, issue ? createReviewPatch(sourceText.value, issue) : null)
+      if (result.accepted) accepted.push(result.accepted)
+      if (result.error) errors.add(result.error)
     }
-    issue._accepted = false
-    issue._ignored = false
+    reportFeedback(accepted, 'accept')
+    if (errors.size) ElMessage.warning([...errors].join('；'))
+    return accepted.length
   }
 
-  // 一键修改全部（与单条操作语义一致：有建议的替换 + 敏感词删除）
-  async function handleAcceptAll() {
-    const actionable = issues.value.filter(i =>
-      !i._accepted && !i._ignored && i.original && (i.suggestion || i.type === 'sensitive')
-    )
+  /** 仅联动当前已报告、未忽略、original + suggestion 完全相同的 occurrences。 */
+  function acceptMatching(input: ReviewIssue): number {
+    const issue = canonicalIssue(input)
+    if (!issue) {
+      ElMessage.warning(MANUAL_CHECK)
+      return 0
+    }
+    return applyIssues(issues.value.filter(item => !item._ignored
+      && item.original === issue.original && item.suggestion === issue.suggestion))
+  }
+
+  async function handleAcceptAll(): Promise<number> {
+    const originalIssues = issues.value
+    const actionable = originalIssues.filter(issue => !issue._accepted && !issue._ignored
+      && issue.original && (issue.suggestion || issue.type === 'sensitive'))
+    if (!actionable.length) return 0
     try {
       await ElMessageBox.confirm(
         `确认接受全部 ${actionable.length} 条修改建议？`,
         '一键修改',
-        { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
+        { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' },
       )
-      const accepted: ReviewIssue[] = []
-      // 长原文优先应用：避免短词先替换拆散长词（如「权力」改写「权力机关」）
-      const ordered = [...actionable].sort((a, b) => b.original.length - a.original.length)
-      for (const issue of ordered) {
-        if (issue.suggestion) {
-          currentText.value = currentText.value.replaceAll(issue.original, issue.suggestion)
-          options.onAcceptReplace?.(issue.original, issue.suggestion)
-        } else {
-          // 敏感词：删除（含紧邻标点），记录撤销锚点
-          const del = computeSensitiveDeletion(currentText.value, issue.original)
-          if (!del) continue
-          currentText.value = currentText.value.replaceAll(del.target, '')
-          options.onDeleteWord?.(del.target)
-          issue._deletedText = del.target
-          issue._undoAnchor = del.anchor
-        }
-        issue._accepted = true
-        accepted.push(issue)
-      }
-      reportFeedback(accepted, 'accept')
-      ElMessage.success('已接受所有修改')
     } catch {
-      // 取消
+      return 0
     }
+    if (issues.value !== originalIssues) return 0
+    const count = applyIssues(actionable)
+    if (count) ElMessage.success(`已接受 ${count} 条修改`)
+    return count
+  }
+
+  /**
+   * 只回放原文位置经过校验的状态；旧草稿无位置时降级为 pending，绝不猜测接受范围。
+   * 冲突长 span 优先，其余保持 pending 并提示；恢复不重复上报反馈。
+   */
+  function restore(text: string, persistedIssues: readonly ReviewIssue[]): ReviewIssue[] {
+    initialize(text, persistedIssues)
+    const errors = new Set<string>()
+    for (const saved of persistedIssues) {
+      if (saved._ignored) {
+        // 未定位项也允许被忽略；只恢复对应的未定位报告，不广播到全文 occurrences。
+        const issue = canonicalIssue(isLocatedReviewIssue(text, saved) ? saved : { ...saved, start: -1, end: -1 })
+        if (issue) setDecision(issue, false, true)
+        else errors.add(MANUAL_CHECK)
+      } else if (saved._accepted && !isLocatedReviewIssue(text, saved)) {
+        errors.add(MANUAL_CHECK)
+      }
+    }
+    for (const saved of longestFirst(persistedIssues.filter(issue => issue._accepted && !issue._ignored))) {
+      if (!isLocatedReviewIssue(text, saved)) continue
+      const result = applyPatch(saved, getIssuePatch(text, saved))
+      if (result.error) errors.add(result.error)
+    }
+    if (errors.size) ElMessage.warning([...errors].join('；'))
+    return issues.value
+  }
+
+  /** 与 sourceText.value 一起保存；恢复调用 restore(source, serializedIssues)。 */
+  function serializeIssues(): ReviewIssue[] {
+    return serializeReviewIssues(issues.value)
   }
 
   return {
-    issues,
+    sourceText,
     currentText,
+    issues,
+    patches,
     filterType,
     activeIssueIndex,
     recordId,
@@ -196,10 +257,16 @@ export function useProofreadReview(options: ProofreadReviewOptions = {}) {
     pendingCount,
     getGlobalIndex,
     reportFeedback,
+    initialize,
+    mergeIssues,
+    restore,
+    serializeIssues,
     acceptIssue,
-    ignoreIssue,
     deleteIssue,
+    ignoreIssue,
     undoIssue,
     handleAcceptAll,
+    acceptMatching,
+    applyIssues,
   }
 }

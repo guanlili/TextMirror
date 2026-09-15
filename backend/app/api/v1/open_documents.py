@@ -30,6 +30,7 @@ from app.core.rate_limit import (
     refund_user_daily_quota,
 )
 from app.core.security import hash_scoped_idempotency_key
+from app.core.task_quota import refund_document_quota
 from app.models.api_key import ApiKey
 from app.models.uploaded_document import UploadedDocument
 from app.models.user import User
@@ -181,7 +182,7 @@ async def open_submit_document(
 
         # ---- 配额（用户输入校验完成后才计费）：用户配额预扣 → 密钥日配额预扣。
         # 密钥配额拒绝时退还用户预扣（本次未获服务不消耗用户额度）----
-        await _charge_user_quota_contract(user)
+        quota_key = await _charge_user_quota_contract(user)
         if api_key is not None:
             try:
                 await charge_api_key_daily(api_key)
@@ -224,6 +225,7 @@ async def open_submit_document(
             "domain": parsed_domain,
             "config_id": config_id,
             "check_types": parsed_check_types,
+            "quota_key": quota_key,
         },
     )
     db.add_all([doc_record, db_task])
@@ -268,7 +270,7 @@ async def open_submit_document(
         )
     except Exception as e:
         logger.error(f"[OpenAPI] 任务队列不可用: {e}")
-        await db.execute(
+        failed = await db.execute(
             update(ProofreadTask)
             .where(ProofreadTask.id == db_task_pk_id, ProofreadTask.status == "PENDING")
             .values(status="FAILURE", error_code="DISPATCH_FAILED", message="任务投递失败，请重试")
@@ -276,7 +278,9 @@ async def open_submit_document(
         await db.commit()
         if api_key is not None:
             await refund_api_key_daily_usage(api_key)
-        await refund_user_daily_quota(user)
+        # 仅取消了尚未执行的投递才退用户预扣；与 worker 共用任务标记。
+        if failed.rowcount:
+            await refund_document_quota(task_uuid, quota_key)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "TASK_QUEUE_UNAVAILABLE", "message": "任务队列暂时不可用，请稍后重试"},

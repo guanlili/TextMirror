@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import time
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from loguru import logger
@@ -134,7 +135,7 @@ async def get_llm_provider(config_id: Optional[int] = None) -> BaseLLMProvider:
                 )
                 config = result.scalar_one_or_none()
                 if not config:
-                    raise RuntimeError(f"指定的模型配置不存在或已停用 (id={config_id})")
+                    raise InvalidModelConfigError(f"指定的模型配置不存在或已停用 (id={config_id})")
             else:
                 result = await session.execute(
                     select(LLMConfig).where(
@@ -163,73 +164,52 @@ async def get_llm_provider(config_id: Optional[int] = None) -> BaseLLMProvider:
     )
     # 尊重后台配置的温度值（校对场景默认 0.2，取两者较低保证确定性）
     provider.default_temperature = min(config.temperature, 0.2)
+    provider.config_id = config.id
+    provider.usage_business = "proofread"
+    # 仅人工点击评测的上下文限制重试/实际模型并发，不改变普通审校行为。
+    from app.services.quality_evaluation import configure_evaluation_provider
+    configure_evaluation_provider(provider)
     return provider
+
+
+@dataclass(frozen=True)
+class ChunkSpan:
+    """Unicode 码点坐标：[start, end) 为完整上下文，core_start 起为本片正文。"""
+
+    start: int
+    end: int
+    core_start: int
+
+
+def split_text_into_chunk_spans(text: str, max_chunk_size: int = 800,
+                                overlap: int = 100) -> List[ChunkSpan]:
+    """正文最多 max_chunk_size 字，优先在上限前最近句界/换行切分，否则硬切。
+
+    上下文直接取原文前 overlap 字；不重建文本，不丢空白，不靠查找片段反推坐标。
+    各 core 连续覆盖全文，只有 prefix 重叠。
+    """
+    if max_chunk_size <= 0 or overlap < 0:
+        raise ValueError("max_chunk_size must be positive and overlap non-negative")
+    if not text:
+        return [ChunkSpan(0, 0, 0)]
+    spans = []
+    core_start = 0
+    while core_start < len(text):
+        end = min(core_start + max_chunk_size, len(text))
+        if end < len(text):
+            boundary = max(text.rfind(sep, core_start, end) for sep in "。！？；\r\n")
+            if boundary >= core_start:
+                end = boundary + 1
+        spans.append(ChunkSpan(max(0, core_start - overlap), end, core_start))
+        core_start = end
+    return spans
 
 
 def split_text_into_chunks(text: str, max_chunk_size: int = 800,
                            overlap: int = 100) -> List[str]:
-    """
-    将长文本按段落分片, 每片不超过 max_chunk_size 字符
-    优先按段落分割, 保证语义完整
-    分片越小,并发越多,长文本总耗时越短（短文本 <800 字仍为单片,不受影响）
-    overlap: 分片重叠窗口——每片开头带上前片尾部约 overlap 字，避免
-    跨切点的指代/矛盾（前句"三台设备"后句变"四台"）在切点处漏检；
-    重复报告由 merge_issues 按 (original, type) 去重兜底。
-    """
-    if len(text) <= max_chunk_size:
-        return [text]
-
-    # 按段落分割
-    paragraphs = text.split('\n')
-    chunks = []
-    current_chunk = ""
-
-    for para in paragraphs:
-        # 如果单个段落超长,按句子再分
-        if len(para) > max_chunk_size:
-            if current_chunk:
-                chunks.append(current_chunk)
-                current_chunk = ""
-            # 按句号分割超长段落
-            sentences = re.split(r'([。！？；\n])', para)
-            temp = ""
-            for i in range(0, len(sentences), 2):
-                sentence = sentences[i]
-                separator = sentences[i + 1] if i + 1 < len(sentences) else ""
-                if len(temp) + len(sentence) + len(separator) > max_chunk_size:
-                    if temp:
-                        chunks.append(temp)
-                    temp = sentence + separator
-                else:
-                    temp += sentence + separator
-            if temp:
-                chunks.append(temp)
-        elif len(current_chunk) + len(para) + 1 > max_chunk_size:
-            chunks.append(current_chunk)
-            current_chunk = para
-        else:
-            if current_chunk:
-                current_chunk += '\n' + para
-            else:
-                current_chunk = para
-
-    if current_chunk:
-        chunks.append(current_chunk)
-
-    chunks = [chunk for chunk in chunks if chunk.strip()]
-    # 重叠窗口：非首片头部带上前片尾部（按句子边界取约 overlap 字）
-    if overlap > 0 and len(chunks) > 1:
-        overlapped = [chunks[0]]
-        for i in range(1, len(chunks)):
-            tail = chunks[i - 1][-overlap:]
-            # 尽量从句子边界开始，避免半句
-            for sep_pos in range(len(tail)):
-                if tail[sep_pos] in "。！？；\n":
-                    tail = tail[sep_pos + 1:]
-                    break
-            overlapped.append(tail + chunks[i])
-        chunks = overlapped
-    return chunks
+    """兼容公开 API；每片正文加前置上下文始终为原文的精确切片。"""
+    return [text[span.start:span.end]
+            for span in split_text_into_chunk_spans(text, max_chunk_size, overlap)]
 
 
 async def load_global_words() -> Dict[str, List[Dict]]:
@@ -386,56 +366,63 @@ _SHORT_FIELD_MAP = {
 }
 
 
+class InvalidModelConfigError(RuntimeError):
+    """用户指定的配置不存在/停用，可安全向用户展示。"""
+
+
+class InvalidProofreadResponse(ValueError):
+    """模型返回的 JSON 或问题结构不合法（不能视为零问题）。"""
+
+
+class ModelProofreadError(RuntimeError):
+    """所有模型分片失败；只向调用方暴露安全错误及可追溯元数据。"""
+
+    def __init__(self, coverage: Dict[str, Any], config_id: Optional[int]):
+        super().__init__("大模型审校失败，请稍后重试")
+        self.coverage = coverage
+        self.config_id = config_id
+
+
 def _normalize_issue_fields(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """将 LLM 输出的短字段名(o/t/s/e/sv)还原为完整字段名,兼容前端"""
+    """还原字段并校验整个数组；任一条非法则整片失败，不悄悄丢弃。"""
     normalized = []
+    fields = set(_SHORT_FIELD_MAP.values())
     for item in items:
         if not isinstance(item, dict):
-            continue
-        new_item = {}
-        for k, v in item.items():
-            new_item[_SHORT_FIELD_MAP.get(k, k)] = v
-        normalized.append(new_item)
+            raise InvalidProofreadResponse("审校问题必须为对象")
+        new_item = {_SHORT_FIELD_MAP.get(k, k): v for k, v in item.items()}
+        if any(not isinstance(new_item.get(field), str) for field in fields):
+            raise InvalidProofreadResponse("审校问题字段缺失或类型错误")
+        if (not new_item["original"].strip()
+                or new_item["type"] not in PROOFREAD_TYPES
+                or new_item["severity"] not in ("error", "warning", "info")):
+            raise InvalidProofreadResponse("审校问题字段取值非法")
+        if "review" in new_item and new_item["review"] not in ("new", "confirm", "doubt"):
+            raise InvalidProofreadResponse("自检标记非法")
+        # source / chunk_index / 坐标只由服务端产生，不信任模型自报。
+        normalized.append({k: v for k, v in new_item.items() if k in fields or k == "review"})
     return normalized
 
 
 def parse_proofread_result(content: str) -> List[Dict[str, Any]]:
-    """
-    解析大模型返回的 JSON 结果
-    做容错处理:尝试从返回内容中提取 JSON 数组,并把短字段名还原
-    """
+    """严格解析 JSON 数组；仅兼容完整代码围栏，不从错误结构中抽取子数组。"""
+    if not isinstance(content, str):
+        raise InvalidProofreadResponse("审校响应必须为文本")
     content = content.strip()
+    fenced = re.fullmatch(r'```(?:json)?\s*(.*?)\s*```', content, re.DOTALL)
+    if fenced:
+        content = fenced.group(1)
 
-    # 尝试直接解析
+    def reject_constant(value):
+        raise InvalidProofreadResponse("审校响应含非法 JSON 常量")
+
     try:
-        result = json.loads(content)
-        if isinstance(result, list):
-            return _normalize_issue_fields(result)
-    except json.JSONDecodeError:
-        pass
-
-    # 尝试从 markdown 代码块中提取
-    json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', content, re.DOTALL)
-    if json_match:
-        try:
-            result = json.loads(json_match.group(1))
-            if isinstance(result, list):
-                return _normalize_issue_fields(result)
-        except json.JSONDecodeError:
-            pass
-
-    # 尝试提取第一个 [ 到最后一个 ] 之间的内容
-    bracket_match = re.search(r'\[.*\]', content, re.DOTALL)
-    if bracket_match:
-        try:
-            result = json.loads(bracket_match.group(0))
-            if isinstance(result, list):
-                return _normalize_issue_fields(result)
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning(f"无法解析大模型返回结果,原始内容: {content[:200]}")
-    return []
+        result = json.loads(content, parse_constant=reject_constant)
+    except (json.JSONDecodeError, RecursionError) as exc:
+        raise InvalidProofreadResponse("审校响应不是合法 JSON") from exc
+    if not isinstance(result, list):
+        raise InvalidProofreadResponse("审校响应必须为数组")
+    return _normalize_issue_fields(result)
 
 
 async def _load_all_words(user_id: Optional[int]) -> Tuple[Dict[str, List[Dict]], Dict[str, List[Dict]]]:
@@ -530,23 +517,36 @@ def scan_words_deterministic(text: str,
 def merge_issues(llm_issues: List[Dict[str, Any]],
                  scanned_issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    合并确定性扫描结果与 LLM 结果：LLM 对同一问题的解释更自然，优先保留
-    LLM 版本，扫描版补位。去重两级：
-    1. (original, type) 精确相等
-    2. 同 type 且扫描版 original 被 LLM 版本包含——LLM 常带上下文引用
-       （报「三个环节:」而规则层报裸「:」），包含即同一问题，不重复补位
+    合并确定性扫描结果与 LLM 结果，同位置/类型/建议优先保留 LLM 版本。
+    主流程必须先定位，避免按 original 包含关系吞掉其他位置的问题。
+    同类型扫描项被 LLM span 严格包含且其原文已被建议修掉时，也优先保留 LLM。
+    仅为旧的无分片、无坐标调用保留文本包含去重兼容。
     """
-    llm_keys = {(i.get("original"), i.get("type")) for i in llm_issues}
     merged = list(llm_issues)
+    position_fields = ("start", "end", "type", "suggestion")
+    positioned = {tuple(i.get(k) for k in position_fields) for i in llm_issues
+                  if i.get("start") is not None}
+    legacy_llm = [i for i in llm_issues if i.get("start") is None and "chunk_index" not in i]
     for s in scanned_issues:
-        if (s["original"], s["type"]) in llm_keys:
-            continue
-        if s["original"] and any(
-            s["original"] in (i.get("original") or "") and i.get("type") == s["type"]
-            for i in llm_issues
-        ):
-            continue
-        merged.append(s)
+        if s.get("start") is not None:
+            duplicate = tuple(s.get(k) for k in position_fields) in positioned
+            if not duplicate and s.get("end") is not None:
+                duplicate = any(
+                    i.get("start") is not None and i.get("end") is not None
+                    and i.get("type") == s["type"]
+                    and i["start"] <= s["start"] < s["end"] <= i["end"]
+                    and (i["start"] < s["start"] or s["end"] < i["end"])
+                    and (i.get("suggestion") or i.get("type") == "sensitive")
+                    and s["original"] not in (i.get("suggestion") or "")
+                    for i in llm_issues
+                )
+        else:
+            duplicate = "chunk_index" not in s and any(
+                s["original"] and s["original"] in (i.get("original") or "") and i.get("type") == s["type"]
+                for i in legacy_llm
+            )
+        if not duplicate:
+            merged.append(s)
     # 严重度排序：error → warning → info
     order = {"error": 0, "warning": 1, "info": 2}
     merged.sort(key=lambda i: order.get(i.get("severity", "warning"), 1))
@@ -584,13 +584,19 @@ async def proofread_text(
         domain = detect_domain(text)
         logger.info(f"[校对] 领域自动识别 → {domain}")
 
-    # 文本分片
-    chunks = split_text_into_chunks(text)
+    # 保留每片完整上下文在原文中的位置，失败补查及问题定位共用。
+    chunk_spans = split_text_into_chunk_spans(text)
+    chunks = [text[span.start:span.end] for span in chunk_spans]
+    coverage = {
+        "status": "complete", "total_chunks": len(chunks),
+        "completed_chunks": len(chunks), "failed_chunks": [],
+    }
     logger.info(f"[校对] 总长度={len(text)} 分片数={len(chunks)} 领域={domain} user_id={user_id}")
 
     # 并行：加载词库/领域规则配置 + 获取大模型 Provider，避免串行等待
     t1 = time.perf_counter()
     (global_words, user_words, domain_rules), provider = await _gather_preparation(user_id, domain, config_id)
+    actual_config_id = getattr(provider, "config_id", config_id)
     t2 = time.perf_counter()
     logger.info(f"[校对] 准备阶段耗时={t2-t1:.2f}s "
                 f"(全局: 敏感={len(global_words['sensitive'])} 禁={len(global_words['banned'])} "
@@ -614,16 +620,19 @@ async def proofread_text(
     if depth == "quick":
         await provider.close()  # quick 不用 LLM，释放已创建的连接
         scanned_issues = _filter_whitelist_issues(scanned_issues, global_words, user_words)
+        scanned_issues = locate_issues(text, verify_llm_issues(text, scanned_issues))
         scanned_issues.sort(key=lambda i: {"error": 0, "warning": 1, "info": 2}.get(i.get("severity", "warning"), 1))
         logger.info(f"[校对][快查] 完成 问题={len(scanned_issues)} 耗时={time.perf_counter()-t0:.2f}s（零LLM）")
         return {
             "issues": scanned_issues,
             "total_issues": len(scanned_issues),
-            "chunks_count": 1,
+            "chunks_count": len(chunks),
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
             "domain": domain,
             "check_types": list(PROOFREAD_TYPES.keys()),
             "depth": "quick",
+            "config_id": actual_config_id,
+            "coverage": coverage,
         }
 
     # 调用大模型（并发校对所有分片，加速整体响应）
@@ -672,23 +681,28 @@ async def proofread_text(
     try:
         tasks = [_process_chunk(i, c) for i, c in enumerate(chunks)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        failed_chunks = 0
-        last_error = None
-        for r in results:
+        for idx, r in enumerate(results):
             if isinstance(r, Exception):
-                failed_chunks += 1
-                last_error = r
-                logger.error(f"[校对] 分片失败: {r}")
+                span = chunk_spans[idx]
+                coverage["failed_chunks"].append({
+                    "chunk_index": idx, "start": span.start, "end": span.end,
+                    "text": text[span.start:span.end],
+                    "error_code": "INVALID_RESPONSE" if isinstance(r, InvalidProofreadResponse) else "MODEL_ERROR",
+                })
+                logger.error(f"[校对] 分片 {idx} 失败: {r}")
                 continue
             issues, usage = r
             all_issues.extend(issues)
             for key in total_usage:
                 total_usage[key] += usage.get(key, 0)
 
-        # 全部分片失败：显式报错，不再静默返回"0个问题"的假成功
-        if failed_chunks == len(chunks) and chunks:
-            raise RuntimeError(f"大模型调用失败: {last_error}")
-        if failed_chunks > 0:
+        failed_chunks = len(coverage["failed_chunks"])
+        coverage["completed_chunks"] = len(chunks) - failed_chunks
+        coverage["status"] = "partial" if failed_chunks else "complete"
+        # 全失败保留既有失败/退款语义，不暴露 provider 异常细节。
+        if failed_chunks == len(chunks):
+            raise ModelProofreadError(coverage, actual_config_id)
+        if failed_chunks:
             logger.warning(f"[校对] {failed_chunks}/{len(chunks)} 个分片失败，结果可能不完整")
 
         # 高危文本二次自检（error 级问题密集时触发；deep 模式强制）：provider 尚未关闭，
@@ -710,12 +724,10 @@ async def proofread_text(
     all_issues = _filter_whitelist_issues(all_issues, global_words, user_words)
     scanned_issues = _filter_whitelist_issues(scanned_issues, global_words, user_words)
 
-    # 合并确定性扫描结果（LLM 版本优先，扫描版补位，按严重度排序）
+    # 先在各自作用域内 post-verify、定位，再合并；不能在定位前按原文去重。
+    all_issues = locate_issues(text, verify_llm_issues(text, all_issues, chunk_spans), chunk_spans)
+    scanned_issues = locate_issues(text, verify_llm_issues(text, scanned_issues))
     all_issues = merge_issues(all_issues, scanned_issues)
-
-    # 幻觉自校验：LLM 报的 original 逐字核验原文，转述偏差自动对齐、
-    # 定位失败的降级——消灭"高亮失败/假问题"这类最伤信任的输出
-    all_issues = verify_llm_issues(text, all_issues)
 
     # 建议有效性自检：改写类建议若没修掉错误核心，降级 warning 提示人工核对
     all_issues = _check_suggestion_effective(all_issues)
@@ -730,6 +742,8 @@ async def proofread_text(
         "domain": domain,
         "check_types": list(PROOFREAD_TYPES.keys()),  # 已废弃字段，恒为全量，仅为响应兼容保留
         "depth": depth,
+        "config_id": actual_config_id,
+        "coverage": coverage,
     }
 
 
@@ -802,8 +816,73 @@ def _check_suggestion_effective(issues: List[Dict[str, Any]]) -> List[Dict[str, 
     return checked
 
 
+_SELF_CHECK_TEXT_LIMIT = 3000
 
-def verify_llm_issues(text: str, issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+
+def _issue_search_span(text: str, issue: Dict[str, Any],
+                       chunk_spans: Optional[List[ChunkSpan]]) -> Tuple[int, int]:
+    if issue.get("source") == "self_check":
+        return 0, min(len(text), _SELF_CHECK_TEXT_LIMIT)
+    if issue.get("source") in ("dict_scan", "consistency", "format_rule"):
+        return 0, len(text)
+    if chunk_spans is not None and "chunk_index" in issue:
+        idx = issue["chunk_index"]
+        if type(idx) is int and 0 <= idx < len(chunk_spans):
+            return chunk_spans[idx].start, chunk_spans[idx].end
+        return 0, 0  # 非法分片号绝不回退到其他分片。
+    return 0, len(text)
+
+
+def locate_issues(text: str, issues: List[Dict[str, Any]],
+                  chunk_spans: Optional[List[ChunkSpan]] = None) -> List[Dict[str, Any]]:
+    """post-verify 后逐处展开；坐标为原文 Unicode 码点，重叠窗口仅去重同一位置。"""
+    # 复用格式层原有判定，裸标点不能被扩展到时间/英文中的合法同字符。
+    from app.services.format_rules import _HALFWIDTH_COLON_RE, _HALFWIDTH_CORE_RE
+
+    punctuation_spans = {m.span() for pattern in (_HALFWIDTH_CORE_RE, _HALFWIDTH_COLON_RE)
+                         for m in pattern.finditer(text)}
+    located, seen, expanded = [], set(), set()
+    for original_issue in issues:
+        issue = dict(original_issue)
+        original = issue.get("original") or ""
+        lo, hi = _issue_search_span(text, issue, chunk_spans)
+        matches = []
+        start, end = issue.pop("start", None), issue.pop("end", None)
+        expansion_key = (original, issue.get("type"), issue.get("suggestion"),
+                         lo, hi, issue.get("source"), issue.get("chunk_index"), start, end)
+        if expansion_key in expanded:
+            continue
+        expanded.add(expansion_key)
+        if (type(start) is int and type(end) is int and lo <= start < end <= hi
+                and text[start:end] == original):
+            matches = [(start, end)]
+        elif original:
+            pos = text.find(original, lo, hi)
+            while pos != -1:
+                matches.append((pos, pos + len(original)))
+                pos = text.find(original, pos + 1, hi)
+        if issue.get("source") == "format_rule" and re.fullmatch(r"[,!?;:]+", original):
+            matches = [span for span in matches if span in punctuation_spans]
+        if not matches:
+            issue["severity"] = "warning"
+            issue["suggestion"] = ""
+            if "需人工核对" not in issue.get("explanation", ""):
+                issue["explanation"] = f"原文定位失败，需人工核对：{issue.get('explanation', '')[:40]}"
+            # 无坐标时按分片保留，不能把不同分片的不确定项冒认为同一处。
+            key = (None, issue.get("chunk_index"), original, issue.get("type"), issue.get("suggestion"))
+            if key not in seen:
+                seen.add(key)
+                located.append(issue)
+        for start, end in matches:
+            key = (start, end, issue.get("type"), issue.get("suggestion"))
+            if key not in seen:
+                seen.add(key)
+                located.append({**issue, "start": start, "end": end})
+    return located
+
+
+def verify_llm_issues(text: str, issues: List[Dict[str, Any]],
+                      chunk_spans: Optional[List[ChunkSpan]] = None) -> List[Dict[str, Any]]:
     """
     校验 LLM 报的问题的 original 是否真实存在于原文：
     1. 逐字命中 → 通过
@@ -815,29 +894,31 @@ def verify_llm_issues(text: str, issues: List[Dict[str, Any]]) -> List[Dict[str,
     确定性扫描层（dict_scan/consistency/format_rule）的 issue 天然
     来自原文匹配，跳过校验。
     """
-    text_norm = _normalize_for_match(text)
     verified: List[Dict[str, Any]] = []
     fuzzy_fixed = 0
 
     for issue in issues:
+        issue = dict(issue)
         if issue.get("source") in ("dict_scan", "consistency", "format_rule"):
             verified.append(issue)
             continue
-        original = (issue.get("original") or "").strip()
-        if not original:
+        lo, hi = _issue_search_span(text, issue, chunk_spans)
+        scope_text = text[lo:hi]
+        original = issue.get("original") or ""
+        if not original.strip():
             continue  # 无原文的问题直接丢弃
-        if original in text:
+        if original in scope_text:
             verified.append(issue)
             continue
-        # 容差匹配：去空白
-        if _normalize_for_match(original) in text_norm:
+        # 容差匹配仅用于校验；没有逐字命中时 locate_issues 不编造坐标。
+        if _normalize_for_match(original) in _normalize_for_match(scope_text):
             verified.append(issue)
             continue
-        # 模糊定位：滑窗找最相似片段（简单公共子串长度比）
+        # 模糊定位也只能在所属分片内进行，禁止将问题移到其他分片。
         best_frag, best_score = None, 0.0
         win = len(original)
-        for i in range(0, max(len(text) - win, 0) + 1):
-            frag = text[i: i + win]
+        for i in range(0, max(len(scope_text) - win, 0) + 1):
+            frag = scope_text[i: i + win]
             # 快速剪枝：首字符都不同则跳过（相似度必低）
             common = _common_ratio(original, frag)
             if common > best_score:
@@ -849,7 +930,7 @@ def verify_llm_issues(text: str, issues: List[Dict[str, Any]]) -> List[Dict[str,
             verified.append(issue)
         else:
             # 降级：保留问题提示但不可自动替换
-            issue = {**issue, "suggestion": "", "severity": "info"}
+            issue = {**issue, "suggestion": "", "severity": "warning"}
             issue["explanation"] = f"原文定位失败，需人工核对：{issue.get('explanation', '')[:40]}"
             verified.append(issue)
 
@@ -916,15 +997,16 @@ async def self_check_pass(
         f"{n}. 原文「{i.get('original', '')[:40]}」→ 建议「{i.get('suggestion', '')[:40]}」（{i.get('type')}）"
         for n, i in enumerate(sample, 1)
     )
-    prompt = SELF_CHECK_PROMPT.format(text=text[:3000], issues=issues_desc)
+    prompt = SELF_CHECK_PROMPT.format(text=text[:_SELF_CHECK_TEXT_LIMIT], issues=issues_desc)
+    from app.services.llm.usage import usage_operation
+
     try:
-        response = await provider.chat(
-            [{"role": "user", "content": prompt}],
-            temperature=provider.default_temperature,
-            # 自检是「对照清单复查遗漏」，不需要深度推理；恒关思考——
-            # 开思考时 3000 字 prompt 必超 60s 配置值，实测 3 次重试全超时后失败
-            thinking=False,
-        )
+        with usage_operation("self_check"):
+            response = await provider.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=provider.default_temperature,
+                thinking=False,
+            )
         extra = parse_proofread_result(response.content)
         # 只取 review=new 的项（LLM 复核意见不覆盖第一轮结果）
         additions = [
