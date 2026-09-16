@@ -1,267 +1,117 @@
 <div align="center">
 
-# 🛡️ TextMirror — Intelligent Document Proofreading Platform
+# TextMirror — Intelligent Document Proofreading Platform
 
-**An AI-driven document proofreading and polishing platform: AI rewriting, text proofreading, document upload review, online preview, issue highlighting, one-click or item-by-item fixes, and export.**
+**Proofreading first, polishing second: find issues, review suggestions, save versions, and deliver a revised draft.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB.svg)](https://www.python.org/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.x-4FC08D.svg)](https://vuejs.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg)](https://fastapi.tiangolo.com/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
-*Make every document stand up to scrutiny — intelligent proofreading · AI polishing · multi-model driven · works out of the box*
-
-**[简体中文](README.md)** | English
+[简体中文](README.md) | English
 
 </div>
 
----
+TextMirror is an open-source, self-hostable proofreading platform for everyday documents, official writing, and legal texts. Deterministic rules and configurable language models identify issues; users decide which changes to apply.
 
-## ✨ Why TextMirror?
+## Capabilities
 
-Most document proofreading tools rely on closed-source commercial services — expensive and inflexible. **TextMirror** is a fully open-source, self-hostable proofreading platform that gives teams and individuals commercial-grade document review capability.
+| Capability | Description |
+|------------|-------------|
+| Text and document review | Paste text or upload DOC / DOCX / PDF / TXT; long-text chunking and task progress |
+| Three depths | Quick runs rules only; Standard uses AI; Deep adds thinking and a second pass. Quality and latency depend on the model |
+| Comparison and role-based review | Compare 2–4 models, or coordinate rule, language, consistency, and dispute-review stages; not multi-user live editing |
+| Review and delivery | Accept, ignore, or undo location-specific suggestions; revised-text preview; manually saved drafts, up to 20 versions, version comparison, and history recovery |
+| Coverage reporting | Distinguish complete, partial, and unrecorded coverage; unfinished review is not an issue-free result |
+| Dictionaries and domain rules | Global dictionaries, personal corrections, allowlists, editable domain rules, and feedback-assisted dictionary maintenance |
+| Quality evaluation | Human-reviewed samples with separate detection and replacement-suggestion checks against accepted or rejected alternatives |
+| Optional fact checking | Web search or trusted sources, initial and counter-evidence searches, exact body quotations and context; disabled by default |
+| AI polishing | 10 styles, three intensity versions, streaming, and multi-model comparison |
+| Administration and integration | RBAC, user/guest quotas, branding, optional Feishu login, API keys, webhooks, and a physical-request model usage ledger |
 
-- **🚀 Works out of the box** — one-command Docker deployment, online in 5 minutes
-- **🤖 Multi-model support** — built-in adapters for 16 AI providers (DeepSeek, OpenAI, Volcengine Ark, Qwen, Kimi, MiniMax, ...), switchable live from the admin console
-- **🎚️ Three proofreading depths** — Quick (rules-only, instant, zero cost) / Standard (AI, seconds) / Deep (AI with extended thinking, fewer false positives)
-- **⚡ Streaming output** — polish results stream word by word via SSE with real-time progress
-- **⚖️ Multi-model comparison** — run the same text through 2–4 models concurrently and compare quality and latency
-- **📝 Full format coverage** — DOCX / PDF / TXT upload review with original layout preserved
-- **🎨 AI rewriting** — 10 styles, three intensity versions (light / standard / deep) with streaming output
-- **🔍 Precise issue location** — highlighted results, review item by item, accept or ignore each
-- **📚 Deterministic lexicon engine** — sensitive/error words matched with 100% recall (not probabilistic), three-layer lexicon + user feedback flywheel
-- **📖 Operable domain rules** — built-in official-document / legal domain rules; edit industry rules in the admin console with instant effect, no redeploy
-- **🔌 Open API** — API keys + 8 endpoints to integrate proofreading and AI polishing into your own workflows, always-on Swagger docs, unified error contract
-- **🏢 Enterprise management** — full RBAC, audit logs, per-user daily quotas (unlimited supported), guest rate limiting
-- **🔐 Auth security** — password change instantly invalidates all old tokens; short-lived access tokens with auto-renewal
-- **📱 Responsive** — complete PC and mobile layouts
+### Boundaries
 
----
+- **AI suggestions are not correctness guarantees.** Saving, exporting, or a successful task does not certify a document. Inspect coverage and review the result.
+- **Previewed content is not necessarily reviewed content.** DOCX extraction currently covers body paragraphs, not tables or other non-body content. PDF processing extracts text without OCR and allows up to 100 pages. The default upload limit is 20MB.
+- The document page exports revised TXT, a TXT issue report, and Word. Layout-preserving rewriting is attempted only for DOCX sources; unsafe changes are rejected, with TXT available as an alternative. The text page exports full text or an issue report as TXT.
+- Saved records can be recovered after refresh, but **acceptance decisions require manual draft saving**. Guest review state exists only in page memory.
+- Both fact-checking modes send content to external services. Trusted-source mode restricts admissible evidence, not all search activity; it is neither offline nor closed retrieval. Findings are advisory and are not automatically applied.
+- Quick review has no AI token cost but still uses platform quotas and rate limits. The model ledger records known usage, does not backfill historical estimates, and is not a provider invoice.
 
-## 🎯 Core Features
+## Local Development (Docker recommended)
 
-### 📋 Text Proofreading
-> Paste text and get instant review. Long texts are chunked automatically; results are highlighted and fixable item by item. Export either the corrected full text or an issue report (original / suggestion / explanation / status per issue).
->
-> **Three depths**: **Quick** (rules engine only — instant, zero AI cost) / **Standard** (default — AI with deep thinking disabled, seconds) / **Deep** (AI with extended thinking + second-pass review, for final review of important documents)
-
-### 📄 Document Upload Review
-> Upload DOCX / PDF / TXT; documents are parsed and proofed asynchronously with SSE progress updates (per-chunk granularity for long documents). Preview preserves layout; export a corrected document after fixes.
-
-### 🎨 AI Rewriting
-> 10 rewriting styles, three intensity versions generated concurrently with streaming word-by-word rendering; generation can be stopped mid-flight.
->
-> **Multi-model comparison mode**: pick 2–4 configured models, polish the same text in parallel, compare output and latency; results saved to history automatically.
-
-### 🔁 Re-run from History
-> From any history entry, one click re-runs polish or proofreading with the original text pre-filled.
-
-### 📚 Lexicon Engine (Deterministic Scanning)
-> - **100% recall**: sensitive / forbidden / correction words use deterministic string scanning (not LLM guessing) — guaranteed hits at zero token cost; the LLM focuses on grammar, logic, and expression
-> - **Three-layer lexicon**: global (admin) + personal (user's wrong→right rules) + whitelist (do-not-disturb list, personal corrections take priority)
-> - **Hit source labels**: results are tagged 〔My lexicon〕/〔Global lexicon〕so you can see your config working
-> - **Suggestion flywheel**: every accept/ignore is recorded; the admin console aggregates whitelist / correction candidates for one-click adoption — gets sharper with use
-
-### 📖 Domain Rules
-> Built-in rules for general / official-document / legal domains (document format, legal terminology, amount-in-words consistency, ...). The admin "Review Rules" page lets you edit domain rules — saved rules take effect immediately, no release needed.
-
-### 🤖 Multi-model Management
-> 16 built-in provider adapters: DeepSeek / OpenAI / Volcengine Ark (Doubao) / Qwen / Kimi / Tencent Hunyuan / Zhipu GLM / Baidu Qianfan / iFlytek Spark / MiniMax / SiliconFlow / Azure OpenAI / LiteLLM / custom OpenAI-compatible gateways ...
-> Configure and switch models in the admin console without restarts; deep-thinking parameters adapt per provider (verified on Volcengine Ark and Qwen).
-
-### 🛡️ Quotas and Rate Limiting
-> - **Per-user daily quota**: set per user, blank = unlimited, resets at midnight Beijing time
-> - **Guest rate limiting**: per-IP daily limits for anonymous users, with configurable count and text-length caps
-
-### 🔐 Enterprise Admin Console
-> User management / RBAC roles / model configuration / lexicon management / audit logs / platform settings / branding
-
-### 🔌 Open API
-> Integrate proofreading into your workflows (scripts / CI / enterprise systems):
-> - **Self-service API keys**: create in the web UI (SHA-256 hashed storage, RPM + daily-quota two-layer limiting, automatic refund on failure)
-> - **8 endpoints**: text proofread / multi-model compare / async document review (upload → poll) / job status / model list / usage statistics / AI polish (incl. streaming)
-> - **Unified error contract**: `{code, message}` with always-on Swagger docs (`/api/v1/open/docs`) — Try it out works out of the box
-
-### 🎨 Branding (White-label)
-> Configure in real time from the admin console, no code changes:
-> **platform name / subtitle / favicon / login slogan / footer (ICP number) / guest mode toggle**
-> Internal deployments can disable guest mode (login required); public deployments keep the guest experience — one codebase, two shapes.
-
-### 🔗 Feishu Integration (optional)
-> Feishu QR login / SSO / auto user provisioning — off by default, configure as needed.
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Solution |
-|:-----:|----------|
-| **Frontend** | Vue 3 + TypeScript + Vite + Element Plus + Pinia |
-| **Editor** | Tiptap rich text + docx-preview + pdf.js |
-| **Backend** | Python 3.10+ / FastAPI / SQLAlchemy 2.0 |
-| **Database** | PostgreSQL + Redis |
-| **Async tasks** | Celery Worker |
-| **Auth** | JWT + RBAC permission model |
-| **Deployment** | Docker Compose (5 containers: frontend / backend / Celery / PostgreSQL / Redis) |
-
----
-
-## 🚀 Quick Start
-
-### Requirements
-
-- Python 3.10+
-- Node.js 22+ (vite 7 requires 20.19+; 22 LTS recommended)
-- PostgreSQL 14+
-- Redis 6+
-
-### Local Development (Docker, recommended)
+Install Docker Engine / Docker Desktop with the Compose plugin. This is a development setup, not a public deployment configuration.
 
 ```bash
-# 1. Configure the backend (DB/Redis point to the compose services)
-cp backend/.env.example backend/.env
-
-# 2. Build and start everything (postgres + redis + backend hot-reload + celery + frontend)
-docker compose -f docker-compose.dev.yml up -d --build
-
-# 3. Initialize the database (schema + seed data: admin / roles / global lexicon)
-docker exec textmirror-dev-backend python -m app.core.seed
-docker exec textmirror-dev-backend alembic stamp head   # stamp migration baseline
-```
-
-### Local Development (bare metal)
-
-```bash
-# 1. Clone
 git clone https://github.com/guanlili/TextMirror.git
 cd TextMirror
-
-# 2. Backend setup
-cd backend
-cp .env.example .env          # copy and edit (DB / Redis / API keys)
-python -m venv venv
-# Windows:
-venv\Scripts\activate
-# Linux/Mac:
-source venv/bin/activate
-pip install -r requirements.txt
-
-# 3. Initialize the database (schema + seed data)
-python -m app.core.seed       # tables, admin account, roles, global lexicon
-alembic stamp head            # stamp migration baseline
-
-# 4. Frontend setup
-cd ../frontend
-npm install
-
-# 5. Start both (two terminals)
-# backend:
-uvicorn app.main:app --reload --port 3020
-# frontend:
-cd ../frontend && npm run dev
+cp backend/.env.example backend/.env
 ```
 
-| Service | URL |
-|---------|-----|
-| Frontend | http://localhost:3022 |
-| Backend API docs | http://localhost:3020/docs |
-| Default account | admin / admin123 |
+Edit the corresponding values in `backend/.env`. The template's `localhost` addresses do not work between containers:
 
----
-
-## 🐳 Docker Deployment
-
-Server-side build, three steps to production:
+```dotenv
+DEBUG=true
+DATABASE_URL=postgresql+asyncpg://postgres:textmirror@postgres:5432/textmirror
+REDIS_HOST=redis
+REDIS_PASSWORD=
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=60
+```
 
 ```bash
-# 1. Clone
-git clone https://github.com/guanlili/TextMirror.git /opt/TextMirror && cd /opt/TextMirror
-
-# 2. Configure environment
-#    Root .env: POSTGRES_PASSWORD / REDIS_PASSWORD (read by compose)
-#    backend/.env.production: copy backend/.env.example, then fill in DB, Redis, and AI provider API keys
-
-# 3. Build and start (5 containers: frontend / backend / Celery / PostgreSQL / Redis)
-docker compose up -d --build
+docker compose -f docker-compose.dev.yml up -d --build
+docker compose -f docker-compose.dev.yml ps
 ```
 
-### Enable HTTPS (optional)
+The backend initializes tables, migrations, and seed data automatically. Do not run a manual migration `stamp` for a fresh container setup.
 
-1. Put SSL certificates into `frontend/ssl/`
-2. Rename `frontend/nginx.production.ssl.conf` to `nginx.production.conf`
-3. Adjust certificate paths and rebuild the frontend image
+| Entry | Address / details |
+|-------|-------------------|
+| User and admin UI | http://localhost:3022 |
+| Backend API docs | http://localhost:3020/docs (DEBUG mode) |
+| Open API docs | http://localhost:3022/api/v1/open/docs |
+| Development administrator | `admin / admin123`, for DEBUG development only |
 
-> First-run initialization, updates, rollback, backup, and troubleshooting are covered in the ops manual (`系统运维操作手册.md`, in Chinese).
+In the admin console, add a real provider key under model configuration and activate the model. Model keys are not configured in `.env`. Quick review currently still loads model configuration, but sends no model requests.
 
----
+Only the backend API hot-reloads in development Compose. Rebuild `frontend` for UI changes; restart `celery-worker` after it is idle for worker code changes. Do not reset the database to resolve migration errors.
 
-## 📁 Project Structure
+## Production Deployment
 
-```
-TextMirror/
-├── backend/                # Backend (FastAPI)
-│   ├── app/
-│   │   ├── api/           # API routes
-│   │   ├── core/          # Config, security, database
-│   │   ├── models/        # Data models
-│   │   └── services/      # Business logic
-│   ├── alembic/           # Database migrations
-│   ├── .env.example       # Config template
-│   └── requirements.txt
-├── frontend/              # Frontend (Vue 3)
-│   ├── src/
-│   │   ├── views/         # Pages
-│   │   ├── stores/        # Pinia state
-│   │   ├── api/           # API clients
-│   │   └── utils/         # Utilities
-│   ├── nginx.production.conf      # Nginx config (HTTP)
-│   ├── nginx.production.ssl.conf  # Nginx config (HTTPS)
-│   └── Dockerfile
-├── docker-compose.yml     # Container orchestration
-├── deploy.sh              # Server deployment script
-└── README.md
-```
+Use [docker-compose.yml](docker-compose.yml) on a Linux server. It serves **HTTP on port 3022** by default and uses host networking, unlike the bridged macOS / Windows development setup.
 
----
+Configure the root `.env` and `backend/.env.production`: strong database/Redis passwords, `DEBUG=false`, independent application/JWT secrets, persistent upload storage, and allowed origins. A new production administrator receives a random password, not the development default. **Disable the default-enabled one-click login before public access**: it allows passwordless administrator login, and neither a random password nor `DEBUG=false` disables it.
 
-## 📖 Documentation
+Follow the [operations manual](系统运维操作手册.md) for initialization, migrations, backups, and verification before public access. HTTPS requires a TLS-terminating proxy or explicit certificate mounts, SSL configuration, and health-check changes; copying certificates alone does not enable it.
 
-| Document | Description |
-|----------|-------------|
-| [系统功能设计文档](系统功能设计文档.md) | Architecture, data models, API design, feature list, dev conventions (Chinese) |
-| [系统运维操作手册](系统运维操作手册.md) | Local dev, production deployment, DB init, update/rollback, troubleshooting (Chinese) |
-| [用户使用手册](用户使用手册.md) | End-user guide (Chinese) |
-| [CHANGELOG.md](CHANGELOG.md) | Release history |
+## Open API
 
----
+Create a key on the API Keys page and send `Authorization: Bearer tm_…`. `/api/v1/open/docs` is the authoritative source for parameters, enums, and interactive examples.
 
-## 🤝 Contributing
+Endpoints cover text review, model comparison, asynchronous documents and polling, model discovery, usage statistics, polishing, and streaming polishing. Asynchronous documents support signed webhooks. See the [user guide](用户使用手册.md) for examples and quota boundaries.
 
-Issues and pull requests are welcome!
+## Stack and Layout
 
-1. Fork this repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a pull request
+- Backend: Python **3.11+**, FastAPI, SQLAlchemy, Alembic, Celery.
+- Frontend: Vue 3, TypeScript, Element Plus, Pinia, Vite; development and CI use Node.js 22.
+- Storage: PostgreSQL 16 and Redis 7. Compose runs five services: frontend, API, worker, database, and cache.
+- `backend/app/`: API, services, models, and tasks; `backend/alembic/`: migrations; `backend/tests/`: backend tests.
+- `frontend/src/`: views, components, API clients, and tests; `backend/eval/`: proofreading evaluation tools.
 
-> See [CONTRIBUTING.md](CONTRIBUTING.md) for the detailed guide.
+## Documentation
 
----
+The detailed guides are currently in Chinese.
 
-## 📄 License
+| Document | Purpose |
+|----------|---------|
+| [User guide](用户使用手册.md) | Proofreading, review delivery, fact checking, quality feedback, and API integration |
+| [Operations manual](系统运维操作手册.md) | Development, production configuration, upgrades, backups, rollback, and troubleshooting |
+| [System design](系统功能设计文档.md) | Module responsibilities, data flow, and consistency contracts |
+| [Contributing](CONTRIBUTING.md) | Validation commands and PR workflow |
+| [Changelog](CHANGELOG.md) | Merged milestones and unreleased changes |
 
-This project is released under the [MIT License](LICENSE).
+## Contributing and License
 
-TextMirror is developed on top of TextGuard and retains the original project's MIT license and copyright notice.
+Issues and pull requests are welcome. Code, tests, and documentation changes go through feature branches and PR review.
 
----
-
-<div align="center">
-
-**TextMirror** — let AI guard every word
-
-Made with ❤️ by TextMirror Contributors
-
-</div>
+Released under the [MIT License](LICENSE). TextMirror builds on TextGuard and retains its original license and copyright notice.

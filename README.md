@@ -1,273 +1,115 @@
 <div align="center">
 
-# 🛡️ TextMirror - 智能文档审校平台
+# TextMirror - 智能文档审校平台
 
-**AI 驱动的新一代文档校对与润色平台，支持 AI 润色、文本校对、文档上传校对，在线预览、问题高亮、一键/逐条修改，修改后导出。**
+**主打审校，润色辅助：发现问题、人工采纳、保存版本，再交付修订稿。**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB.svg)](https://www.python.org/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.x-4FC08D.svg)](https://vuejs.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg)](https://fastapi.tiangolo.com/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
-*让每一份文档都经得起推敲 —— 智能校对 · AI润色 · 多模型驱动 · 开箱即用*
-
-简体中文 | **[English](README.en.md)**
+简体中文 | [English](README.en.md)
 
 </div>
 
----
+TextMirror 是可私有化部署的开源审校平台，适合日常文稿、公文和法律文本。规则引擎与可配置的大模型共同发现问题，最终是否修改由用户决定。
 
-## ✨ 为什么选择 TextMirror？
+## 核心能力
 
-当前市面上的文档校对工具大多依赖商业闭源方案，费用高昂且不可定制。**TextMirror** 是一个完全开源、可私有化部署的智能文档审校平台，让企业和个人都能拥有媲美商业级产品的文档校对能力。
+| 能力 | 说明 |
+|------|------|
+| 文本与文档审校 | 文本粘贴，DOC / DOCX / PDF / TXT 上传，长文本分片与任务进度 |
+| 三档深度 | 快查仅运行规则；标准使用 AI；深度增加思考与二次自检，实际效果和耗时依赖模型 |
+| 多模型对比与角色协作 | 2–4 个模型横向对比；协作模式串联规则、语言、一致性和争议复核，并非多人在线编辑 |
+| 人工审阅与交付 | 按位置采纳、忽略、撤销；修订预览；手动保存草稿、最多 20 个版本、版本对比与历史继续审阅 |
+| 覆盖状态 | 区分完整、部分完成和未记录覆盖；未审完不能视为没有问题 |
+| 词库与行业规则 | 全局词库、个人纠错、放行词；领域规则后台维护；用户反馈辅助词库运营 |
+| 质量反馈与评测 | 人工审核反馈样例，独立统计是否检出、替换建议是否符合认可或禁止的改法 |
+| 事实核查（可选） | 联网搜索 / 可信信源两种模式，初始与反证检索、逐字引文和证据上下文；默认关闭 |
+| AI 润色 | 10 种风格，轻量 / 标准 / 深度三个版本，支持流式输出与多模型对比 |
+| 管理与集成 | RBAC、用户及游客配额、品牌设置、可选飞书登录、API 密钥、Webhook、实际模型调用账本 |
 
-- **🚀 开箱即用** — Docker 一键部署，5 分钟即可上线
-- **🤖 多模型支持** — 内置 16 家 AI 供应商适配（DeepSeek、OpenAI、火山方舟、通义千问、Kimi、MiniMax 等），管理后台动态切换
-- **🎚️ 审校深度三档** — 快查（纯规则引擎秒回零成本）/ 标准（AI 秒级）/ 深度（AI 开思考模式，误报更少），按文档重要性自由选档
-- **⚡ 流式输出** — 润色结果 SSE 流式逐字渲染，进度实时推送，不再干等
-- **⚖️ 多模型对比** — 同一段文本并发跑 2-4 个模型，横向对比输出效果与耗时
-- **📝 全格式覆盖** — 支持 DOCX / PDF / TXT 上传校对，保留原始排版
-- **🎨 AI 智能润色** — 10 种风格一键润色，三段式（轻量/标准/深度）流式输出
-- **🔍 精准问题定位** — 校对结果高亮标注，支持逐条审阅、一键采纳或忽略
-- **📚 确定性词库引擎** — 敏感词/纠错词 100% 命中（非概率匹配），三层词库 + 用户反馈飞轮，越用越准
-- **📖 行业规则可运营** — 公文/法律领域规则内置，行业规则后台可编辑、实时生效
-- **🔌 开放 API** — API 密钥 + 8 端点接入自有工作流，Swagger 文档常开、错误契约统一
-- **🏢 企业级管理** — 完善的 RBAC 权限体系、审计日志、用户每日配额（支持「不限」）、游客限流
-- **🔐 认证安全** — 密码变更即刻失效所有旧登录凭证、Access Token 短时效自动续期
-- **📱 全端适配** — PC 与移动端完整适配，随时随地审校文档
+### 使用边界
 
----
+- **AI 建议不是正确性保证**。保存、导出和任务成功不代表全文无误；需要检查覆盖范围并人工复核。
+- **预览不等于全部内容已审校**。DOCX 当前提取正文段落，表格等非正文内容不在该提取范围；PDF 只提取文本，不做 OCR，最多 100 页。上传默认上限 20MB。
+- 文档页支持修订 TXT、问题报告 TXT 和 Word 导出。仅来源为 DOCX 时尝试保留排版回写；无法安全应用的修改会拒绝导出，可改用 TXT。文本页导出全文或问题报告 TXT。
+- 登录记录可刷新恢复，**采纳决定仍需手动保存草稿**；游客审阅只保留在页面内存中。
+- 事实核查两种模式都会向外部服务发送待核查内容；可信信源限制可采纳证据，不是离线或封闭检索。结论只供参考，不自动采纳。
+- 快查没有 AI Token 成本，但仍受平台配额和限流约束。模型调用账本记录已知用量，不回填历史估算，也不等于供应商费用账单。
 
-## 🎯 核心功能
+## 本地启动（Docker 推荐）
 
-<!-- 演示截图：待前端改版后补充 -->
-
-### 📋 文本校对
-
-> 在线输入文本即可智能校对，支持分片处理超长文本，校对结果高亮展示，逐条修改；导出支持「修改后全文」与「问题报告」（含每条问题的原文/建议/说明及处理状态）
->
-> **审校深度三档**：**快查**（仅规则引擎，秒回、零 AI 成本）/ **标准**（默认，AI 关闭深度思考，秒级出结果）/ **深度**（AI 开启深度思考 + 二次复查，误报更少，适合重要文档终审）
-
-### 📄 文档上传校对
-> 上传 DOCX / PDF / TXT 文件，AI 自动解析并校对，异步任务 + SSE 实时进度推送（长文档按分片粒度上报进度），在线预览保留排版，修改后导出新文档
-
-### 🎨 AI 智能润色
-> 提供 10 种润色风格，三个版本（轻量/标准/深度）并发流式输出、逐字渲染，支持「停止生成」
->
-> **多模型对比模式**：勾选 2-4 个已配置模型并发润色同一段文本，对比输出效果与耗时，结果自动存入校对历史
-
-### 🔁 历史复跑
-> 校对历史详情一键「再次润色 / 重新校对」，原文自动带入对应页面
-
-### 📚 词库引擎（确定性扫描）
-> - **100% 召回**：敏感词 / 禁词 / 纠错词采用确定性字符串扫描（非 LLM 概率匹配），命中必报、零 token 成本；LLM 专注语法 / 逻辑 / 表达
-> - **三层词库体系**：全局词库（管理员）+ 个性化词库（用户错→对规则）+ 放行词（免打扰白名单，用户纠错优先级最高）
-> - **命中来源标识**：结果中标注〔我的词库〕/〔全局词库〕，配置生效看得见
-> - **优化建议（数据飞轮）**：用户每条建议的接受 / 忽略自动沉淀，后台聚合出「放行词候选 / 纠错词候选」一键采纳——越用越准
-
-### 📖 领域审校规则
-> 通用 / 公文 / 法律三大领域内置专业规则（公文格式、法律术语、金额大小写一致等），管理后台「审校规则」页可自定义行业规则，**保存即时生效无需发版**
-
-### 🤖 多大模型管理
-> 内置 16 家 AI 供应商适配：DeepSeek / OpenAI / 火山方舟(豆包) / 通义千问 / Kimi / 腾讯混元 / 智谱GLM / 百度千帆 / 讯飞星火 / MiniMax / 硅基流动 / Azure OpenAI / LiteLLM / 自定义 OpenAI 兼容网关等
-> 管理后台可视化配置，动态切换，无需重启；深度思考模式按供应商自动适配参数（火山方舟 / 通义千问已验证）
-
-### 🛡️ 配额与限流
-> - **用户每日配额**：按用户设置每日使用次数，留空即不限，北京时间零点重置
-> - **游客限流**：未登录用户按 IP 每日限次，可自定义次数与文本长度上限
-
-### 🔐 企业级管理后台
-> 用户管理 / 角色权限(RBAC) / 大模型配置 / 词库管理 / 审计日志 / 平台设置 / 品牌定制
-
-### 🔌 开放 API
-> 文本校对能力通过 API 集成到你的工作流（脚本 / CI / 企业系统）：
-> - **API 密钥自助管理**：网页端一键创建（SHA-256 哈希存储、RPM + 日配额双层限流、失败自动退额度）
-> - **8 个端点**：文本审校 / 多模型对比 / 异步文档审校（上传→轮询）/ 任务状态 / 可用模型列表 / 用量统计 / AI 润色（含流式）
-> - **统一错误契约**：`{code, message}` 格式 + Swagger 文档常开（`/api/v1/open/docs`），Try it out 预填即可调试
-> 详见 [用户使用手册 - API 密钥](用户使用手册.md)
-
-### 🎨 品牌定制（白标）
-> 管理后台「平台品牌设置」实时配置，无需改代码：
-> **平台名称 / 副标题 / 浏览器图标 / 登录页标语 / 页脚（备案号）/ 游客模式开关**
-> 企业内部部署可关闭游客模式（全员需登录），个人开放部署保留游客体验——同一份代码两种形态
-
-### 🔗 飞书对接（可选）
-> 飞书扫码登录 / SSO 单点登录 / 自动创建用户 — 默认关闭，按需配置
-
----
-
-## 🛠️ 技术栈
-
-| 层级 | 技术方案 |
-|:----:|----------|
-| **前端** | Vue 3 + TypeScript + Vite + Element Plus + Pinia |
-| **编辑器** | Tiptap 富文本 + docx-preview + pdf.js |
-| **后端** | Python 3.10+ / FastAPI / SQLAlchemy 2.0 |
-| **数据库** | PostgreSQL + Redis |
-| **异步任务** | Celery Worker |
-| **认证** | JWT + RBAC 权限模型 |
-| **部署** | Docker Compose（5 容器：前端/后端/Celery/PostgreSQL/Redis） |
-
----
-
-## 🚀 快速开始
-
-### 环境要求
-
-- Python 3.10+
-- Node.js 22+（vite 7 要求 20.19+，推荐 22 LTS）
-- PostgreSQL 14+
-- Redis 6+
-
-### 本地开发（Docker，推荐）
+需要 Docker Engine / Docker Desktop 及 Compose 插件。以下为开发环境，不要直接用于公网部署。
 
 ```bash
-# 1. 配置后端环境（数据库/Redis 连接指向 compose 内服务）
-cp backend/.env.example backend/.env
-
-# 2. 一键构建并启动（postgres + redis + backend 热重载 + celery + frontend）
-#    首次启动自动完成建表、迁移与种子数据（管理员/角色权限/全局词库），无需手动初始化
-docker compose -f docker-compose.dev.yml up -d --build
-```
-
-### 本地开发（裸机）
-
-```bash
-# 1. 克隆项目
 git clone https://github.com/guanlili/TextMirror.git
 cd TextMirror
-
-# 2. 配置后端环境
-cd backend
-cp .env.example .env          # 复制并修改配置（数据库/Redis/API Key）
-python -m venv venv
-# Windows:
-venv\Scripts\activate
-# Linux/Mac:
-source venv/bin/activate
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-# 3. 初始化数据库（建表 + 种子数据）
-python -m app.core.seed       # 创建表结构、管理员账号、角色权限、全局词库
-alembic stamp head            # 标记迁移基线（表结构已由上一步建好）
-
-# 4. 配置前端
-cd ../frontend
-npm install --registry=https://registry.npmmirror.com
-
-# 5. 启动前后端（分别开两个终端）
-# 后端:
-uvicorn app.main:app --reload --port 3020
-# 前端:
-cd ../frontend && npm run dev
+cp backend/.env.example backend/.env
 ```
 
-| 服务 | 地址 |
-|------|------|
-| 前端 | http://localhost:3022 |
-| 后端 API 文档 | http://localhost:3020/docs |
-| 默认账号 | admin / admin123（DEBUG 开发模式；生产首启为随机密码，见容器日志与 `initial_admin_password.txt`） |
+编辑 `backend/.env`，将对应配置改为开发容器地址；模板中的 `localhost` 不能用于容器间连接：
 
----
-
-## 🐳 Docker 部署
-
-服务器端构建，三步上线：
+```dotenv
+DEBUG=true
+DATABASE_URL=postgresql+asyncpg://postgres:textmirror@postgres:5432/textmirror
+REDIS_HOST=redis
+REDIS_PASSWORD=
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=60
+```
 
 ```bash
-# 1. 克隆代码
-git clone https://github.com/guanlili/TextMirror.git /opt/TextMirror && cd /opt/TextMirror
-
-# 2. 配置环境变量
-#    根目录 .env：POSTGRES_PASSWORD / REDIS_PASSWORD（供 compose 读取）
-#    backend/.env.production：cp backend/.env.example backend/.env.production 后填入数据库、Redis、大模型 API Key 等
-
-# 3. 构建并启动（5 容器：前端/后端/Celery/PostgreSQL/Redis）
-docker compose up -d --build
+docker compose -f docker-compose.dev.yml up -d --build
+docker compose -f docker-compose.dev.yml ps
 ```
 
-### 启用 HTTPS（可选）
+后端首启自动建表、执行迁移并初始化种子数据，无需手动 `stamp`。
 
-1. 将 SSL 证书放到 `frontend/ssl/` 目录
-2. 将 `frontend/nginx.production.ssl.conf` 重命名为 `nginx.production.conf`
-3. 修改证书路径后重新构建前端镜像
+| 入口 | 地址 / 说明 |
+|------|-------------|
+| 用户端与管理后台 | http://localhost:3022 |
+| 后端接口文档 | http://localhost:3020/docs（DEBUG 模式） |
+| 开放接口文档 | http://localhost:3022/api/v1/open/docs |
+| 开发管理员 | `admin / admin123`，仅用于 DEBUG 开发环境 |
 
-> 首次初始化、更新、回滚、备份、故障排查等详见 [系统运维操作手册](系统运维操作手册.md)
+登录管理后台「大模型配置」，填写真实供应商密钥并激活模型；模型密钥不在 `.env` 中设置。当前快查也会加载模型配置，但不发起模型请求。
 
----
+开发 Compose 仅后端 API 热加载：前端变更需重新构建 `frontend`，worker 代码变更需空闲后重启 `celery-worker`。不要用重建或清空数据库解决迁移问题。
 
-## 📁 项目结构
+## 生产部署
 
-```
-TextMirror/
-├── backend/                # 后端（FastAPI）
-│   ├── app/
-│   │   ├── api/           # API 路由
-│   │   ├── core/          # 核心配置、安全、数据库
-│   │   ├── models/        # 数据模型
-│   │   └── services/      # 业务逻辑层
-│   ├── alembic/           # 数据库迁移
-│   ├── .env.example       # 配置模板
-│   └── requirements.txt
-├── frontend/              # 前端（Vue 3）
-│   ├── src/
-│   │   ├── views/         # 页面组件
-│   │   ├── stores/        # Pinia 状态管理
-│   │   ├── api/           # API 接口
-│   │   └── utils/         # 工具函数
-│   ├── nginx.production.conf      # Nginx 配置（HTTP）
-│   ├── nginx.production.ssl.conf  # Nginx 配置（HTTPS）
-│   └── Dockerfile
-├── docker-compose.yml     # 容器编排
-├── deploy.sh              # 服务器部署脚本
-└── README.md
-```
+Linux 服务器使用 [docker-compose.yml](docker-compose.yml)，默认通过 **HTTP 3022** 提供服务；它与 macOS / Windows 开发用的桥接网络配置不同。
 
----
+生产需配置根目录 `.env` 和 `backend/.env.production`：强数据库及 Redis 密码、`DEBUG=false`、独立应用/JWT 密钥、上传持久化路径与访问域名。生产管理员首启使用随机密码，不是开发默认密码。**公网开放前必须关闭默认启用的一键登录**，该入口可免密登录管理员；随机密码及 `DEBUG=false` 不会关闭它。
 
-## 📖 文档索引
+按 [系统运维操作手册](系统运维操作手册.md) 完成配置、迁移、备份与验收后再对外开放。HTTPS 需额外配置 TLS 终止代理，或证书挂载、SSL 配置和健康检查；不是放入证书后自动启用。
 
-| 文档 | 说明 |
+## 开放 API
+
+在网页「API 密钥」创建密钥，使用 `Authorization: Bearer tm_…`。完整参数、枚举与在线调试以 `/api/v1/open/docs` 为准。
+
+支持文本审校、多模型对比、异步文档与任务轮询、模型列表、用量统计、润色及流式润色；异步文档可配置签名 Webhook。集成示例和额度边界见 [用户使用手册](用户使用手册.md)。
+
+## 技术栈与目录
+
+- 后端：Python **3.11+**、FastAPI、SQLAlchemy、Alembic、Celery。
+- 前端：Vue 3、TypeScript、Element Plus、Pinia、Vite；开发与 CI 使用 Node.js 22。
+- 存储：PostgreSQL 16、Redis 7；Compose 包含前端、API、worker、数据库和缓存五个服务。
+- `backend/app/`：API、业务服务、模型与任务；`backend/alembic/`：数据库迁移；`backend/tests/`：后端测试。
+- `frontend/src/`：页面、组件、API 客户端及测试；`backend/eval/`：审校评测工具。
+
+## 文档
+
+| 文档 | 用途 |
 |------|------|
-| [系统功能设计文档](系统功能设计文档.md) | 技术架构、数据模型、API 设计、功能清单、开发规范 |
-| [系统运维操作手册](系统运维操作手册.md) | 本地开发、生产部署、数据库初始化、更新回滚、故障排查 |
-| [用户使用手册](用户使用手册.md) | 面向终端用户的操作指南 |
+| [用户使用手册](用户使用手册.md) | 审校、审阅交付、事实核查、质量反馈及开放接口 |
+| [系统运维操作手册](系统运维操作手册.md) | 开发环境、生产配置、更新、备份、回滚与排障 |
+| [系统功能设计文档](系统功能设计文档.md) | 模块职责、数据流与关键一致性约定 |
+| [贡献指南](CONTRIBUTING.md) | 开发验证与 PR 流程 |
+| [更新日志](CHANGELOG.md) | 已合并里程碑及未发布变更 |
 
----
+## 贡献与许可
 
-## 🤝 参与贡献
+欢迎通过 Issue 和 Pull Request 参与；代码、测试和文档变更均走分支与 PR 审核。
 
-欢迎提交 Issue 和 Pull Request！
-
-1. Fork 本项目
-2. 创建你的特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交你的修改 (`git commit -m 'feat: add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 提交 Pull Request
-
-> 详细贡献指南请参考 [CONTRIBUTING.md](CONTRIBUTING.md)
-
----
-
-## 📄 开源协议
-
-本项目采用 [MIT License](LICENSE) 开源协议，你可以自由使用、修改和分发。
-
-TextMirror 基于 TextGuard 开发，保留原项目的 MIT 许可及版权声明。
-
----
-
-## ⭐ Star History
-
-如果这个项目对你有帮助，请点一个 ⭐ Star 支持一下！
-
----
-
-<div align="center">
-
-**TextMirror** — 让 AI 守护每一个文字
-
-Made with ❤️ by TextMirror Contributors
-
-</div>
+本项目采用 [MIT License](LICENSE)，基于 TextGuard 开发，保留原项目许可及版权声明。
