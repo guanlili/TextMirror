@@ -16,7 +16,8 @@ pydantic==2.13.5
 pydantic-settings==2.15.0
 
 # Redis
-redis[hiredis]==5.2.1
+# celery[redis] -> kombu 5.6 requires redis<6.5.
+redis[hiredis]==6.4.0
 
 # Auth & Security
 # 由 python-jose 换为 PyJWT：前者依赖链中的 ecdsa 漏洞无可用修复版本
