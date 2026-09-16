@@ -13,9 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
+RUN pip install --no-cache-dir --upgrade pip -i https://pypi.org/simple/ && \
     pip install --no-cache-dir --prefix=/install -r requirements.txt \
-        -i https://mirrors.aliyun.com/pypi/simple/ \
+        -i https://pypi.org/simple/ \
         --timeout 60
 
 # ---- 运行层 ----
