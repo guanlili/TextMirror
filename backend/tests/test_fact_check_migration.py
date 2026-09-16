@@ -3,11 +3,11 @@ from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.exc import IntegrityError
-
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from sqlalchemy.exc import IntegrityError
+
 from app.core.database import Base
 from app.models.fact_check import FactCheckConfig, FactCheckRun
 
