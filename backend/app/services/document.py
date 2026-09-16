@@ -10,7 +10,7 @@ import tempfile
 from html import escape as html_escape
 from typing import List
 
-import fitz  # PyMuPDF
+import pymupdf
 from docx import Document as DocxDocument
 from docx.shared import RGBColor
 from loguru import logger
@@ -179,19 +179,17 @@ def _extract_docx(file_path: str) -> str:
 
 def _extract_pdf(file_path: str) -> str:
     """提取 PDF 文件文本"""
-    doc = fitz.open(file_path)
-    if doc.page_count > 100:
-        doc.close()
-        raise ValueError(f"PDF 页数超过限制（{doc.page_count}页，最多100页）")
+    with pymupdf.open(file_path) as doc:
+        if doc.page_count > 100:
+            raise ValueError(f"PDF 页数超过限制（{doc.page_count}页，最多100页）")
 
-    text_parts = []
-    for page_num in range(doc.page_count):
-        page = doc.load_page(page_num)
-        text = page.get_text("text")
-        if text.strip():
-            text_parts.append(text.strip())
+        text_parts = []
+        for page_num in range(doc.page_count):
+            page = doc.load_page(page_num)
+            text = page.get_text("text")
+            if text.strip():
+                text_parts.append(text.strip())
 
-    doc.close()
     return "\n".join(text_parts)
 
 

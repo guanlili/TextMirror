@@ -7,10 +7,12 @@ import io
 import os
 import zipfile
 
+import pymupdf
 import pytest
 from fastapi import UploadFile
 
 from app.core.config import settings
+from app.services.document import extract_text_from_file
 from app.services.upload import UploadRejected, remove_upload_dir, store_upload
 
 FILE_ID = "test-upload-1"
@@ -58,6 +60,73 @@ async def test_pdf_magic_mismatch_rejected(client):
     # 可执行文件伪装成 .pdf
     with pytest.raises(UploadRejected, match="不是有效的 PDF"):
         await _store(b"MZ\x90\x00fake-exe", "a.pdf")
+
+
+def _make_pdf(pages: list[str]) -> bytes:
+    with pymupdf.open() as doc:
+        for text in pages:
+            page = doc.new_page()
+            if text:
+                page.insert_text((72, 72), text, fontname="china-s", fontsize=12)
+        return doc.tobytes()
+
+
+async def test_real_pdf_upload_extracts_ordered_chinese_pages(client):
+    stored = await _store(_make_pdf(["第一页测试文本。", "", "第二页测试文本。"]), "chinese.pdf")
+    try:
+        assert extract_text_from_file(stored.file_path, ".pdf") == "第一页测试文本。\n第二页测试文本。"
+    finally:
+        remove_upload_dir(FILE_ID)
+
+
+async def test_real_pdf_upload_api_returns_text_and_preview(client):
+    response = await client.post(
+        "/api/v1/document/upload",
+        files={"file": ("chinese.pdf", _make_pdf(["中文审校测试。", "第二页内容。"]), "application/pdf")},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["extracted_text"] == "中文审校测试。\n第二页内容。"
+    assert data["text_length"] == len(data["extracted_text"])
+    assert "中文审校测试。" in data["extracted_html"]
+
+
+@pytest.mark.parametrize(
+    ("pages", "message"),
+    [([""], "文件中未提取到有效文本内容"), (["测试文本。"] * 101, "PDF 页数超过限制（101页，最多100页）")],
+)
+async def test_pdf_upload_api_rejects_invalid_content(client, pages, message):
+    response = await client.post(
+        "/api/v1/document/upload", files={"file": ("invalid.pdf", _make_pdf(pages), "application/pdf")},
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == message
+
+
+def test_pdf_accepts_exactly_100_pages(tmp_path):
+    path = tmp_path / "limit.pdf"
+    path.write_bytes(_make_pdf(["测试文本。"] * 100))
+    assert len(extract_text_from_file(str(path), ".pdf").splitlines()) == 100
+
+
+def test_pdf_rejects_more_than_100_pages(tmp_path):
+    path = tmp_path / "over-limit.pdf"
+    path.write_bytes(_make_pdf(["测试文本。"] * 101))
+    with pytest.raises(ValueError, match="PDF 页数超过限制（101页，最多100页）"):
+        extract_text_from_file(str(path), ".pdf")
+
+
+def test_blank_pdf_has_no_extractable_text(tmp_path):
+    path = tmp_path / "blank.pdf"
+    path.write_bytes(_make_pdf([""]))
+    assert extract_text_from_file(str(path), ".pdf") == ""
+
+
+def test_corrupt_pdf_rejected_by_parser(tmp_path):
+    path = tmp_path / "corrupt.pdf"
+    path.write_bytes(b"%PDF-1.7\nnot a PDF document")
+    with pytest.raises(pymupdf.FileDataError):
+        extract_text_from_file(str(path), ".pdf")
 
 
 async def test_docx_not_zip_rejected(client):

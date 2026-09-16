@@ -34,7 +34,7 @@ httpx==0.28.1
 
 # Document Parsing
 python-docx==1.2.0
-PyMuPDF==1.25.1
+PyMuPDF==1.28.2
 
 # Async Tasks
 celery[redis]==5.6.3
