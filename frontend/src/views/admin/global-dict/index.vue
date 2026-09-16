@@ -80,7 +80,7 @@
         <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
         <el-table-column label="操作" width="100" align="center" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="openEditDialog(row)">编辑</el-button>
+            <el-button type="primary" link size="small" @click="openEditDialog(row as GlobalWordItem)">编辑</el-button>
             <el-popconfirm title="确定删除该词条？" @confirm="handleDelete(row.id)">
               <template #reference>
                 <el-button type="danger" link size="small">删除</el-button>

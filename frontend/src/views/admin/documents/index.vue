@@ -47,10 +47,10 @@
         <el-table-column prop="created_at" label="上传时间" width="170" />
         <el-table-column label="操作" width="160" align="center" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleDownload(row)">
+            <el-button type="primary" link size="small" @click="handleDownload(row as AdminDocumentItem)">
               <el-icon><Download /></el-icon>下载
             </el-button>
-            <el-popconfirm title="确定删除该文档？" @confirm="handleDelete(row)">
+            <el-popconfirm title="确定删除该文档？" @confirm="handleDelete(row as AdminDocumentItem)">
               <template #reference>
                 <el-button type="danger" link size="small"><el-icon><Delete /></el-icon>删除</el-button>
               </template>

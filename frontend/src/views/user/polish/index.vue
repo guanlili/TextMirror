@@ -199,7 +199,7 @@
             <span class="meta-text">原文 {{ originalText.length || inputText.length }} 字</span>
           </div>
           <div class="result-actions">
-            <el-button v-if="streaming" size="small" type="danger" plain @click="streamAbort?.()">
+            <el-button v-if="streaming" size="small" type="danger" plain @click="stopStreaming">
               停止生成
             </el-button>
             <el-button v-else size="small" @click="handleRegenerate" :loading="regenerating">
@@ -328,8 +328,12 @@ const comparing = ref(false)
 const hasCompareResult = computed(() => compareResults.value.length > 0)
 let compareAbort: (() => void) | null = null
 
-onUnmounted(() => {
+function stopStreaming() {
   streamAbort?.()
+}
+
+onUnmounted(() => {
+  stopStreaming()
   compareAbort?.()
 })
 

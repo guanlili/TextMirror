@@ -76,7 +76,7 @@
         </el-table-column>
         <el-table-column label="操作" width="130" align="center">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openWebhookDialog(row)">回调</el-button>
+            <el-button link type="primary" size="small" @click="openWebhookDialog(row as ApiKeyItem)">回调</el-button>
             <el-popconfirm
               v-if="row.status === 'active'"
               title="吊销后立即失效且不可恢复，确定？"

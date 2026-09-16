@@ -43,7 +43,7 @@
         </el-table-column>
         <el-table-column label="操作" width="140" align="center">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="editWord(row)">编辑</el-button>
+            <el-button type="primary" link size="small" @click="editWord(row as WhitelistItem)">编辑</el-button>
             <el-popconfirm title="确定删除？" @confirm="handleDelete(row.id)">
               <template #reference>
                 <el-button type="danger" link size="small">删除</el-button>
