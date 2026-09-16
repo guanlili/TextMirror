@@ -2,12 +2,12 @@
 # starlette 显式 pin：原先仅由 fastapi 间接约束，重建镜像可能解析到不同版本
 fastapi==0.141.1
 starlette==1.6.0
-uvicorn[standard]==0.52.4
+uvicorn[standard]==0.53.0
 # 0.0.18 存在 multipart DoS 与 Content-Disposition 参数走私
 python-multipart==0.0.32
 
 # Database ORM
-sqlalchemy[asyncio]==2.0.36
+sqlalchemy[asyncio]==2.0.54
 asyncpg==0.31.0
 alembic==1.20.0
 
@@ -16,11 +16,12 @@ pydantic==2.13.5
 pydantic-settings==2.15.0
 
 # Redis
-redis[hiredis]==5.2.1
+# celery[redis] -> kombu 5.6 requires redis<6.5.
+redis[hiredis]==6.4.0
 
 # Auth & Security
 # 由 python-jose 换为 PyJWT：前者依赖链中的 ecdsa 漏洞无可用修复版本
-PyJWT==2.13.0
+PyJWT==2.14.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 cryptography==50.0.1
@@ -32,9 +33,9 @@ loguru==0.7.3
 httpx==0.28.1
 
 # Document Parsing
-python-docx==1.1.2
+python-docx==1.2.0
 PyMuPDF==1.28.2
 
 # Async Tasks
 celery[redis]==5.6.3
-psycopg2-binary==2.9.12
+psycopg2-binary==2.9.13
