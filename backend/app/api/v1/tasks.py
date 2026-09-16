@@ -10,8 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import async_session_factory
+from app.core.database import async_session_factory, get_db
 from app.core.dependencies import get_current_user_optional
 from app.core.task_quota import document_quota_key, refund_document_quota
 
@@ -158,6 +159,7 @@ async def get_task_status(
 async def stream_task_status(
     task_id: str,
     http_request: Request,
+    db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user_optional),
     token: str = None,
     access_token: str = None,
@@ -179,8 +181,8 @@ async def stream_task_status(
             if payload and payload.get("type") == "access":
                 role_code = payload.get("role_code")
                 if current_user is None:
-                    async with async_session_factory() as db:
-                        res = await db.execute(select(User).where(User.id == int(payload.get("sub"))))
+                    async with async_session_factory() as token_db:
+                        res = await token_db.execute(select(User).where(User.id == int(payload.get("sub"))))
                         current_user = res.scalar_one_or_none()
         except Exception:
             current_user = None
@@ -189,6 +191,8 @@ async def stream_task_status(
         role_code = getattr(current_user, "role_code", None)
     is_super_admin = role_code == "super_admin"
 
+    # 归属校验会另开短会话，先释放鉴权连接，避免并发建流时耗尽连接池。
+    await db.commit()
     db_task = await _load_task_with_auth(
         task_id,
         current_user,

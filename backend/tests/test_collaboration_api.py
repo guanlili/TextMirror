@@ -4,6 +4,7 @@ import copy
 import json
 import threading
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -11,17 +12,19 @@ from unittest.mock import AsyncMock, Mock
 import fakeredis
 import fakeredis.aioredis
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import event, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.v1 import proofread as proofread_api
+from app.api.v1 import tasks as tasks_api
 from app.celery_app import celery_app
 from app.core import rate_limit
 from app.core import redis as redis_module
 from app.core.database import async_session_factory, get_db
 from app.core.dependencies import get_current_user, get_current_user_optional
 from app.core.secret_crypto import encrypt_secret
+from app.core.security import create_access_token
 from app.main import app
 from app.models.llm_config import LLMConfig
 from app.models.proofread import ProofreadRecord
@@ -733,6 +736,63 @@ async def test_terminal_sse_includes_report_without_submission_params(client, ac
     assert len(events) == 1 and events[0]["status"] == "CANCELLED"
     CollaborationReport.model_validate(events[0]["collaboration"])
     assert TEXT not in response.text and "params_json" not in response.text and "quota_key" not in response.text
+
+
+async def test_sse_releases_auth_session_before_first_event(client, actors, monkeypatch):
+    task = await submit(client, actors)
+    assert (await client.post(f"{TASKS}/{task.task_id}/cancel")).status_code == 200
+    app.dependency_overrides.pop(get_current_user)
+    app.dependency_overrides.pop(get_current_user_optional)
+    sessions, connections, finished, observed = [], [], [], []
+
+    def capture_connection(session, transaction, connection):
+        connections.append(connection)
+
+    async def capture_db():
+        async with asynccontextmanager(get_db)() as db:
+            sessions.append(db)
+            event.listen(db.sync_session, "after_begin", capture_connection)
+            try:
+                yield db
+            finally:
+                finished.append(db)
+                event.remove(db.sync_session, "after_begin", capture_connection)
+
+    load_task = tasks_api._load_task_with_auth
+
+    async def inspect_ownership(*args, **kwargs):
+        assert len(sessions) == 1 and connections
+        assert not sessions[0].in_transaction(), "release auth before acquiring a second connection"
+        assert all(connection.closed for connection in connections)
+        return await load_task(*args, **kwargs)
+
+    monkeypatch.setattr(tasks_api, "_load_task_with_auth", inspect_ownership)
+    streaming_response = tasks_api.StreamingResponse
+
+    def inspect_response(content, **kwargs):
+        async def inspect_stream():
+            async for chunk in content:
+                assert len(sessions) == 1 and connections
+                assert not finished, "check before request dependency cleanup"
+                assert not sessions[0].in_transaction(), "auth transaction must end before the first SSE event"
+                assert all(connection.closed for connection in connections)
+                observed.append(json.loads(chunk[6:]))
+                yield chunk
+
+        return streaming_response(inspect_stream(), **kwargs)
+
+    monkeypatch.setitem(app.dependency_overrides, get_db, capture_db)
+    monkeypatch.setattr(tasks_api, "StreamingResponse", inspect_response)
+    response = await client.get(
+        f"{TASKS}/{task.task_id}/stream",
+        headers={"Authorization": f"Bearer {create_access_token(actors.owner.id)}"},
+    )
+    assert response.status_code == 200 and response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["x-accel-buffering"] == "no"
+    assert len(observed) == 1 and observed[0]["status"] == "CANCELLED"
+    CollaborationReport.model_validate(observed[0]["collaboration"])
+    assert actors.redis.get(task.params_json["quota_key"]) == "0"
 
 
 @pytest.mark.parametrize("suffix", ["", "/stream"])
