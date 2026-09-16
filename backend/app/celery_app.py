@@ -28,7 +28,7 @@ celery_app.conf.update(
     task_soft_time_limit=300,  # 软超时5分钟
     task_time_limit=360,  # 硬超时6分钟
     worker_prefetch_multiplier=1,
-    worker_concurrency=4,
+    worker_concurrency=2,
     # 定时任务：审计日志每日清理（90 天保留，与后台手动清理同口径）
     beat_schedule={
         "clean-old-audit-logs-daily": {

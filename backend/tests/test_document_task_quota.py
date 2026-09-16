@@ -3,13 +3,15 @@ import asyncio
 import threading
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import ANY, AsyncMock, Mock, call
 
 import fakeredis
 import fakeredis.aioredis
 import pytest
+from billiard.exceptions import SoftTimeLimitExceeded, TimeLimitExceeded
+from celery.worker.request import Request
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -27,9 +29,11 @@ from app.models.proofread_task import ProofreadTask
 from app.models.role import Role
 from app.models.uploaded_document import UploadedDocument
 from app.models.user import User
-from app.services import proofread
+from app.services import proofread, webhook
 from app.tasks import proofread_task as worker
 
+_REAL_RUN_ASYNC = worker._run_async
+_REAL_KEY_REFUND = worker._refund_key_daily_quota
 BASE = "/api/v1/document/proofread"
 TASKS = "/api/v1/tasks"
 RESULT = {"issues": [], "total_issues": 0, "chunks_count": 1,
@@ -79,11 +83,12 @@ async def state(client, monkeypatch):
     refund = RefundRedis(redis)
     monkeypatch.setattr(redis_module.redis_client, "eval", AsyncMock(side_effect=refund.eval))
     monkeypatch.setattr(worker, "_get_sync_redis", lambda: refund)
-    dispatch, revoke, key_refund = Mock(), Mock(), Mock()
+    dispatch, revoke, key_refund, webhook_dispatch = Mock(), Mock(), Mock(), Mock()
     engine = AsyncMock(return_value=RESULT)
     monkeypatch.setattr(worker.async_proofread_document, "apply_async", dispatch)
     monkeypatch.setattr(celery_app.control, "revoke", revoke)
     monkeypatch.setattr(worker, "_refund_key_daily_quota", key_refund)
+    monkeypatch.setattr(webhook, "dispatch_webhook", webhook_dispatch)
     monkeypatch.setattr(proofread, "proofread_text", engine)
     monkeypatch.setattr(document_api, "proofread_text", engine)
     async with async_session_factory() as db:
@@ -112,11 +117,38 @@ async def state(client, monkeypatch):
                              headers={"Authorization": f"Bearer {create_access_token(users[0].id)}"},
                              key_headers={"Authorization": f"Bearer {plaintext}"}, api_key=api_key,
                              redis=redis, refund=refund, dispatch=dispatch, revoke=revoke,
-                             engine=engine, key_refund=key_refund)
+                             engine=engine, key_refund=key_refund, webhook=webhook_dispatch)
     try:
         yield result
     finally:
         redis.close()
+
+
+@pytest.fixture
+def task_callbacks(monkeypatch):
+    task = worker.async_proofread_document
+    callbacks = SimpleNamespace(retry=Mock(wraps=task.retry), failure=Mock(wraps=task.on_failure))
+    monkeypatch.setattr(task, "retry", callbacks.retry)
+    monkeypatch.setattr(task, "on_failure", callbacks.failure)
+    return callbacks
+
+
+@pytest.fixture
+def timeout_thread(monkeypatch):
+    thread = Mock()
+    # 只替换 worker 的模块引用，不影响 SQLite/asyncio 使用的真实 threading.Thread。
+    monkeypatch.setattr(worker, "threading", SimpleNamespace(Thread=thread))
+    return thread
+
+
+def document_request(task):
+    celery_task = worker.async_proofread_document
+    assert celery_task.Request is worker.ProofreadDocumentRequest
+    message = SimpleNamespace(headers={"id": task.task_id, "task": celery_task.name},
+                              body=((task.id,), {}, None), delivery_info={}, properties={})
+    request = celery_task.Request(message, app=celery_app, task=celery_task, decoded=True)
+    assert isinstance(request, Request)
+    return request
 
 
 async def load_task(task_id):
@@ -176,6 +208,379 @@ async def test_pending_cancel_worker_skip_and_failure_callbacks_refund_once(clie
     state.key_refund.assert_not_called()
 
 
+async def test_time_budget_cancels_model_and_apply_refunds_once_before_next_task(
+    client, state, monkeypatch, task_callbacks,
+):
+    task = await submit(client, state)
+    next_task = await submit(client, state)
+    key = task.params_json["quota_key"]
+    events = []
+
+    async def slow_model(**kwargs):
+        events.append("started")
+        try:
+            await asyncio.sleep(1)
+            return RESULT
+        except asyncio.CancelledError:
+            events.append("cancelled")
+            raise
+        finally:
+            await asyncio.sleep(0)
+            events.append("cleaned")
+
+    state.engine.side_effect = slow_model
+    monkeypatch.setattr(worker, "_DOCUMENT_TIME_BUDGET_S", 0.25)
+    result = worker.async_proofread_document.apply(args=(task.id,), task_id=task.task_id, throw=False)
+    assert result.state == "FAILURE"
+    assert isinstance(result.result, TimeoutError)
+    assert not isinstance(result.result, worker.ProofreadRetryableError)
+    assert events == ["started", "cancelled", "cleaned"]
+    fresh = await load_task(task.task_id)
+    assert fresh.status == "FAILURE" and fresh.error_code == "TIMEOUT"
+    assert fresh.finished_at is not None and fresh.finished_at >= fresh.started_at
+    state.engine.assert_awaited_once()
+    task_callbacks.failure.assert_called_once_with(ANY, task.task_id, (task.id,), {}, ANY)
+    task_callbacks.retry.assert_not_called()
+    assert state.redis.get(key) == "1"
+    assert state.redis.get(f"textmirror:document_refund:{task.task_id}") == "1"
+
+    fail(task)
+    fail(task)
+    assert state.redis.get(key) == "1"
+    assert (await load_task(task.task_id)).finished_at == fresh.finished_at
+    state.engine.side_effect = None
+    next_result = worker.async_proofread_document.apply(
+        args=(next_task.id,), task_id=next_task.task_id, throw=False,
+    )
+    assert next_result.state == "SUCCESS"
+    completed = await load_task(next_task.task_id)
+    assert completed.status == "SUCCESS" and completed.finished_at is not None
+    assert completed.result_json["usage"] == RESULT["usage"]
+    assert state.engine.await_count == 2
+    assert events == ["started", "cancelled", "cleaned"]
+    assert state.redis.get(key) == "1"
+    assert state.dispatch.call_count == 2
+    task_callbacks.retry.assert_not_called()
+    state.key_refund.assert_not_called()
+
+
+@pytest.mark.parametrize("elapsed", [240, 300])
+async def test_expired_retry_keeps_started_at_without_awaiting_model(
+    client, state, task_callbacks, elapsed,
+):
+    assert worker._DOCUMENT_TIME_BUDGET_S == 240
+    task = await submit(client, state)
+    await update_task(task, status="RETRYING", error_code="PROOFREAD_RETRYABLE",
+                      started_at=datetime.now(timezone.utc) - timedelta(seconds=elapsed))
+    started_at = (await load_task(task.task_id)).started_at
+    result = worker.async_proofread_document.apply(
+        args=(task.id,), task_id=task.task_id, retries=1, throw=False,
+    )
+    assert result.state == "FAILURE" and isinstance(result.result, TimeoutError)
+    fresh = await load_task(task.task_id)
+    assert fresh.status == "FAILURE" and fresh.error_code == "TIMEOUT"
+    assert fresh.started_at == started_at
+    assert fresh.finished_at is not None and fresh.finished_at >= started_at
+    state.engine.assert_not_awaited()
+    task_callbacks.retry.assert_not_called()
+    task_callbacks.failure.assert_called_once()
+    assert state.redis.get(task.params_json["quota_key"]) == "0"
+    state.dispatch.assert_called_once()
+
+
+async def test_successful_autoretry_preserves_first_started_at(client, state, task_callbacks):
+    task = await submit(client, state)
+    starts = []
+
+    async def transient_model(**kwargs):
+        with Session(worker._get_sync_engine()) as db:
+            current = db.get(ProofreadTask, task.id)
+            assert current.status == "STARTED" and current.finished_at is None
+            starts.append(current.started_at)
+        assert state.redis.get(task.params_json["quota_key"]) == "1"
+        state.refund.eval.assert_not_called()
+        if len(starts) == 1:
+            raise ConnectionError("temporary model outage")
+        return RESULT
+
+    state.engine.side_effect = transient_model
+    result = worker.async_proofread_document.apply(args=(task.id,), task_id=task.task_id, throw=False)
+    assert result.state == "SUCCESS"
+    assert len(starts) == 2 and starts[0] is not None and starts[0] == starts[1]
+    fresh = await load_task(task.task_id)
+    assert fresh.status == "SUCCESS" and fresh.started_at == starts[0]
+    assert fresh.finished_at is not None and fresh.finished_at >= fresh.started_at
+    assert fresh.result_json["issues"] == RESULT["issues"]
+    assert state.engine.await_count == 2
+    task_callbacks.retry.assert_called_once()
+    assert isinstance(task_callbacks.retry.call_args.kwargs["exc"], worker.ProofreadRetryableError)
+    task_callbacks.failure.assert_not_called()
+    state.refund.eval.assert_not_called()
+    assert state.redis.get(task.params_json["quota_key"]) == "1"
+    state.dispatch.assert_called_once()
+
+
+async def test_first_claim_does_not_count_queue_time_against_budget(client, state, task_callbacks):
+    task = await submit(client, state)
+    await update_task(task, created_at=datetime.now(timezone.utc) - timedelta(days=1))
+    queued = await load_task(task.task_id)
+    assert queued.started_at is None
+    before_claim = datetime.now(timezone.utc)
+    result = worker.async_proofread_document.apply(args=(task.id,), task_id=task.task_id, throw=False)
+    assert result.state == "SUCCESS"
+    fresh = await load_task(task.task_id)
+    assert fresh.status == "SUCCESS" and fresh.finished_at is not None
+    assert fresh.started_at.replace(tzinfo=timezone.utc) >= before_claim
+    assert fresh.created_at == queued.created_at
+    assert (fresh.started_at - fresh.created_at).total_seconds() > worker._DOCUMENT_TIME_BUDGET_S
+    state.engine.assert_awaited_once()
+    task_callbacks.retry.assert_not_called()
+    task_callbacks.failure.assert_not_called()
+    state.refund.eval.assert_not_called()
+    assert state.redis.get(task.params_json["quota_key"]) == "1"
+
+
+async def test_soft_time_limit_is_terminal_without_autoretry(client, state, task_callbacks):
+    task = await submit(client, state)
+    state.engine.side_effect = SoftTimeLimitExceeded()
+    result = worker.async_proofread_document.apply(args=(task.id,), task_id=task.task_id, throw=False)
+    assert result.state == "FAILURE" and isinstance(result.result, SoftTimeLimitExceeded)
+    assert not isinstance(result.result, worker.ProofreadRetryableError)
+    fresh = await load_task(task.task_id)
+    assert fresh.status == "FAILURE" and fresh.error_code == "TIMEOUT"
+    assert fresh.finished_at is not None and fresh.finished_at >= fresh.started_at
+    state.engine.assert_awaited_once()
+    task_callbacks.retry.assert_not_called()
+    task_callbacks.failure.assert_called_once_with(ANY, task.task_id, (task.id,), {}, ANY)
+    assert isinstance(task_callbacks.failure.call_args.args[0], SoftTimeLimitExceeded)
+    assert state.redis.get(task.params_json["quota_key"]) == "0"
+    state.dispatch.assert_called_once()
+
+
+@pytest.mark.parametrize("status", ["STARTED", "PROGRESS", "RETRYING"])
+async def test_real_request_only_hard_timeout_finishes_and_refunds(
+    client, state, monkeypatch, task_callbacks, timeout_thread, status,
+):
+    task = await submit(client, state)
+    await update_task(task, status=status, error_code="PROOFREAD_RETRYABLE", message="retry pending",
+                      started_at=datetime.now(timezone.utc) - timedelta(seconds=100))
+    started_at = (await load_task(task.task_id)).started_at
+    key = task.params_json["quota_key"]
+    state.redis.incr(key)
+    parent = Mock()
+    monkeypatch.setattr(Request, "on_timeout", parent)
+    order = Mock()
+    order.attach_mock(parent, "parent")
+    order.attach_mock(timeout_thread, "thread")
+    request = document_request(task)
+
+    request.on_timeout(soft=True, timeout=300)
+    assert order.mock_calls == [call.parent(True, 300)]
+    timeout_thread.assert_not_called()
+    fresh = await load_task(task.task_id)
+    assert fresh.status == status and fresh.finished_at is None
+    assert fresh.error_code == "PROOFREAD_RETRYABLE" and fresh.started_at == started_at
+    assert state.redis.get(key) == "2"
+    state.refund.eval.assert_not_called()
+    task_callbacks.failure.assert_not_called()
+
+    request.on_timeout(soft=False, timeout=360)
+    assert order.mock_calls == [
+        call.parent(True, 300), call.parent(False, 360),
+        call.thread(target=task_callbacks.failure, args=(ANY, task.task_id, (task.id,), {}, None), daemon=True),
+        call.thread().start(),
+    ]
+    task_callbacks.failure.assert_not_called()
+    assert (await load_task(task.task_id)).status == status
+    assert state.redis.get(key) == "2"
+    thread_kwargs = timeout_thread.call_args.kwargs
+    error = thread_kwargs["args"][0]
+    assert isinstance(error, TimeLimitExceeded) and error.args == (360,)
+    thread_kwargs["target"](*thread_kwargs["args"])
+    task_callbacks.failure.assert_called_once_with(error, task.task_id, (task.id,), {}, None)
+    fresh = await load_task(task.task_id)
+    assert fresh.status == "FAILURE" and fresh.error_code == "TIMEOUT"
+    assert fresh.started_at == started_at
+    assert fresh.finished_at is not None and fresh.finished_at >= started_at
+    assert fresh.message != "retry pending"
+    assert state.redis.get(key) == "1"
+    assert state.redis.get(f"textmirror:document_refund:{task.task_id}") == "1"
+
+    request.on_timeout(soft=False, timeout=360)
+    thread_kwargs = timeout_thread.call_args.kwargs
+    thread_kwargs["target"](*thread_kwargs["args"])
+    assert timeout_thread.return_value.start.call_count == 2
+    assert task_callbacks.failure.call_count == 2
+    assert state.redis.get(key) == "1"
+    assert (await load_task(task.task_id)).finished_at == fresh.finished_at
+    task_callbacks.retry.assert_not_called()
+    state.engine.assert_not_awaited()
+    state.key_refund.assert_not_called()
+    state.dispatch.assert_called_once()
+
+
+@pytest.mark.parametrize("status", ["SUCCESS", "REVOKED"])
+async def test_real_request_late_hard_timeout_does_not_refund_terminal_api_key_task(
+    client, state, monkeypatch, task_callbacks, timeout_thread, status,
+):
+    task = await submit(client, state)
+    await update_task(task, status=status, owner_kind="api_key", owner_api_key_id=state.api_key.id,
+                      result_json=RESULT, finished_at=datetime.now(timezone.utc))
+    completed = await load_task(task.task_id)
+    key = task.params_json["quota_key"]
+    api_key_quota = rate_limit._api_key_daily_redis_key(state.api_key)
+    state.redis.set(api_key_quota, 1)
+    parent = Mock()
+    monkeypatch.setattr(Request, "on_timeout", parent)
+    request = document_request(task)
+    request.on_timeout(soft=True, timeout=300)
+    timeout_thread.assert_not_called()
+    task_callbacks.failure.assert_not_called()
+    for _ in range(2):
+        request.on_timeout(soft=False, timeout=360)
+        thread_kwargs = timeout_thread.call_args.kwargs
+        assert thread_kwargs["daemon"] is True
+        thread_kwargs["target"](*thread_kwargs["args"])
+    assert timeout_thread.return_value.start.call_count == 2
+    assert parent.call_args_list == [call(True, 300), call(False, 360), call(False, 360)]
+    assert task_callbacks.failure.call_count == 2
+    fresh = await load_task(task.task_id)
+    assert fresh.status == status and fresh.error_code is None
+    assert fresh.finished_at == completed.finished_at and fresh.result_json == RESULT
+    assert state.redis.get(key) == "1" and state.redis.get(api_key_quota) == "1"
+    state.refund.eval.assert_not_called()
+    state.key_refund.assert_not_called()
+    state.webhook.assert_not_called()
+    state.engine.assert_not_awaited()
+    task_callbacks.retry.assert_not_called()
+
+
+async def test_real_request_hard_timeout_returns_while_failure_callback_is_blocked(
+    client, state, monkeypatch, task_callbacks,
+):
+    task = await submit(client, state)
+    await update_task(task, status="STARTED", started_at=datetime.now(timezone.utc))
+    entered, release, returned = threading.Event(), threading.Event(), threading.Event()
+    threads, errors = [], []
+    parent = Mock()
+    monkeypatch.setattr(Request, "on_timeout", parent)
+
+    def thread_factory(**kwargs):
+        thread = threading.Thread(**kwargs)
+        threads.append(thread)
+        return thread
+
+    def blocked_failure(*args, **kwargs):
+        entered.set()
+        try:
+            assert release.wait(5), "测试未释放失败回调"
+            worker.ProofreadDocumentTask.on_failure(worker.async_proofread_document, *args, **kwargs)
+        except BaseException as exc:
+            errors.append(exc)
+
+    monkeypatch.setattr(worker, "threading", SimpleNamespace(Thread=thread_factory))
+    task_callbacks.failure.side_effect = blocked_failure
+    request = document_request(task)
+
+    def invoke_timeout():
+        try:
+            request.on_timeout(soft=False, timeout=360)
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            returned.set()
+
+    caller = threading.Thread(target=invoke_timeout)
+    caller.start()
+    try:
+        assert entered.wait(2), "失败回调未启动"
+        assert returned.wait(0.5), "on_timeout 等待阻塞回调，会延迟 Billiard 终止子进程"
+        assert len(threads) == 1 and threads[0].daemon and threads[0].is_alive()
+        assert (await load_task(task.task_id)).status == "STARTED"
+        assert state.redis.get(task.params_json["quota_key"]) == "1"
+        state.refund.eval.assert_not_called()
+    finally:
+        release.set()
+        caller.join(timeout=5)
+        for thread in threads:
+            thread.join(timeout=5)
+    assert not caller.is_alive() and all(not thread.is_alive() for thread in threads)
+    assert not errors
+    parent.assert_called_once_with(False, 360)
+    task_callbacks.failure.assert_called_once_with(ANY, task.task_id, (task.id,), {}, None)
+    fresh = await load_task(task.task_id)
+    assert fresh.status == "FAILURE" and fresh.error_code == "TIMEOUT" and fresh.finished_at is not None
+    assert state.redis.get(task.params_json["quota_key"]) == "0"
+
+
+@pytest.mark.parametrize("exception_type", [SoftTimeLimitExceeded, KeyboardInterrupt])
+async def test_real_run_async_drains_interrupted_root_and_child_before_reusing_loop(monkeypatch, exception_type):
+    monkeypatch.setattr(worker, "_run_async_state", threading.local())
+    events, tasks = [], {}
+    interruption = exception_type()
+
+    def interrupt():
+        events.append("interrupted")
+        raise interruption
+
+    def propagate_callback_error(context):
+        assert context["exception"] is interruption
+        raise context["exception"]
+
+    async def child():
+        tasks["child"] = asyncio.current_task()
+        asyncio.get_running_loop().call_soon(interrupt)
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)
+            events.append("child cleaned")
+
+    async def root():
+        loop = asyncio.get_running_loop()
+        # asyncio 默认吞掉 callback 中的普通异常；让软超时像 worker 信号一样中断 run_until_complete。
+        monkeypatch.setattr(loop, "call_exception_handler", propagate_callback_error)
+        tasks["root"] = asyncio.current_task()
+        try:
+            return await asyncio.wait_for(child(), timeout=10)
+        finally:
+            await asyncio.sleep(0)
+            events.append("root cleaned")
+
+    async def next_call(loop):
+        assert asyncio.get_running_loop() is loop
+        assert asyncio.all_tasks(loop) == {asyncio.current_task()}
+        await asyncio.sleep(0)
+        return RESULT
+
+    def run():
+        try:
+            with pytest.raises(exception_type) as caught:
+                _REAL_RUN_ASYNC(root())
+            assert caught.value is interruption
+            loop = worker._run_async_state.loop
+            assert events == ["interrupted", "child cleaned", "root cleaned"]
+            assert tasks["root"].cancelled() and tasks["child"].cancelled()
+            assert not asyncio.all_tasks(loop)
+            assert not loop.is_closed()
+            assert _REAL_RUN_ASYNC(next_call(loop)) == RESULT
+            assert worker._run_async_state.loop is loop
+            assert not asyncio.all_tasks(loop)
+            assert events == ["interrupted", "child cleaned", "root cleaned"]
+        finally:
+            loop = getattr(worker._run_async_state, "loop", None)
+            if loop is not None:
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                loop.close()
+                del worker._run_async_state.loop
+                asyncio.set_event_loop(None)
+
+    await asyncio.to_thread(run)
+
+
 async def test_running_cancel_refunds_only_after_worker_exits(client, state):
     task = await submit(client, state)
     key = task.params_json["quota_key"]
@@ -233,14 +638,155 @@ async def test_final_failure_repeated_callbacks_only_refund_one_charge(client, s
     assert state.redis.get(task.params_json["quota_key"]) == "1"
 
 
-async def test_success_late_failure_callback_or_cancel_does_not_refund(client, state):
+@pytest.mark.parametrize("redis_down_first", [False, True])
+async def test_api_key_failure_commits_before_refund_and_refunds_and_notifies_once(
+    client, state, monkeypatch, redis_down_first,
+):
     task = await submit(client, state)
+    await update_task(task, status="RETRYING", owner_kind="api_key", owner_api_key_id=state.api_key.id,
+                      error_code="PROOFREAD_RETRYABLE", started_at=datetime.now(timezone.utc))
+    user_key = task.params_json["quota_key"]
+    key_quota = rate_limit._api_key_daily_redis_key(state.api_key)
+    state.redis.incr(user_key)
+    state.redis.set(key_quota, 2, ex=172800)
+    user_marker = f"textmirror:document_refund:{task.task_id}"
+    key_marker = f"textmirror:document_key_refund:{task.task_id}"
+    snapshots, outcomes, locked_reads = [], [], []
+    scalar = Session.scalar
+
+    def track_locked_read(session, statement, *args, **kwargs):
+        locked_reads.append(statement._for_update_arg is not None)
+        return scalar(session, statement, *args, **kwargs)
+
+    def inspect_refund(script, numkeys, key, marker):
+        with Session(worker._get_sync_engine()) as db:
+            fresh = db.get(ProofreadTask, task.id)
+            snapshots.append((fresh.status, fresh.error_code, fresh.finished_at))
+        if redis_down_first and key == key_quota and not outcomes:
+            raise ConnectionError("Redis unavailable on first key refund")
+        return state.refund.evaluate(script, numkeys, key, marker)
+
+    def refund_key(*args):
+        result = _REAL_KEY_REFUND(*args)
+        outcomes.append(result)
+        return result
+
+    key_refund = Mock(side_effect=refund_key)
+    monkeypatch.setattr(worker, "_refund_key_daily_quota", key_refund)
+    state.refund.eval.side_effect = inspect_refund
+    celery_ids = [str(uuid.uuid4()) for _ in range(3)]
+    with monkeypatch.context() as scoped:
+        scoped.setattr(Session, "scalar", track_locked_read)
+        for index, celery_id in enumerate(celery_ids):
+            worker.async_proofread_document.on_failure(
+                TimeLimitExceeded(360), celery_id, (task.id,), {}, None,
+            )
+            if index == 0 and redis_down_first:
+                assert state.redis.get(user_key) == "1" and state.redis.get(key_quota) == "2"
+                assert state.redis.get(key_marker) is None
+                state.webhook.assert_not_called()
+    assert locked_reads == [True, True, True]
+    assert outcomes == ([False, True, False] if redis_down_first else [True, False, False])
+    assert key_refund.call_args_list == [call(state.api_key.id, task.task_id)] * 3
+    assert len(snapshots) == 6
+    fresh = await load_task(task.task_id)
+    assert fresh.status == "FAILURE" and fresh.error_code == "TIMEOUT" and fresh.finished_at is not None
+    assert snapshots == [("FAILURE", "TIMEOUT", fresh.finished_at)] * 6
+    assert state.redis.get(user_key) == "1" and state.redis.get(key_quota) == "1"
+    assert state.redis.get(user_marker) == "1" and state.redis.get(key_marker) == "1"
+    assert all(state.redis.get(f"textmirror:document_key_refund:{celery_id}") is None for celery_id in celery_ids)
+    state.webhook.assert_called_once_with(state.api_key.id, {
+        "event": "document.failed", "api_version": "v1", "job_id": task.task_id, "timestamp": ANY,
+        "data": {"error_code": "TIMEOUT", "message": fresh.message},
+    })
+
+
+@pytest.mark.parametrize("status,code", [("CANCELLED", "USER_CANCELLED"), ("FAILURE", "INVALID_CONFIG")])
+async def test_api_key_cancel_or_invalid_config_refunds_only_user(client, state, status, code):
+    task = await submit(client, state)
+    await update_task(task, status=status, error_code=code, owner_kind="api_key", owner_api_key_id=state.api_key.id,
+                      finished_at=datetime.now(timezone.utc))
+    terminal = await load_task(task.task_id)
+    user_key = task.params_json["quota_key"]
+    key_quota = rate_limit._api_key_daily_redis_key(state.api_key)
+    state.redis.incr(user_key)
+    state.redis.set(key_quota, 2)
+    fail(task)
+    fail(task)
+    fresh = await load_task(task.task_id)
+    assert fresh.status == status and fresh.error_code == code and fresh.finished_at == terminal.finished_at
+    assert state.redis.get(user_key) == "1" and state.redis.get(key_quota) == "2"
+    assert state.redis.get(f"textmirror:document_refund:{task.task_id}") == "1"
+    assert state.redis.get(f"textmirror:document_key_refund:{task.task_id}") is None
+    state.key_refund.assert_not_called()
+    state.webhook.assert_not_called()
+
+
+@pytest.mark.parametrize("owner_kind", ["user", "api_key"])
+async def test_success_late_failure_callback_or_cancel_does_not_refund(client, state, owner_kind):
+    task = await submit(client, state)
+    if owner_kind == "api_key":
+        await update_task(task, owner_kind=owner_kind, owner_api_key_id=state.api_key.id)
+        state.redis.set(rate_limit._api_key_daily_redis_key(state.api_key), 1)
     worker.async_proofread_document.run(task.id)
+    completed = await load_task(task.task_id)
+    state.webhook.reset_mock()
+    fail(task)
     fail(task)
     await cancel(client, state, task)
-    assert (await load_task(task.task_id)).status == "SUCCESS"
+    fresh = await load_task(task.task_id)
+    assert fresh.status == "SUCCESS" and fresh.result_json == completed.result_json
+    assert fresh.finished_at == completed.finished_at
     assert state.redis.get(task.params_json["quota_key"]) == "1"
+    if owner_kind == "api_key":
+        assert state.redis.get(rate_limit._api_key_daily_redis_key(state.api_key)) == "1"
     state.refund.eval.assert_not_called()
+    state.key_refund.assert_not_called()
+    state.webhook.assert_not_called()
+
+
+async def test_success_cas_loses_to_failure_and_rolls_back_proofread_record(client, state, monkeypatch):
+    task = await submit(client, state)
+    await update_task(task, owner_kind="api_key", owner_api_key_id=state.api_key.id)
+    finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    execute, flush = Session.execute, Session.flush
+    raced, inserted_record_ids = False, []
+
+    def defer_record_flush(session, *args, **kwargs):
+        # SQLite 单写锁：将记录 flush 延到竞争方提交后，但仍在真实 CAS UPDATE 前 INSERT。
+        if not raced and any(isinstance(item, ProofreadRecord) for item in session.new):
+            return
+        return flush(session, *args, **kwargs)
+
+    def race(session, statement, *args, **kwargs):
+        nonlocal raced
+        if not raced and statement.is_update and statement.compile().params.get("status") == "SUCCESS":
+            raced = True
+            with Session(worker._get_sync_engine()) as other:
+                other.execute(update(ProofreadTask).where(ProofreadTask.id == task.id).values(
+                    status="FAILURE", error_code="TIMEOUT", message="hard timeout won", finished_at=finished_at,
+                ))
+                other.commit()
+            records = [item for item in session.new if isinstance(item, ProofreadRecord)]
+            assert len(records) == 1
+            flush(session)
+            inserted_record_ids.extend(record.id for record in records)
+        return execute(session, statement, *args, **kwargs)
+
+    monkeypatch.setattr(Session, "flush", defer_record_flush)
+    monkeypatch.setattr(Session, "execute", race)
+    result = worker.async_proofread_document.run(task.id)
+    assert raced and len(inserted_record_ids) == 1 and inserted_record_ids[0] is not None
+    assert result["skipped"]
+    fresh = await load_task(task.task_id)
+    assert fresh.status == "FAILURE" and fresh.error_code == "TIMEOUT"
+    assert fresh.message == "hard timeout won" and fresh.finished_at == finished_at
+    assert fresh.result_json is None
+    async with async_session_factory() as db:
+        assert not (await db.scalars(select(ProofreadRecord).where(
+            ProofreadRecord.user_id == state.owner.id))).all()
+    state.engine.assert_awaited_once()
+    state.webhook.assert_not_called()
 
 
 @pytest.mark.parametrize("path", ["pending", "running", "failure", "dispatch", "sync"])

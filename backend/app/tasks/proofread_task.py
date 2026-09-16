@@ -7,9 +7,11 @@ import json
 import os
 import threading
 
+from billiard.exceptions import SoftTimeLimitExceeded, TimeLimitExceeded
 from celery import signals
+from celery.worker.request import Request
 from loguru import logger
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 # 注册 ORM 元数据：任务内保存 ProofreadRecord 时其 user_id/api_key_id 外键需要解析到
 # users/api_keys 表，且 User↔Role 相互引用需同时注册，否则 mapper 初始化失败（记录保存静默失败）
@@ -19,9 +21,10 @@ import app.models.user  # noqa
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.file_security import build_download_url, safe_upload_path, sanitize_filename
-from app.core.task_quota import document_quota_key, refund_document_quota_sync
+from app.core.task_quota import REFUND_TASK_QUOTA_LUA, document_quota_key, refund_document_quota_sync
 
 _run_async_state = threading.local()
+_DOCUMENT_TIME_BUDGET_S = 240
 
 
 def _run_async(coro):
@@ -35,19 +38,15 @@ def _run_async(coro):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         _run_async_state.loop = loop
-    return loop.run_until_complete(coro)
+    task = loop.create_task(coro)
+    try:
+        return loop.run_until_complete(task)
+    except BaseException:
+        # 信号中断不能把未完成的协程留到同一进程的下一笔任务。
+        task.cancel()
+        loop.run_until_complete(asyncio.gather(task, return_exceptions=True))
+        raise
 
-
-# 与 app.core.rate_limit._REFUND_DAILY_LUA 同构（此处为同步上下文，避免引入异步模块依赖）
-_REFUND_LUA = (
-    "local c = redis.call('GET', KEYS[1]) "
-    "if c and tonumber(c) > 0 then "
-    "  local refund = tonumber(ARGV[1]) "
-    "  if tonumber(c) < refund then refund = tonumber(c) end "
-    "  return redis.call('DECRBY', KEYS[1], refund) "
-    "end "
-    "return 0"
-)
 
 # ---- Celery worker 子进程级同步引擎单例 ----
 # _sync_engine / _sync_engine_pid 在 prefork 子进程首次 _get_sync_engine() 时惰性创建，
@@ -72,18 +71,20 @@ def _get_sync_redis():
     )
 
 
-def _refund_key_daily_quota(api_key_id: int) -> None:
-    """同步 Redis 退还密钥日配额计数（失败不抛出，仅记日志）"""
+def _refund_key_daily_quota(api_key_id: int, task_id: str) -> bool:
     try:
         from datetime import datetime
         from zoneinfo import ZoneInfo
 
-        r = _get_sync_redis()
         today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
-        r.eval(_REFUND_LUA, 1, f"textmirror:apikey_daily:{api_key_id}:{today}", 1)
-        r.close()
+        with _get_sync_redis() as redis:
+            return bool(redis.eval(
+                REFUND_TASK_QUOTA_LUA, 2, f"textmirror:apikey_daily:{api_key_id}:{today}",
+                f"textmirror:document_key_refund:{task_id}",
+            ))
     except Exception as e:
         logger.warning(f"[退款] 密钥日配额退还失败 key_id={api_key_id}: {e}")
+        return False
 
 
 def _get_sync_engine():
@@ -118,9 +119,20 @@ def _get_sync_engine():
     return _sync_engine
 
 
+@signals.worker_process_init.connect
+def _reset_sync_engine_after_fork(**_kwargs) -> None:
+    global _sync_engine, _sync_engine_pid, _sync_engine_lock
+    _sync_engine_lock = threading.Lock()
+    if _sync_engine is not None:
+        _sync_engine.dispose(close=False)
+    _sync_engine = None
+    _sync_engine_pid = None
+
+
+@signals.worker_process_shutdown.connect
 @signals.worker_shutdown.connect
 def _dispose_sync_engine(**_kwargs) -> None:
-    """worker 退出时释放连接池（prefork 主/子进程均会触发，无害幂等）"""
+    """主进程与 prefork 子进程退出时分别释放各自连接池。"""
     global _sync_engine, _sync_engine_pid
     if _sync_engine is not None:
         try:
@@ -151,8 +163,22 @@ class ProofreadRetryableError(Exception):
     """可重试的校对失败（LLM/网络/数据库瞬态错误），触发 Celery 自动重试。"""
 
 
+class ProofreadDocumentRequest(Request):
+    def on_timeout(self, soft, timeout):
+        super().on_timeout(soft, timeout)
+        if not soft:
+            # Billiard 在此回调返回后才终止子进程，数据库清理不能阻塞它。
+            threading.Thread(
+                target=self.task.on_failure,
+                args=(TimeLimitExceeded(timeout), self.id, self.args, self.kwargs, None),
+                daemon=True,
+            ).start()
+
+
 class ProofreadDocumentTask(celery_app.Task):
     """文档校对任务基类：统一处理最终失败时的配额退款。"""
+
+    Request = ProofreadDocumentRequest
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         """
@@ -167,45 +193,36 @@ class ProofreadDocumentTask(celery_app.Task):
         if not args:
             return
         db_task_id = args[0]
-        sync_engine = _get_sync_engine()
         try:
-            with Session(sync_engine) as session:
-                db_task = session.get(ProofreadTask, db_task_id)
-                if db_task is None:
+            with Session(_get_sync_engine()) as session:
+                db_task = session.scalar(select(ProofreadTask).where(
+                    ProofreadTask.id == db_task_id,
+                ).with_for_update())
+                if db_task is None or db_task.status in ("SUCCESS", "REVOKED"):
                     return
-                # 成功任务的迟到失败通知不能退还用户预扣。
-                if db_task.status != "SUCCESS":
-                    refund_document_quota_sync(db_task.task_id, document_quota_key(db_task))
-                # 取消不退密钥额度；用户预扣按同一任务标记补偿，重复通知无害。
-                if db_task.status == "CANCELLED":
-                    return
-                # 集成方指定无效配置：密钥额度不退（用户错误）
-                if db_task.error_code == "INVALID_CONFIG":
-                    return
-                # 若仍处在执行/重试状态，标记为最终失败
-                if db_task.status in ("STARTED", "RETRYING"):
+                if db_task.status in ("STARTED", "PROGRESS", "RETRYING"):
                     from datetime import datetime, timezone
 
                     db_task.status = "FAILURE"
+                    if isinstance(exc, (SoftTimeLimitExceeded, TimeLimitExceeded)):
+                        db_task.error_code = "TIMEOUT"
+                        db_task.message = "文档处理超时，请缩短文档或稍后重试"
                     if not db_task.error_code:
                         db_task.error_code = "PROOFREAD_FAILED"
                     if not db_task.message:
                         db_task.message = "校对任务最终失败"
                     db_task.finished_at = datetime.now(timezone.utc)
-                    session.commit()
-                if db_task.owner_api_key_id:
-                    _refund_key_daily_quota(db_task.owner_api_key_id)
-                    # 配置了回调的开放 API 任务：推送失败事件（尽力而为）
-                    from app.services.webhook import build_event, dispatch_webhook
+                refund_task_id, quota_key = db_task.task_id, document_quota_key(db_task)
+                api_key_id = db_task.owner_api_key_id
+                refund_key = db_task.status != "CANCELLED" and db_task.error_code != "INVALID_CONFIG"
+                failure = {"error_code": db_task.error_code or "PROOFREAD_FAILED",
+                           "message": db_task.message or "校对任务最终失败"}
+                session.commit()
+            refund_document_quota_sync(refund_task_id, quota_key)
+            if refund_key and api_key_id and _refund_key_daily_quota(api_key_id, refund_task_id):
+                from app.services.webhook import build_event, dispatch_webhook
 
-                    dispatch_webhook(db_task.owner_api_key_id, build_event(
-                        "document.failed",
-                        db_task.task_id,
-                        {
-                            "error_code": db_task.error_code or "PROOFREAD_FAILED",
-                            "message": db_task.message or "校对任务最终失败",
-                        },
-                    ))
+                dispatch_webhook(api_key_id, build_event("document.failed", refund_task_id, failure))
         except Exception as e:
             logger.warning(f"[on_failure] 处理失败 task_id={task_id}: {e}")
 
@@ -267,7 +284,11 @@ def async_proofread_document(self, db_task_id: int):
             claim = session.execute(
                 update(ProofreadTask)
                 .where(ProofreadTask.id == db_task_id, ProofreadTask.status == expected_status)
-                .values(status="STARTED", started_at=datetime.now(timezone.utc))
+                .values(
+                    status="STARTED",
+                    started_at=(func.coalesce(ProofreadTask.started_at, datetime.now(timezone.utc))
+                                if is_retry else datetime.now(timezone.utc)),
+                )
             )
             if claim.rowcount != 1:
                 session.rollback()
@@ -337,10 +358,22 @@ def async_proofread_document(self, db_task_id: int):
 
             try:
                 from app.services.proofread import proofread_text
-                result = _run_async(proofread_text(
+
+                started_at = db_task.started_at
+                if started_at.tzinfo is None:
+                    started_at = started_at.replace(tzinfo=timezone.utc)
+                remaining = _DOCUMENT_TIME_BUDGET_S - (datetime.now(timezone.utc) - started_at).total_seconds()
+                result = _run_async(asyncio.wait_for(proofread_text(
                     text=text, domain=domain, config_id=config_id, user_id=user_id,
                     depth=depth, on_progress=_on_proofread_progress,
-                ))
+                ), timeout=max(0, remaining)))
+            except (TimeoutError, SoftTimeLimitExceeded):
+                db_task.status = "FAILURE"
+                db_task.error_code = "TIMEOUT"
+                db_task.message = "文档审校超过时间预算，请缩短文档或稍后重试"
+                db_task.finished_at = datetime.now(timezone.utc)
+                session.commit()
+                raise
             except Exception as e:
                 logger.error(f"[Task {celery_task_id}] 校对失败: {e}")
                 if _is_invalid_config_error(e):
@@ -384,6 +417,8 @@ def async_proofread_document(self, db_task_id: int):
                     corrected_url = build_download_url(file_id, corrected_filename)
                     db_task.output_path = corrected_path
                     session.commit()
+            except SoftTimeLimitExceeded:
+                raise
             except Exception as e:
                 logger.warning(f"[Task {celery_task_id}] 生成修订文档失败: {e}")
 
@@ -410,6 +445,8 @@ def async_proofread_document(self, db_task_id: int):
                     session.add(record)
                     session.flush()
                     record_id = record.id
+                except SoftTimeLimitExceeded:
+                    raise
                 except Exception as e:
                     logger.warning(f"[Task {celery_task_id}] 保存记录失败: {e}")
 
@@ -431,12 +468,14 @@ def async_proofread_document(self, db_task_id: int):
             }
 
             from datetime import datetime, timezone
-            db_task.status = "SUCCESS"
-            db_task.progress = 100
-            db_task.phase = "done"
-            db_task.message = "校对完成"
-            db_task.result_json = result_payload
-            db_task.finished_at = datetime.now(timezone.utc)
+            completed = session.execute(update(ProofreadTask).where(
+                ProofreadTask.id == db_task_id,
+                ProofreadTask.status.in_(("STARTED", "PROGRESS")),
+            ).values(status="SUCCESS", progress=100, phase="done", message="校对完成",
+                     result_json=result_payload, finished_at=datetime.now(timezone.utc)))
+            if completed.rowcount != 1:
+                session.rollback()
+                return {"skipped": True, "task_id": celery_task_id}
             session.commit()
 
             # 开放 API 提交且配置了回调：推送完成事件（尽力而为，不阻塞主任务）

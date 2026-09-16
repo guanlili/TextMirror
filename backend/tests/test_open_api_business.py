@@ -471,7 +471,7 @@ async def test_celery_task_on_failure_refunds_once(client, db, user, api_key):
         db_task = result.scalar_one()
     assert db_task.status == "FAILURE"
     assert db_task.error_code == "PROOFREAD_RETRYABLE"
-    refund_mock.assert_called_once_with(key_obj.id)
+    refund_mock.assert_called_once_with(key_obj.id, task.task_id)
 
 
 async def test_celery_task_on_failure_no_refund_for_invalid_config(client, db, user, api_key):
