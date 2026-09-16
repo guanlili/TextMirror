@@ -48,7 +48,7 @@
                 <el-tag type="info" size="small">{{ modeLabel(row.mode) }}</el-tag>
                 <el-tag :type="coverageTag(row.coverage_status)" size="small" effect="plain">{{ coverageLabel(row.coverage_status) }}</el-tag>
               </div>
-              <div class="summary-text">已发现 {{ row.review_summary.total }} 项 · {{ decisionSummary(row) }}</div>
+              <div class="summary-text">已发现 {{ row.review_summary.total }} 项 · {{ decisionSummary(row as HistoryItem) }}</div>
               <div v-if="row.review_summary.failed_models" class="summary-warning">{{ row.review_summary.failed_models }} 个模型失败，不能视为零问题</div>
             </div>
           </template>
@@ -70,7 +70,7 @@
               type="primary"
               link
               size="small"
-              @click.stop="continueReview(row)"
+              @click.stop="continueReview(row as HistoryItem)"
             >继续审阅</el-button>
             <el-popconfirm title="确定删除此记录？" @confirm.stop="handleDelete(row.id)">
               <template #reference>

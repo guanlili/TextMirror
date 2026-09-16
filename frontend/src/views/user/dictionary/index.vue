@@ -23,13 +23,13 @@
         <el-table-column prop="entry_count" label="词条数" width="100" align="center" />
         <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
-            <el-switch v-model="row.is_active" @change="handleToggleActive(row)" />
+            <el-switch v-model="row.is_active" @change="handleToggleActive(row as DictionaryItem)" />
           </template>
         </el-table-column>
         <el-table-column label="操作" width="200" align="center">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="openDict(row)">管理词条</el-button>
-            <el-button type="warning" link size="small" @click="editDict(row)">编辑</el-button>
+            <el-button type="primary" link size="small" @click="openDict(row as DictionaryItem)">管理词条</el-button>
+            <el-button type="warning" link size="small" @click="editDict(row as DictionaryItem)">编辑</el-button>
             <el-popconfirm title="确定删除该词库？" @confirm="handleDeleteDict(row.id)">
               <template #reference>
                 <el-button type="danger" link size="small">删除</el-button>

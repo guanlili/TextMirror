@@ -97,13 +97,13 @@
         </el-table-column>
         <el-table-column label="操作" width="150" align="center" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openEditDialog(row)">编辑</el-button>
+            <el-button link type="primary" size="small" @click="openEditDialog(row as AdminApiKeyItem)">编辑</el-button>
             <el-popconfirm
               v-if="row.is_active"
               :title="`吊销「${row.name}」？立即失效，可恢复。`"
               confirm-button-text="吊销"
               confirm-button-type="danger"
-              @confirm="handleToggleActive(row, false)"
+              @confirm="handleToggleActive(row as AdminApiKeyItem, false)"
             >
               <template #reference>
                 <el-button type="danger" link size="small">吊销</el-button>
@@ -113,7 +113,7 @@
               v-else
               title="恢复该密钥？恢复后立即可用。"
               confirm-button-text="恢复"
-              @confirm="handleToggleActive(row, true)"
+              @confirm="handleToggleActive(row as AdminApiKeyItem, true)"
             >
               <template #reference>
                 <el-button type="success" link size="small">恢复</el-button>

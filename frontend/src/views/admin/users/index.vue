@@ -28,7 +28,7 @@
         </el-table-column>
         <el-table-column label="状态" width="80" align="center">
           <template #default="{ row }">
-            <el-switch v-model="row.is_active" @change="handleToggleActive(row)" size="small" />
+            <el-switch v-model="row.is_active" @change="handleToggleActive(row as AdminUserItem)" size="small" />
           </template>
         </el-table-column>
         <el-table-column label="日配额" width="80" align="center">
@@ -43,7 +43,7 @@
         </el-table-column>
         <el-table-column label="操作" width="140" align="center">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="editUser(row)">编辑</el-button>
+            <el-button type="primary" link size="small" @click="editUser(row as AdminUserItem)">编辑</el-button>
             <el-popconfirm title="确定删除？" @confirm="handleDelete(row.id)">
               <template #reference>
                 <el-button type="danger" link size="small">删除</el-button>
