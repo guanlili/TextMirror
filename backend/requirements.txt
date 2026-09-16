@@ -13,7 +13,7 @@ alembic==1.14.1
 
 # Validation
 pydantic==2.10.4
-pydantic-settings==2.7.1
+pydantic-settings==2.15.0
 
 # Redis
 redis[hiredis]==5.2.1
