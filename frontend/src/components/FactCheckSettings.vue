@@ -171,7 +171,7 @@ async function save() {
     if (alive && token === sequence) saving.value = false
   }
 }
-watch(() => draft.value.provider, () => { apiKey.value = ''; notice.value = '' })
+watch(() => draft.value.provider, () => { apiKey.value = ''; notice.value = '' }, { flush: 'sync' })
 onMounted(() => { void load() })
 onBeforeUnmount(() => { alive = false; sequence++; controller?.abort(); apiKey.value = '' })
 </script>

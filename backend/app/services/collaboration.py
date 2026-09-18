@@ -248,11 +248,6 @@ async def run_collaboration(
             async with progress_lock:
                 await on_progress({"progress": percent, "message": message, "collaboration": deepcopy(report)})
 
-    async def _publish_locked(percent: int, message: str):
-        """publish 的内部版本，调用方已持有 progress_lock"""
-        if on_progress is not None:
-            await on_progress({"progress": percent, "message": message, "collaboration": deepcopy(report)})
-
     def finish(role_id: str, start: float, status: str, message: str):
         roles[role_id].update(status=status, message=message, elapsed_ms=int((time.perf_counter() - start) * 1000))
 
@@ -301,27 +296,18 @@ async def run_collaboration(
                     {"role": "user", "content": proofread.PROOFREAD_USER_PROMPT.format(text=text)},
                 ], 4096)
                 findings, rejected = _detection_findings(content, text, role_id, global_words, user_words)
-                async with progress_lock:
-                    rejected_count += rejected
-                    role_findings[role_id] = findings
-                    roles[role_id]["issue_count"] = len(findings)
-                    finish(role_id, start, "success", f"检测完成；发现{len(findings)}项，范围或定位不明确跳过{rejected}项")
-                    finished_detectors += 1
-                    report["findings"] = _merge(role_findings)
-                    await _publish_locked(20 + 25 * finished_detectors, f"{ROLE_NAMES[role_id]}：{roles[role_id]['message']}")
+                rejected_count += rejected
+                role_findings[role_id] = findings
+                roles[role_id]["issue_count"] = len(findings)
+                finish(role_id, start, "success", f"检测完成；发现{len(findings)}项，范围或定位不明确跳过{rejected}项")
             except asyncio.CancelledError:
-                async with progress_lock:
-                    finish(role_id, start, "cancelled", "检测已取消")
-                    finished_detectors += 1
-                    report["findings"] = _merge(role_findings)
-                    await _publish_locked(20 + 25 * finished_detectors, f"{ROLE_NAMES[role_id]}：检测已取消")
+                finish(role_id, start, "cancelled", "检测已取消")
                 raise
             except Exception:
-                async with progress_lock:
-                    finish(role_id, start, "failed", "模型调用或响应解析失败，检测结果不完整")
-                    finished_detectors += 1
-                    report["findings"] = _merge(role_findings)
-                    await _publish_locked(20 + 25 * finished_detectors, f"{ROLE_NAMES[role_id]}：{roles[role_id]['message']}")
+                finish(role_id, start, "failed", "模型调用或响应解析失败，检测结果不完整")
+            finished_detectors += 1
+            report["findings"] = _merge(role_findings)
+            await publish(20 + 25 * finished_detectors, f"{ROLE_NAMES[role_id]}：{roles[role_id]['message']}")
 
         for role_id in ("language", "consistency"):
             roles[role_id].update(status="running", message="正在独立检测完整原文")

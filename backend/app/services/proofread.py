@@ -230,118 +230,35 @@ class ChunkSpan:
     core_start: int
 
 
-def split_text_into_chunk_spans(
-    text: str,
-    min_chunk_size: int = 400,
-    max_chunk_size: int = 1500,
-    target_chunk_size: int = 800,
-    overlap: int = 100,
-) -> List[ChunkSpan]:
-    """自适应分片：优先按段落边界切分，合并短段落，拆分长段落。
+def split_text_into_chunk_spans(text: str, max_chunk_size: int = 800,
+                                overlap: int = 100) -> List[ChunkSpan]:
+    """正文最多 max_chunk_size 字，优先在上限前最近句界/换行切分，否则硬切。
 
-    策略：
-    1. 识别段落边界（连续换行 \\n\\n 或 \\r\\n\\r\\n）
-    2. 短段落合并：连续段落累计 < target_chunk_size 时合并为一片
-    3. 长段落拆分：单段 > max_chunk_size 时按句子边界拆分
-    4. 每片保留前 overlap 字作为上下文重叠
-
+    上下文直接取原文前 overlap 字；不重建文本，不丢空白，不靠查找片段反推坐标。
     各 core 连续覆盖全文，只有 prefix 重叠。
     """
     if max_chunk_size <= 0 or overlap < 0:
         raise ValueError("max_chunk_size must be positive and overlap non-negative")
     if not text:
         return [ChunkSpan(0, 0, 0)]
-
-    # 识别段落边界：找到所有段落起始位置
-    paragraph_starts = [0]
-    i = 0
-    while i < len(text):
-        # 检测段落边界：连续换行
-        if text[i] in '\r\n':
-            j = i
-            while j < len(text) and text[j] in '\r\n':
-                j += 1
-            if j > i + 1 and j < len(text):  # 至少两个换行符且后面有内容
-                paragraph_starts.append(j)
-            i = j
-        else:
-            i += 1
-
-    # 构建段落列表：(start, end) 表示每段在原文中的位置
-    paragraphs = []
-    for idx, start in enumerate(paragraph_starts):
-        end = paragraph_starts[idx + 1] if idx + 1 < len(paragraph_starts) else len(text)
-        # 段落内容去掉尾部空白
-        content_end = end
-        while content_end > start and text[content_end - 1] in ' \t\r\n':
-            content_end -= 1
-        if content_end > start:  # 非空段落
-            paragraphs.append((start, content_end))
-
-    if not paragraphs:
-        return [ChunkSpan(0, 0, 0)]
-
-    # 将段落组合成片
     spans = []
-    chunk_start = 0  # 当前片的起始位置（含 overlap）
-    core_start = 0   # 当前片正文起始位置
-    current_end = paragraphs[0][0]  # 当前片的结束位置
-
-    for para_start, para_end in paragraphs:
-        para_len = para_end - para_start
-
-        # 情况1：单段超过 max_chunk_size，需要拆分
-        if para_len > max_chunk_size:
-            # 先把之前积累的段落成片
-            if current_end > core_start:
-                spans.append(ChunkSpan(max(0, core_start - overlap), current_end, core_start))
-            # 拆分长段落
-            chunk_start = para_start
-            while chunk_start < para_end:
-                end = min(chunk_start + max_chunk_size, para_end)
-                if end < para_end:
-                    # 在窗口内找句子边界
-                    boundary = max(
-                        (text.rfind(sep, chunk_start, end) for sep in "。！？；\r\n"),
-                        default=-1
-                    )
-                    if boundary >= chunk_start:
-                        end = boundary + 1
-                spans.append(ChunkSpan(max(0, chunk_start - overlap), end, chunk_start))
-                chunk_start = end
-            core_start = chunk_start
-            current_end = chunk_start
-            continue
-
-        # 情况2：加入当前段落后是否超限
-        new_end = para_end
-        chunk_len = new_end - core_start
-
-        if chunk_len <= target_chunk_size:
-            # 可以加入当前片段
-            current_end = new_end
-        elif chunk_len <= max_chunk_size and core_start == paragraphs[0][0] and len(spans) == 0:
-            # 第一片且不超过 max，可以放宽到 max_chunk_size
-            current_end = new_end
-        else:
-            # 超限，先结束当前片，开始新片
-            if current_end > core_start:
-                spans.append(ChunkSpan(max(0, core_start - overlap), current_end, core_start))
-            core_start = para_start
-            current_end = para_end
-
-    # 处理最后一片
-    if current_end > core_start:
-        spans.append(ChunkSpan(max(0, core_start - overlap), current_end, core_start))
-
+    core_start = 0
+    while core_start < len(text):
+        end = min(core_start + max_chunk_size, len(text))
+        if end < len(text):
+            boundary = max(text.rfind(sep, core_start, end) for sep in "。！？；\r\n")
+            if boundary >= core_start:
+                end = boundary + 1
+        spans.append(ChunkSpan(max(0, core_start - overlap), end, core_start))
+        core_start = end
     return spans
 
 
-def split_text_into_chunks(text: str, max_chunk_size: int = 1500,
+def split_text_into_chunks(text: str, max_chunk_size: int = 800,
                            overlap: int = 100) -> List[str]:
     """兼容公开 API；每片正文加前置上下文始终为原文的精确切片。"""
     return [text[span.start:span.end]
-            for span in split_text_into_chunk_spans(text, max_chunk_size=max_chunk_size, overlap=overlap)]
+            for span in split_text_into_chunk_spans(text, max_chunk_size, overlap)]
 
 
 async def load_global_words() -> Dict[str, List[Dict]]:
@@ -891,6 +808,7 @@ async def proofread_text(
         self_check_extra = await self_check_pass(
             text, merged_early, provider, force=(depth == "deep"),
             chunk_spans=chunk_spans, chunks=chunks,
+            partial=bool(coverage["failed_chunks"]),
         )
         all_issues.extend(self_check_extra)
         for key in total_usage:
@@ -1171,16 +1089,18 @@ async def self_check_pass(
     force: bool = False,
     chunk_spans: Optional[List[ChunkSpan]] = None,
     chunks: Optional[List[str]] = None,
+    partial: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     二次自检：把第一轮问题清单喂回 LLM 复查，返回补充遗漏的 issue。
     长文档按分片聚焦复查——优先复查 error 密集的分片，而非只看开头 3000 字。
+    覆盖不完整（有分片失败）时聚焦复查会漏掉从未检查的失败区域，退回整段复查。
     异常自捕获——二次检查失败不影响第一轮结果（尽力而为的增益层）。
     """
     if not force and not _needs_self_check(issues):
         return []
 
-    use_chunk_mode = chunk_spans is not None and chunks and len(chunks) > 1
+    use_chunk_mode = chunk_spans is not None and chunks and len(chunks) > 1 and not partial
     if use_chunk_mode:
         return await _self_check_chunks(text, issues, provider, chunk_spans, chunks)
 

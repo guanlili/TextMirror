@@ -105,15 +105,29 @@ async def charge_user_daily_quota(user, weight: int = 1) -> str | None:
     try:
         redis = get_redis()
         key = _daily_key("user_daily", str(user.id))
-        count = await redis.eval(_CHARGE_DAILY_LUA, 1, key, weight, user.daily_quota)
-        if count == -1:
+        count = await redis.incrby(key, weight)
+        try:
+            if await redis.ttl(key) < 0:
+                await redis.expire(key, 172800)
+        except Exception as e:
+            # INCRBY 已成功，TTL 故障不能丢失预扣凭据或跳过限额判断。
+            logger.warning(f"用户配额 TTL 设置失败 user_id={user.id}: {e}")
+        if count > user.daily_quota:
+            # 被拒请求不消耗额度：抵消本次自增（刚 INCRBY 的计数必然归本次所有，
+            # 直接 DECRBY 即可；退还失败不影响拒绝）。管理员当日上调配额后立即生效
+            try:
+                await redis.decrby(key, weight)
+            except Exception as e:
+                logger.warning(f"用户配额被拒请求退还失败 user_id={user.id}: {e}")
+            used = count - weight
             logger.warning(
-                f"用户配额触发: user_id={user.id}, quota={user.daily_quota}, need={weight}"
+                f"用户配额触发: user_id={user.id}, used={used}, "
+                f"need={weight}, quota={user.daily_quota}"
             )
             detail = (
                 f"已达今日使用配额（{user.daily_quota} 次/天），请联系管理员调整"
                 if weight == 1
-                else f"今日配额 {user.daily_quota} 次已用完，本次需 {weight} 次（每个模型计一次），请减少模型数量或明天再试"
+                else f"今日剩余额度 {max(user.daily_quota - used, 0)} 次，本次需 {weight} 次（每个模型计一次），请减少模型数量或明天再试"
             )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -211,11 +225,18 @@ async def charge_api_key_daily(api_key, weight: int = 1) -> None:
     try:
         redis = get_redis()
         daily_key = _api_key_daily_redis_key(api_key)
-        quota = api_key.daily_quota if api_key.daily_quota is not None else 0
-        count = await redis.eval(_CHARGE_DAILY_LUA, 1, daily_key, weight, quota)
-        if count == -1:
+        daily_count = await redis.incrby(daily_key, weight)
+        if await redis.ttl(daily_key) < 0:
+            await redis.expire(daily_key, 172800)
+        if api_key.daily_quota is not None and daily_count > api_key.daily_quota:
+            # 被拒请求不消耗额度：抵消本次自增（退还失败不影响拒绝）
+            try:
+                await redis.decrby(daily_key, weight)
+            except Exception as e:
+                logger.warning(f"密钥配额被拒请求退还失败 key_id={api_key.id}: {e}")
             logger.warning(
-                f"密钥日配额触发: key_id={api_key.id}, quota={api_key.daily_quota}, need={weight}"
+                f"密钥日配额触发: key_id={api_key.id}, used={daily_count - weight}, "
+                f"need={weight}, quota={api_key.daily_quota}"
             )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -246,21 +267,6 @@ async def get_api_key_daily_usage(api_key) -> int | None:
         logger.error(f"读取密钥日用量 Redis 异常: {e}")
         return None
 
-
-# 原子预扣 Lua：INCRBY → 检查限额 → 超额则 DECRBY 回滚并返回 -1，未超额则设 TTL 并返回当前计数
-# 消除 INCRBY/check/DECRBY 三步非原子操作的竞态窗口
-_CHARGE_DAILY_LUA = (
-    "local cur = redis.call('INCRBY', KEYS[1], ARGV[1]) "
-    "local quota = tonumber(ARGV[2]) "
-    "if quota > 0 and cur > quota then "
-    "  redis.call('DECRBY', KEYS[1], ARGV[1]) "
-    "  return -1 "
-    "end "
-    "if redis.call('TTL', KEYS[1]) < 0 then "
-    "  redis.call('EXPIRE', KEYS[1], 172800) "
-    "end "
-    "return cur "
-)
 
 # 仅当计数 >0 时 DECR（下限为 0），避免键过期/多次退还制造负值
 _REFUND_DAILY_LUA = (

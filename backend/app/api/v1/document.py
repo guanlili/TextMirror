@@ -14,11 +14,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
-from starlette.background import BackgroundTask
 from loguru import logger
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
 from app.core.database import async_session_factory, get_db
 from app.core.dependencies import get_current_user_optional
@@ -216,7 +216,7 @@ def _generate_revised_text_docx(text: str, output_path: str) -> None:
 def _generate_report_docx(data: ExportReportRequest, output_path: str) -> None:
     """将问题报告写入 Word 文档"""
     from docx import Document
-    from docx.shared import RGBColor, Pt
+    from docx.shared import Pt, RGBColor
 
     document = Document()
 
@@ -423,13 +423,6 @@ async def upload_document(
             raise HTTPException(status_code=400, detail="文件中未提取到有效文本内容")
 
         text_preview = extracted_text[:200] + ("..." if len(extracted_text) > 200 else "")
-
-        # 提取格式化 HTML（保留排版和字体样式）
-        extracted_html = ""
-        try:
-            extracted_html = await asyncio.to_thread(extract_html_from_file, file_path, file_ext, extracted_text)
-        except Exception as e:
-            logger.warning(f"HTML格式提取失败，将降级使用纯文本: {e}")
 
         # 写入数据库记录：失败则整体失败，避免出现磁盘有文件而无记录可追溯的状态
         try:
