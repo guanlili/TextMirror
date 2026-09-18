@@ -83,6 +83,27 @@ services:
       redis:
         condition: service_healthy
 
+  fact-check-worker:
+    build: ./backend
+    image: textmirror-backend:dev
+    container_name: textmirror-dev-fact-check
+    restart: unless-stopped
+    env_file: ./backend/.env
+    volumes:
+      - ./backend:/app
+    command: celery -A app.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=1 -Q fact-check
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.celery_app:celery_app inspect ping -d celery@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   frontend:
     build: ./frontend
     image: textmirror-frontend:dev

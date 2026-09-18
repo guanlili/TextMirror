@@ -1,6 +1,6 @@
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 import httpx
@@ -27,6 +27,14 @@ class SearchResult:
     urls: list[str]
     usage: dict[str, int]
     search_queries: int
+    titles: dict[str, str] = field(default_factory=dict)
+
+
+def _titles(items: list, urls: list[str]) -> dict[str, str]:
+    """Bounded display metadata only; never substitute a search title for page evidence."""
+    return {item["url"]: item["title"][:500] for item in items
+            if isinstance(item, dict) and isinstance(item.get("url"), str)
+            and item["url"] in urls and isinstance(item.get("title"), str)}
 
 
 def model_search_unavailable_reason(provider: str, api_base: str, model: str) -> str:
@@ -176,7 +184,8 @@ def _ark_result(data: dict) -> SearchResult:
     tool_usage = raw_usage.get("tool_usage") if isinstance(raw_usage, dict) else None
     count = tool_usage.get("web_search") if isinstance(tool_usage, dict) else None
     count = count if type(count) is int and count > 0 else len(searches)
-    return SearchResult(_urls(citations), _tokens(data), count)
+    urls = _urls(citations)
+    return SearchResult(urls, _tokens(data), count, _titles(citations, urls))
 
 
 def _qwen_result(data: dict) -> SearchResult:
@@ -194,7 +203,8 @@ def _qwen_result(data: dict) -> SearchResult:
     plugins = raw_usage.get("plugins") if isinstance(raw_usage, dict) else None
     search = plugins.get("search") if isinstance(plugins, dict) else None
     count = search.get("count") if isinstance(search, dict) else None
-    return SearchResult(_urls(results), _tokens(data), count if type(count) is int and count > 0 else 1)
+    urls = _urls(results)
+    return SearchResult(urls, _tokens(data), count if type(count) is int and count > 0 else 1, _titles(results, urls))
 
 
 async def search_model(query: str, provider, sources: list[dict] | None) -> SearchResult:

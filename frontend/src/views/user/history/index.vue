@@ -145,7 +145,7 @@
         <template v-if="detail.type === 'polish'">
           <el-divider content-position="left">润色结果</el-divider>
           <div class="polish-versions">
-            <div v-for="(ver, i) in (detail.result?.versions || [])" :key="i" class="polish-version-item">
+            <div v-for="(ver, i) in (detail.result?.versions || [])" :key="`${ver.label}-${i}`" class="polish-version-item">
               <div class="version-label">
                 <el-tag size="small">{{ ver.label }}</el-tag>
               </div>
@@ -159,7 +159,7 @@
         <template v-else>
           <el-divider content-position="left">问题列表 ({{ detail.issues?.length || 0 }})</el-divider>
           <div class="detail-issues">
-            <div v-for="(issue, i) in (detail.issues || [])" :key="i" class="issue-item">
+            <div v-for="(issue, i) in (detail.issues || [])" :key="`${issue.start ?? ''}-${issue.end ?? ''}-${issue.type}-${i}`" class="issue-item">
               <div class="issue-head">
                 <el-tag :type="severityColor(issue.severity)" size="small">{{ typeLabel(issue.type) }}</el-tag>
                 <el-tag :type="severityColor(issue.severity)" size="small" effect="plain">{{ severityLabel(issue.severity) }}</el-tag>

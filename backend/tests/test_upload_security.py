@@ -86,9 +86,15 @@ async def test_real_pdf_upload_api_returns_text_and_preview(client):
     )
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["extracted_text"] == "中文审校测试。\n第二页内容。"
-    assert data["text_length"] == len(data["extracted_text"])
-    assert "中文审校测试。" in data["extracted_html"]
+    assert data["text_length"] == len("中文审校测试。\n第二页内容。")
+    assert "中文审校测试。" in data["text_preview"]
+
+    file_id = data["file_id"]
+    text_resp = await client.get(f"/api/v1/document/{file_id}/extracted-text")
+    assert text_resp.status_code == 200
+    text_data = text_resp.json()
+    assert text_data["extracted_text"] == "中文审校测试。\n第二页内容。"
+    assert "中文审校测试。" in text_data["extracted_html"]
 
 
 @pytest.mark.parametrize(

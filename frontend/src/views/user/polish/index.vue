@@ -279,6 +279,8 @@ import {
 } from '@/api/polish'
 
 // ---- Markdown 配置 ----
+const POLISH_TEXT_MIN_LEN = 10
+const POLISH_TEXT_MAX_LEN = 5000
 marked.setOptions({
   breaks: true,
   gfm: true,
@@ -339,16 +341,14 @@ onUnmounted(() => {
 
 const canCompare = computed(() => {
   const len = inputText.value.trim().length
-  return len >= 10 && len <= 5000 && selectedModelIds.value.length >= 2
+  return len >= POLISH_TEXT_MIN_LEN && len <= POLISH_TEXT_MAX_LEN && selectedModelIds.value.length >= 2
 })
 
 // ---- 计算属性 ----
-const textTooShort = computed(() => inputText.value.trim().length > 0 && inputText.value.trim().length < 10)
-const textTooLong = computed(() => inputText.value.length > 5000)
-const canSubmit = computed(() => {
-  const len = inputText.value.trim().length
-  return len >= 10 && len <= 5000
-})
+const trimmedLen = computed(() => inputText.value.trim().length)
+const textTooShort = computed(() => trimmedLen.value > 0 && trimmedLen.value < POLISH_TEXT_MIN_LEN)
+const textTooLong = computed(() => inputText.value.length > POLISH_TEXT_MAX_LEN)
+const canSubmit = computed(() => trimmedLen.value >= POLISH_TEXT_MIN_LEN && trimmedLen.value <= POLISH_TEXT_MAX_LEN)
 const hasResult = computed(() => versions.value.length > 0)
 const currentSelectedStyleName = computed(() => {
   const found = styles.value.find(s => s.key === selectedStyle.value)
@@ -390,7 +390,9 @@ onMounted(async () => {
   try {
     const res = await getAvailableModelsCached()
     availableModels.value = res.models
-  } catch { /* 模型列表加载失败时对比功能不可用 */ }
+  } catch {
+    ElMessage.warning('可用模型列表加载失败，多模型对比功能暂不可用')
+  }
 
   // 从校对历史「再次润色」带入的原文
   const rerunText = sessionStorage.getItem('tm_rerun_text')

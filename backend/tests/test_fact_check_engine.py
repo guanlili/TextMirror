@@ -10,8 +10,9 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from app.schemas.fact_check import FactCheckReport
+from app.schemas.fact_check import FactCheckReport, FactSearchRound, FactSearchSource
 from app.services import fact_check as fc
+from app.services.fact_check_search import SearchResult
 
 _REAL_CLIENT = httpx.AsyncClient
 TEXT = "2024年该市人口为100万人。"
@@ -52,7 +53,7 @@ def response(status=200, body=b"", headers=None):
 
 
 def extract(text=TEXT):
-    return {"claims": [{"original": text, "start": 0, "end": len(text), "statement": text}]}
+    return {"claims": [{"segment_id": "s1", "original": text, "statement": text}]}
 
 
 def checks(**statuses):
@@ -115,7 +116,7 @@ def mock_evidence(monkeypatch, result_page=None):
 
     async def search(query, key, sources):
         searches.append((query, key, sources))
-        return ["https://example.com/news/report"]
+        return SearchResult(["https://example.com/news/report"], {}, 1)
 
     async def fetch(url, sources):
         return copy.deepcopy(result_page or page())
@@ -146,7 +147,10 @@ async def test_empty_report_is_success_and_reads_full_input(empty):
     assert report["coverage"]["extracted"] == report["coverage"]["checked"] == 0
     assert report["usage"] == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
                                "search_queries": 0, "pages_fetched": 0}
-    assert json.loads(provider.calls[0]["messages"][1]["content"])["text"] == text
+    segments = json.loads(provider.calls[0]["messages"][1]["content"])["segments"]
+    assert "".join(segment["text"] for segment in segments) == text
+    assert all(set(segment) == {"id", "text"} for segment in segments)
+    assert segments[-1]["text"] == "希望世界更好。"
     assert events[0][0] == 0 and events[-1][0] == 100
     assert not provider.closed
 
@@ -156,7 +160,7 @@ async def test_empty_report_is_success_and_reads_full_input(empty):
                                      '{"claims":[],"error":"failed"}', '{"claims":[],"success":false}'])
 async def test_malformed_extraction_is_not_no_facts(content):
     with pytest.raises(fc.FactCheckError) as exc:
-        await run(Provider(content))
+        await run(Provider(content, content))
     assert exc.value.code == "MODEL_FORMAT_ERROR"
 
 
@@ -183,29 +187,149 @@ async def test_truncated_json_response_fails_even_if_valid_json():
         await run(Truncated({"claims": []}))
 
 
+@pytest.mark.parametrize("slug", ["volcengine", "qwen", "openai", "custom", None])
+async def test_fact_check_json_mode_is_explicit_for_ark(slug, monkeypatch):
+    mock_evidence(monkeypatch)
+    provider = Provider(extract(), decision())
+    provider.provider_slug = slug
+    report = await run(provider)
+    assert report["claims"][0]["verdict"] == "supported"
+    for call in provider.calls:
+        assert call.get("response_format") == ({"type": "json_object"} if slug == "volcengine" else None)
+        assert "json" in call["messages"][0]["content"]
+        assert call["thinking"] is False and call["max_tokens"] == 8000
+
+
+@pytest.mark.parametrize("content", ["not JSON", '```json\n{"claims":[]}\n```', '说明：{"claims":[]}',
+                                     '{"claims":[]} trailing', '{"claims":[]}{"claims":[]}', '"text"', "null"])
+async def test_format_retry_is_once_with_original_input_and_all_usage(content):
+    provider = Provider(content, {"claims": []})
+    report = await run(provider)
+    assert report["claims"] == [] and len(provider.calls) == 2
+    first, second = provider.calls
+    assert first["messages"][1] == second["messages"][1]
+    assert len(second["messages"]) == 2 and "上次响应格式不合规" in second["messages"][0]["content"]
+    assert content not in second["messages"][0]["content"]
+    assert 0 < second["timeout"] < first["timeout"] <= fc.MODEL_TIMEOUT
+    assert report["usage"] == {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30,
+                               "search_queries": 0, "pages_fetched": 0}
+
+
+async def test_repeated_format_failure_is_bounded_and_diagnostics_are_content_free():
+    secret = "private material sk-secret"
+    provider = Provider(secret, secret, {"claims": []})
+    messages = []
+    sink = fc.logger.add(lambda message: messages.append(str(message)), format="{message}")
+    try:
+        with pytest.raises(fc.FactCheckError, match="一次格式重试"):
+            await run(provider)
+    finally:
+        fc.logger.remove(sink)
+    assert len(provider.calls) == 2 and len(provider.responses) == 1
+    assert all(secret not in message for message in messages)
+    assert "attempt=1 issue=invalid_json" in messages[0]
+    assert "attempt=2 issue=invalid_json" in messages[1]
+
+
+@pytest.mark.parametrize("finish", ["length", "content_filter", "tool_calls"])
+async def test_incomplete_model_output_is_never_format_retried(finish):
+    class Incomplete(Provider):
+        async def chat(self, **kwargs):
+            response = await super().chat(**kwargs)
+            response.finish_reason = finish
+            return response
+
+    provider = Incomplete({"claims": []}, {"claims": []})
+    with pytest.raises(fc.FactCheckError, match="截断或未正常完成"):
+        await run(provider)
+    assert len(provider.calls) == 1
+
+
+async def test_provider_rejection_is_not_retried_as_format_failure():
+    provider = Provider(RuntimeError("response_format rejected sk-secret"), {"claims": []})
+    provider.provider_slug = "volcengine"
+    with pytest.raises(fc.FactCheckError) as exc:
+        await run(provider)
+    assert exc.value.code == "MODEL_PROVIDER_ERROR" and "sk-secret" not in exc.value.message
+    assert len(provider.calls) == 1 and provider.calls[0]["response_format"] == {"type": "json_object"}
+
+
+async def test_format_attempts_share_one_timeout(monkeypatch):
+    original_timeout = asyncio.timeout
+    limits = []
+
+    def timeout(seconds):
+        limits.append(seconds)
+        return original_timeout(seconds)
+
+    class Stalled(Provider):
+        async def chat(self, **kwargs):
+            if self.calls:
+                self.calls.append(kwargs)
+                await asyncio.Event().wait()
+            return await super().chat(**kwargs)
+
+    monkeypatch.setattr(fc, "MODEL_TIMEOUT", 0.02)
+    monkeypatch.setattr(fc.asyncio, "timeout", timeout)
+    provider = Stalled("malformed")
+    with pytest.raises(fc.FactCheckError) as exc:
+        await run(provider)
+    assert exc.value.code == "MODEL_PROVIDER_ERROR"
+    assert limits == [0.02] and len(provider.calls) == 2
+    assert provider.calls[1]["timeout"] < provider.calls[0]["timeout"]
+
+
+async def test_format_retry_preserves_cancellation():
+    class Cancelled(Provider):
+        async def chat(self, **kwargs):
+            self.calls.append(kwargs)
+            raise asyncio.CancelledError
+
+    provider = Cancelled()
+    with pytest.raises(asyncio.CancelledError):
+        await run(provider)
+    assert len(provider.calls) == 1
+
+
+async def test_judgment_format_retry_does_not_repeat_search_or_skip_evidence_checks(monkeypatch):
+    searches = mock_evidence(monkeypatch)
+    provider = Provider(extract(), "malformed", decision())
+    report = await run(provider)
+    assert len(searches) == 2 and len(provider.calls) == 3
+    assert provider.calls[1]["messages"][1] == provider.calls[2]["messages"][1]
+    assert report["claims"][0]["verdict"] == "supported"
+    assert report["claims"][0]["evidence"][0]["quote"] == QUOTE
+    assert report["usage"]["total_tokens"] == 45
+    fabricated = [{"id": "c1-e1", "quote": "捏造的正文", "stance": "supports", "checks": checks()}]
+    rejected = await run(Provider(extract(), "malformed", decision(evidence=fabricated)))
+    assert rejected["claims"][0]["verdict"] == "insufficient"
+    assert rejected["claims"][0]["evidence"] == []
+
+
 def test_unicode_offsets_repetition_and_context_are_verified():
     text = "\U0001f600前文。同一句。中段。同一句。结尾。"
     second = text.rindex("同一句。")
     claims, issues = fc._claims_from_model({"claims": [
-        {"original": "同一句。", "statement": "second", "start": second, "end": second + 4},
-        {"original": "同一句。", "statement": "ambiguous"},
-        {"original": "前文。", "statement": "wrong UTF16", "start": 2, "end": 5},
-        {"original": "结尾。", "statement": "unique"},
+        {"segment_id": "s4", "original": "同一句。", "statement": "second"},
+        {"original": "同一句。", "statement": "missing segment"},
+        {"segment_id": "s1", "original": "前文。", "statement": "wrong UTF16", "start": 2, "end": 5},
+        {"segment_id": "s5", "original": "结尾。", "statement": "unique"},
     ]}, text)
     assert [claim["original"] for claim in claims] == ["同一句。", "结尾。"]
     assert claims[0]["start"] == second
     assert issues
     for claim in claims:
         assert text[claim["start"]:claim["end"]] == claim["original"]
-    assert fc._locate(text, {"original": "同一句。", "context_before": "中段。", "context_after": "结尾。"}) == (second, second + 4)
-    assert fc._locate("aaaa", {"original": "aa"}) is None  # overlapping duplicates
-    assert fc._locate("唯一", {"original": "唯一", "start": 3, "end": 5}) is None
+    segments = {segment["id"]: segment for segment in fc._source_segments("前甲中甲后")}
+    assert fc._locate(segments, {"segment_id": "s1", "original": "甲", "context_before": "中", "context_after": "后"}) == (3, 4)
+    assert fc._locate(segments, {"segment_id": "s1", "original": "甲"}) is None
+    assert fc._locate(segments, {"segment_id": "s1", "original": "前", "start": 0, "end": 1}) is None
 
 
 def test_distinct_atomic_claims_in_same_sentence_are_not_dropped():
     text = "该机构于2020年成立，并于2023年发布报告。"
-    first = {"original": text, "statement": "该机构于2020年成立"}
-    second = {"original": text, "statement": "该机构于2023年发布报告"}
+    first = {"segment_id": "s1", "original": text, "statement": "该机构于2020年成立"}
+    second = {"segment_id": "s1", "original": text, "statement": "该机构于2023年发布报告"}
     claims, issues = fc._claims_from_model({"claims": [first, second, first]}, text)
     assert len(claims) == 2 and not issues
     assert claims[0]["start"] == claims[1]["start"] == 0
@@ -219,16 +343,81 @@ async def test_meta_charset_decodes_chinese_page(mock_http, public_dns):
     assert result.title == "统计公报" and "人口为100万人。" in result.text
 
 
-async def test_invalid_locations_are_skipped_but_coverage_is_partial():
-    report = await run(Provider({"claims": [{"original": "不存在", "statement": "不能映射"}]}))
-    assert report["claims"] == []
-    assert report["coverage"]["status"] == "partial"
-    assert "坐标" in report["coverage"]["reason"]
+@pytest.mark.parametrize("retry_empty", [False, True])
+async def test_all_invalid_locations_fail_and_preserve_usage(retry_empty):
+    invalid = {"claims": [{"segment_id": "s1", "original": "不存在", "statement": "不能映射"}]}
+    provider = Provider(invalid, {"claims": []} if retry_empty else invalid)
+    events = []
+
+    async def progress(percent, message, report=None):
+        events.append((percent, message, report))
+
+    with pytest.raises(fc.FactCheckError) as exc:
+        await run(provider, on_progress=progress)
+    assert exc.value.code == "EXTRACTION_LOCATION_FAILED"
+    assert len(provider.calls) == 2
+    assert provider.calls[0]["messages"][1] == provider.calls[1]["messages"][1]
+    assert "上次提取项全部定位失败" in provider.calls[1]["messages"][0]["content"]
+    assert 0 < provider.calls[1]["timeout"] < provider.calls[0]["timeout"] <= fc.MODEL_TIMEOUT
+    report = events[-1][2]
+    assert events[-1][0] < 100 and report["claims"] == []
+    assert report["coverage"]["status"] == "partial" and "句段" in report["coverage"]["reason"]
+    assert report["usage"]["total_tokens"] == 30
+    assert report["usage"]["search_queries"] == report["usage"]["pages_fetched"] == 0
+
+
+async def test_location_retry_recovers_duplicate_original_and_reaches_search(monkeypatch):
+    text = TEXT + " " + TEXT + "\n"
+    invalid = {"claims": [{"original": TEXT, "statement": TEXT}]}
+    corrected = {"claims": [{"segment_id": "s2", "original": TEXT, "statement": TEXT}]}
+    searches = mock_evidence(monkeypatch)
+    provider = Provider(invalid, corrected, decision())
+    report = await run(provider, text=text)
+    claim = report["claims"][0]
+    assert claim["start"] == len(TEXT) + 1 and text[claim["start"]:claim["end"]] == TEXT
+    assert claim["verdict"] == "supported" and len(searches) == 2
+    assert report["usage"]["total_tokens"] == 45 and report["coverage"]["status"] == "complete"
+
+
+async def test_format_and_location_retry_share_two_attempt_budget():
+    invalid = {"claims": [{"segment_id": "s999", "original": TEXT, "statement": TEXT}]}
+    provider = Provider("invalid json", invalid, extract())
+    with pytest.raises(fc.FactCheckError) as exc:
+        await run(provider)
+    assert exc.value.code == "EXTRACTION_LOCATION_FAILED"
+    assert len(provider.calls) == 2 and len(provider.responses) == 1
+
+
+async def test_partial_locations_retain_valid_facts_without_reextracting(monkeypatch):
+    mock_evidence(monkeypatch)
+    raw = extract()
+    raw["claims"].append({"segment_id": "s999", "original": "不存在", "statement": "不能映射"})
+    provider = Provider(raw, decision())
+    report = await run(provider)
+    assert len(provider.calls) == 2 and len(report["claims"]) == 1
+    assert report["claims"][0]["checked"] and report["coverage"]["status"] == "partial"
+
+
+@pytest.mark.parametrize("text", ["\r\n 𠮷甲。 同一句。\r\n同一句。\n", "Value 3.14. Next! End?", "“句子。”下一句！", "无句号长文" * 5000])
+def test_segments_preserve_full_unicode_input_and_exact_offsets(text):
+    segments = fc._source_segments(text)
+    assert "".join(segment["text"] for segment in segments) == text
+    assert [segment["id"] for segment in segments] == [f"s{i + 1}" for i in range(len(segments))]
+    assert all(text[segment["start"]:segment["end"]] == segment["text"] for segment in segments)
+    assert segments[0]["start"] == 0 and segments[-1]["end"] == len(text)
+
+
+@pytest.mark.parametrize("patch", [{"segment_id": "s999"}, {"segment_id": 1}, {"segment_id": None},
+                                  {"original": "甲。乙。"}, {"context_before": "乙"}, {"context_after": "捏造"},
+                                  {"context_after": []}, {"start": 0}, {"end": 2}])
+def test_invalid_segment_and_untrusted_offsets_are_rejected(patch):
+    claims, issues = fc._claims_from_model({"claims": [{"segment_id": "s1", "original": "甲。", "statement": "甲", **patch}]}, "甲。乙。")
+    assert not claims and issues
 
 
 async def test_extraction_cap_and_zero_check_budget():
     text = " ".join(f"事实{i}。" for i in range(31))
-    raw = {"claims": [{"original": f"事实{i}。", "statement": f"事实{i}。"} for i in range(31)]}
+    raw = {"claims": [{"segment_id": f"s{i + 1}", "original": f"事实{i}。", "statement": f"事实{i}。"} for i in range(31)]}
     report = await run(Provider(raw), text=text, max_claims=0)
     assert len(report["claims"]) == 30
     assert report["coverage"]["unverified"] == 30
@@ -243,13 +432,13 @@ async def test_budget_queries_partial_callbacks_and_no_evidence(monkeypatch):
 
     async def search(query, key, sources):
         queries.append(query)
-        return []
+        return SearchResult([], {}, 1)
 
     async def progress(percent, message, report=None):
         events.append((percent, message, report))
 
     monkeypatch.setattr(fc, "_search", search)
-    provider = Provider({"claims": [{"original": item, "statement": item} for item in ["甲", "乙", "丙"]]})
+    provider = Provider({"claims": [{"segment_id": "s1", "original": item, "statement": item} for item in ["甲", "乙", "丙"]]})
     report = await run(provider, text="甲乙丙", max_claims=2, on_progress=progress)
     assert len(queries) == 4 and len(set(queries)) == 4
     assert len(provider.calls) == 1  # no evidence => no model verdict, let alone a true/false guess
@@ -537,7 +726,7 @@ def test_valid_refutation_can_keep_suggestion_but_top_level_forged_url_is_reject
 
 async def test_identical_reprints_are_not_multiple_evidence_sources(monkeypatch):
     async def search(*args):
-        return ["https://example.com/news/a", "https://other.example/reprint"]
+        return SearchResult(["https://example.com/news/a", "https://other.example/reprint"], {}, 1)
 
     async def fetch(url, sources):
         return page(url=url)
@@ -549,11 +738,16 @@ async def test_identical_reprints_are_not_multiple_evidence_sources(monkeypatch)
     data = json.loads(provider.calls[1]["messages"][1]["content"])
     assert len(data["pages"]) == 1
     assert report["usage"]["pages_fetched"] == 2
+    sources = [source for item in report["claims"][0]["search_rounds"] for source in item["sources"]]
+    assert [source["status"] for source in sources] == ["fetched", "duplicate", "duplicate", "duplicate"]
+    assert {source["evidence_id"] for source in sources} == {"c1-e1"}
+    assert all("独立佐证" in source["reason"] for source in sources[1:])
+    FactCheckReport.model_validate(report)
 
 
 async def test_fetch_errors_mark_partial_and_insufficient(monkeypatch):
     async def search(*args):
-        return ["https://example.com/news/a"]
+        return SearchResult(["https://example.com/news/a"], {}, 1)
 
     async def fetch(*args):
         raise fc._FetchError("PAGE_FETCH_FAILED", "failed")
@@ -721,7 +915,7 @@ async def test_transient_search_failure_can_return_partial_report(monkeypatch):
         queries.append(query)
         if len(queries) == 1:
             raise fc._SearchFailure("SEARCH_UNAVAILABLE", "transient")
-        return []
+        return SearchResult([], {}, 1)
 
     monkeypatch.setattr(fc, "_search", search)
     report = await run(Provider(extract()))
@@ -741,7 +935,7 @@ async def test_second_query_can_find_valid_evidence(monkeypatch):
 
     async def search(query, key, sources):
         queries.append(query)
-        return [] if len(queries) == 1 else ["https://example.com/news/report"]
+        return SearchResult([] if len(queries) == 1 else ["https://example.com/news/report"], {}, 1)
 
     async def fetch(url, sources):
         return page()
@@ -760,6 +954,8 @@ async def test_quote_from_search_snippet_is_never_accepted(monkeypatch):
     report = await run(Provider(extract(), bad))
     assert report["claims"][0]["verdict"] == "insufficient"
     assert report["claims"][0]["evidence"] == []
+    assert all(source["evidence_id"] is None for search_round in report["claims"][0]["search_rounds"]
+               for source in search_round["sources"])
 
 
 async def test_truncated_model_page_is_disclosed_and_hidden_tail_cannot_be_cited(monkeypatch):
@@ -778,7 +974,7 @@ async def test_first_round_support_and_counter_round_refutation_are_judged_toget
 
     async def search(query, key, sources):
         queries.append(query)
-        return [f"https://example.com/news/{len(queries)}"]
+        return SearchResult([f"https://example.com/news/{len(queries)}"], {}, 1)
 
     async def fetch(url, sources):
         fetched.append(url)
@@ -810,6 +1006,12 @@ async def test_first_round_support_and_counter_round_refutation_are_judged_toget
     rounds = report["claims"][0]["search_rounds"]
     assert [item["kind"] for item in rounds] == ["initial", "counter"]
     assert [item["status"] for item in rounds] == ["complete", "complete"]
+    assert [item["sources"][0]["evidence_id"] for item in rounds] == ["c1-e1", "c1-e2"]
+    adopted = {item["id"]: item["stance"] for item in report["claims"][0]["evidence"]}
+    assert [adopted[item["sources"][0]["evidence_id"]] for item in rounds] == ["supports", "refutes"]
+    assert all(source["evidence_id"] is None for _, _, current in events
+               if current and not current["claims"][0]["checked"]
+               for item in current["claims"][0]["search_rounds"] for source in item["sources"])
     assert [event[0] for event in events] == sorted(event[0] for event in events)
     pending = next(current for _, _, current in events if current is not None)
     assert [item["status"] for item in pending["claims"][0]["search_rounds"]] == ["pending", "pending"]
@@ -822,7 +1024,7 @@ async def test_two_rounds_never_fetch_more_than_three_candidates_each(monkeypatc
 
     async def search(query, key, sources):
         queries.append(query)
-        return [f"https://example.com/news/{len(queries)}/{i}" for i in range(10)]
+        return SearchResult([f"https://example.com/news/{len(queries)}/{i}" for i in range(10)], {}, 1)
 
     async def fetch(url, sources):
         fetched.append(url)
@@ -895,6 +1097,29 @@ def test_numeric_value_difference_is_refutation_not_scope_mismatch():
     assert result["evidence"][0]["checks"]["scope_unit"]["status"] == "match"
 
 
+@pytest.mark.parametrize("time_status", ["match", "mismatch", "unknown"])
+async def test_event_date_refutation_requires_comparable_event_time(time_status, monkeypatch):
+    text = "中华人民共和国成立于1949年10月2日。"
+    body = "中华人民共和国成立于1949年10月1日。"
+    assessment = {
+        "subject": {"status": "match", "reason": "正文与陈述均指中华人民共和国成立事件。"},
+        "event_time": {"status": time_status, "reason": "同一唯一事件的发生日期不同，而非不同统计时期。"},
+        "scope_unit": {"status": "not_applicable", "reason": "未涉及统计范围或单位。"},
+    }
+    ref = {"id": "c1-e1", "quote": body, "stance": "refutes", "checks": assessment}
+    mock_evidence(monkeypatch, page(text=body))
+    provider = Provider(extract(text), decision("refuted", [ref], suggestion=body))
+    report = await run(provider, text=text)
+    claim = report["claims"][0]
+    prompt = provider.calls[-1]["messages"][0]["content"]
+    assert "同一唯一事件本身的发生日期" in prompt
+    assert "不同统计年份、不同届次或重复发生的事件" in prompt
+    assert claim["verdict"] == ("refuted" if time_status == "match" else "insufficient")
+    assert claim["suggestion"] == (body if time_status == "match" else None)
+    assert claim["evidence"][0]["stance"] == ("refutes" if time_status == "match" else "context")
+    assert claim["evidence"][0]["quote"] == body
+
+
 def test_not_applicable_and_context_unknown_are_explicit_not_implicit():
     body = "三角形是有三条边的多边形。"
     assessment = {"subject": {"status": "match", "reason": "同为三角形定义"},
@@ -936,7 +1161,7 @@ async def test_counter_round_failure_never_reports_supported_or_complete(monkeyp
         queries.append(query)
         if len(queries) == 2 and failure == "search":
             raise fc._SearchFailure("SEARCH_UNAVAILABLE", "failed")
-        return [f"https://example.com/news/{len(queries)}"]
+        return SearchResult([f"https://example.com/news/{len(queries)}"], {}, 1)
 
     async def fetch(url, sources):
         if len(queries) == 2:
@@ -970,7 +1195,7 @@ async def test_native_counter_failure_emits_failed_snapshot_and_never_judges(mon
         calls.append(query)
         if len(calls) == 2:
             raise fc.NativeSearchError("SEARCH_INCOMPLETE", "反证搜索未完成")
-        return SimpleNamespace(urls=["https://example.com/news/report"], usage={}, search_queries=1)
+        return SearchResult(["https://example.com/news/report"], {}, 1)
 
     async def fetch(url, sources):
         return page()
@@ -1255,3 +1480,205 @@ async def test_qwen38_stream_search_result_cannot_replace_page_body(mock_http, p
     report = await run(provider, search_provider="model", api_key="")
     assert report["claims"][0]["verdict"] == "insufficient"
     assert report["claims"][0]["evidence"] == []
+    assert all(source["evidence_id"] is None for search_round in report["claims"][0]["search_rounds"]
+               for source in search_round["sources"])
+
+
+@pytest.mark.parametrize("slug", ["volcengine", "qwen", "tavily"])
+@pytest.mark.parametrize("title", ["标题" * 300, None, 7, {"text": "not a string"}, ["title"]])
+async def test_search_titles_are_bounded_metadata_only(slug, title, mock_http):
+    from app.services import fact_check_search as native
+
+    urls = ["javascript:alert(1)", "https://example.com/news/report"]
+    data = native_result(slug, urls) if slug != "tavily" else {"results": [{"url": url} for url in urls]}
+    items = (data["results"] if slug == "tavily" else data["output"]["search_info"]["search_results"]
+             if slug == "qwen" else data["output"][1]["content"][0]["annotations"])
+    for item in items:
+        item["title"] = title
+    mock_http(lambda request: response(body=json.dumps(data).encode()))
+    result = (await fc._search(TEXT, "key", None) if slug == "tavily"
+              else await native.search_model(TEXT, native_provider(slug), None))
+    assert result.urls == urls  # rejected URLs remain plain data until safe fetching
+    assert result.titles == ({url: title[:500] for url in urls} if isinstance(title, str) else {})
+    assert set(vars(result)) == {"urls", "titles", "usage", "search_queries"}
+    fresh = SearchResult([], {}, 1)
+    fresh.titles["url"] = "changed"
+    assert SearchResult([], {}, 1).titles == {}
+
+
+def test_trace_schema_legacy_empty_and_rejected_urls():
+    args = {"kind": "initial", "query": TEXT, "status": "pending"}
+    assert FactSearchRound(**args).sources is None
+    assert FactSearchRound(**args, sources=None).model_dump()["sources"] is None
+    assert FactSearchRound(**args, sources=[]).model_dump()["sources"] == []
+    rejected = FactSearchSource(url="javascript:alert(1)", status="failed", error_code="UNSAFE_URL")
+    assert rejected.url == "javascript:alert(1)" and rejected.origin == "search" and rejected.title == ""
+    assert rejected.evidence_id is None
+    for change in ({"url": "x" * 4097}, {"title": "x" * 501}, {"reason": "x" * 1001},
+                   {"status": "supported"}, {"origin": "model"}, {"evidence_id": 1}):
+        with pytest.raises(ValueError):
+            FactSearchSource.model_validate(rejected.model_dump() | change)
+    with pytest.raises(ValueError):
+        FactSearchRound(**args, sources=[rejected] * 7)
+
+
+async def test_trace_evidence_ids_must_belong_to_same_claim(monkeypatch):
+    mock_evidence(monkeypatch)
+    report = await run(Provider(extract(), decision()))
+    FactCheckReport.model_validate(report)
+    for bad_id in ("missing", "", "c2-e1"):
+        changed = copy.deepcopy(report)
+        second = copy.deepcopy(changed["claims"][0])
+        second["id"] = "c2"
+        second["evidence"][0]["id"] = "c2-e1"
+        second["search_rounds"] = []
+        changed["claims"].append(second)
+        changed["coverage"].update(extracted=2, checked=2)
+        changed["claims"][0]["search_rounds"][0]["sources"][0]["evidence_id"] = bad_id
+        with pytest.raises(ValueError, match="同一事实项"):
+            FactCheckReport.model_validate(changed)
+
+
+@pytest.mark.parametrize("search_provider", ["tavily", "model"])
+async def test_fake_ip_failures_and_all_candidates_survive_progress(monkeypatch, search_provider):
+    urls = [f"https://example.com/news/{i}" for i in range(3)]
+    events, resolutions = [], []
+
+    async def search(*args):
+        return SearchResult(urls, {}, 1, {url: "候选搜索标题" for url in urls})
+
+    async def dns(host, port, **kwargs):
+        resolutions.append(host)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("198.18.0.8", port))]
+
+    async def progress(percent, message, current=None):
+        if current:
+            FactCheckReport.model_validate(current)
+            events.append(current)
+
+    monkeypatch.setattr(fc, "_search", search)
+    monkeypatch.setattr(fc, "search_model", search)
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", dns)
+    provider = Provider(extract())
+    report = await run(provider, search_provider=search_provider, on_progress=progress)
+    rounds = report["claims"][0]["search_rounds"]
+    assert len(resolutions) == 3 and len(provider.calls) == 1
+    assert report["claims"][0]["verdict"] == "insufficient" and report["coverage"]["status"] == "partial"
+    assert [item["status"] for item in rounds[0]["sources"]] == ["failed"] * 3
+    assert [item["status"] for item in rounds[1]["sources"]] == ["duplicate"] * 3
+    assert all(source["error_code"] == "UNSAFE_ADDRESS" and "非公网" in source["reason"]
+               and source["title"] == "候选搜索标题" and source["evidence_id"] is None
+               for item in rounds for source in item["sources"])
+    states = [[source["status"] for source in event["claims"][0]["search_rounds"][0]["sources"]]
+              for event in events]
+    assert ["pending"] * 3 in states
+    assert ["failed", "pending", "pending"] in states
+    assert ["failed", "failed", "pending"] in states
+    assert report["usage"]["pages_fetched"] == 0 and report["usage"]["search_queries"] == 2
+
+
+@pytest.mark.parametrize("url", ["javascript:alert(1)", "https://example.com/" + "x" * 4096])
+async def test_rejected_raw_url_is_retained_without_becoming_evidence(monkeypatch, url):
+    async def search(*args):
+        return SearchResult([url], {}, 1)
+
+    monkeypatch.setattr(fc, "_search", search)
+    report = await run(Provider(extract()))
+    source = report["claims"][0]["search_rounds"][0]["sources"][0]
+    assert source["url"] == url[:4096] and source["status"] == "failed"
+    assert source["error_code"] == "UNSAFE_URL" and source["evidence_id"] is None
+    if len(url) > 4096:
+        assert "截断" in source["reason"]
+    FactCheckReport.model_validate(report)
+
+
+@pytest.mark.parametrize("fabricated", [False, True])
+async def test_fetched_uncited_sources_get_no_invented_rationale(monkeypatch, fabricated):
+    mock_evidence(monkeypatch)
+    refs = [{"id": "c1-e1", "quote": "捏造引文", "stance": "supports", "checks": checks()}] if fabricated else []
+    report = await run(Provider(extract(), decision("insufficient", refs)))
+    claim = report["claims"][0]
+    fetched, duplicate = [item["sources"][0] for item in claim["search_rounds"]]
+    assert fetched["status"] == "fetched" and fetched["evidence_id"] is None
+    assert fetched["reason"] == "正文已读取，但本轮未形成可用引用；未采用不代表内容无关或陈述为假。"
+    assert duplicate["status"] == "duplicate" and duplicate["evidence_id"] is None
+    assert not claim["evidence"]
+
+
+@pytest.mark.parametrize("interrupt_at", ["正在安全抓取", "已记录", "正在依据"])
+async def test_interrupted_trace_never_implies_judgment_completed(monkeypatch, interrupt_at):
+    urls = [f"https://example.com/news/{i}" for i in range(3)]
+    events, fetched = [], []
+
+    async def search(*args):
+        return SearchResult(urls, {}, 1, {url: "搜索标题" for url in urls})
+
+    async def fetch(url, sources):
+        fetched.append(url)
+        return page(url=url, text=url + QUOTE)
+
+    async def progress(percent, message, current=None):
+        if current:
+            events.append(current)
+        if message.startswith(interrupt_at):
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(fc, "_search", search)
+    monkeypatch.setattr(fc, "_fetch_page", fetch)
+    with pytest.raises(asyncio.CancelledError):
+        await run(Provider(extract()), on_progress=progress)
+    claim = events[-1]["claims"][0]
+    assert not claim["checked"] and not claim["evidence"]
+    sources = claim["search_rounds"][0]["sources"]
+    assert len(sources) == 3 and all(source["evidence_id"] is None for source in sources)
+    assert all("未形成可用引用" not in source["reason"] for source in sources)
+    if interrupt_at == "正在安全抓取":
+        assert not fetched and {source["title"] for source in sources} == {"搜索标题"}
+        assert {source["status"] for source in sources} == {"pending"}
+    elif interrupt_at == "已记录":
+        assert len(fetched) == 1
+        assert [source["status"] for source in sources] == ["fetched", "pending", "pending"]
+        assert sources[0]["title"] == "统计公报"
+    else:
+        assert len(fetched) == 3 and all("尚未完成评估" in source["reason"] for source in sources)
+    FactCheckReport.model_validate(events[-1])
+
+
+async def test_deep_trace_keeps_six_candidates_and_resets_parent(monkeypatch):
+    mock_evidence(monkeypatch)
+    parent = await run(Provider(extract(), decision()))
+    original = copy.deepcopy(parent)
+    queries, fetched, events = [], [], []
+    supplemental = [f"https://example.com/supplement/{i}" for i in range(3)]
+    searched = [f"https://example.com/search/{i}" for i in range(3)]
+
+    async def search(query, *args):
+        queries.append(query)
+        return SearchResult(searched if len(queries) == 3 else [], {}, 1)
+
+    async def fetch(url, sources):
+        fetched.append(url)
+        return page(url=url, text=url + QUOTE)
+
+    async def progress(percent, message, current=None):
+        if current:
+            FactCheckReport.model_validate(current)
+            events.append(current)
+
+    monkeypatch.setattr(fc, "_search", search)
+    monkeypatch.setattr(fc, "_fetch_page", fetch)
+    provider = Provider(decision())
+    report = await run(provider, prepared_report=parent, selected_claim_ids=["c1"], depth="deep",
+                       supplemental_urls=supplemental, on_progress=progress)
+    assert parent == original
+    assert len(provider.calls) == 1 and len(queries) == 3 and fetched == supplemental
+    assert all(item["sources"] == [] for item in events[0]["claims"][0]["search_rounds"])
+    assert not events[0]["claims"][0]["evidence"]
+    sources = report["claims"][0]["search_rounds"][2]["sources"]
+    assert [source["url"] for source in sources] == supplemental + searched
+    assert [source["origin"] for source in sources] == ["supplemental"] * 3 + ["search"] * 3
+    assert [source["status"] for source in sources] == ["fetched"] * 3 + ["skipped"] * 3
+    assert all("预算" in source["reason"] and source["evidence_id"] is None for source in sources[3:])
+    pending = next(event["claims"][0]["search_rounds"][2]["sources"] for event in events
+                   if len(event["claims"][0]["search_rounds"][2]["sources"]) == 6)
+    assert {source["status"] for source in pending} == {"pending"}

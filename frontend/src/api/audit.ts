@@ -28,12 +28,12 @@ export interface AuditLogDetail extends AuditLogItem {
   input_length: number
   output_text: string | null
   output_length: number
-  extra_params: Record<string, any> | null
+  extra_params: Record<string, unknown> | null
   file_id: string | null
   file_path: string | null
   file_size: number | null
   error_message: string | null
-  token_usage: Record<string, any> | null
+  token_usage: Record<string, unknown> | null
 }
 
 /** 审计日志列表响应 */

@@ -99,9 +99,18 @@ def _build_status_payload(task_id: str, db_task) -> dict:
     if display_status == "SUCCESS" and db_task.result_json:
         payload = dict(db_task.result_json)
         payload.pop("user_id", None)
+        payload.pop("partial_issues", None)
+        payload.pop("partial_chunks", None)
+        payload.pop("partial_total", None)
         response["result"] = payload
     elif display_status in ("FAILURE", "CANCELLED", "REVOKED"):
         response["error"] = db_task.error_code or "task_failed"
+
+    if display_status in ("PROGRESS", "STARTED") and db_task.result_json:
+        partial = db_task.result_json
+        if partial.get("partial_issues"):
+            response["partial_issues"] = partial["partial_issues"]
+            response["partial_total"] = partial.get("partial_total", len(partial["partial_issues"]))
     if (db_task.result_json or {}).get("collaboration"):
         from app.schemas.collaboration import CollaborationReport
 

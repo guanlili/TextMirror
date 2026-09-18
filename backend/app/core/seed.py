@@ -27,6 +27,10 @@ PERMISSION_SEED = [
     ("proofread:text", "文本校对", "menu", "proofread", "/proofread/text", "Edit", 1),
     ("proofread:document", "文档校对", "menu", "proofread", "/proofread/document", "Document", 2),
     ("proofread:export", "导出校对结果", "button", "proofread", None, None, 3),
+    ("fact-check", "事实核查", "menu", None, "/fact-check", "Search", 3),
+    ("fact-check:run", "运行事实核查", "button", "fact-check", None, None, 1),
+    ("fact-check:review", "复核事实结论", "button", "fact-check", None, None, 2),
+    ("fact-check:export", "导出核查报告", "button", "fact-check", None, None, 3),
     ("dictionary", "个性化词库", "menu", None, "/dictionary", "Collection", 2),
     ("dictionary:create", "创建词库", "button", "dictionary", None, None, 1),
     ("dictionary:edit", "编辑词库", "button", "dictionary", None, None, 2),
@@ -144,6 +148,7 @@ async def seed_roles(session, perm_map):
     # 为普通用户角色分配基础权限
     user_perms = [
         "proofread", "proofread:text", "proofread:document", "proofread:export",
+        "fact-check", "fact-check:run", "fact-check:review", "fact-check:export",
         "dictionary", "dictionary:create", "dictionary:edit", "dictionary:delete", "dictionary:import",
         "whitelist", "whitelist:create", "whitelist:edit", "whitelist:delete",
         "history", "history:view", "history:export",

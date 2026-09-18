@@ -95,12 +95,8 @@ async def get_current_user(
         )
 
     role_code = payload.get("role_code")
-    if not role_code and user.role_id is not None:
-        from app.models.role import Role
-        role_result = await db.execute(select(Role).where(Role.id == user.role_id))
-        role = role_result.scalar_one_or_none()
-        if role is not None:
-            role_code = role.code
+    if not role_code and user.role is not None:
+        role_code = user.role.code
     if role_code:
         setattr(user, "role_code", role_code)
 
@@ -139,14 +135,10 @@ def require_permission(permission_code: str):
         db: AsyncSession = Depends(get_db),
     ):
         # 延迟导入避免循环依赖
-        from app.models.role import Permission, Role, RolePermission
+        from app.models.role import Permission, RolePermission
 
-        # 超级管理员拥有所有权限
-        result = await db.execute(
-            select(Role).where(Role.id == current_user.role_id)
-        )
-        role = result.scalar_one_or_none()
-        if role and role.code == "super_admin":
+        # 超级管理员拥有所有权限（role 已由 get_current_user 的 selectinload 加载）
+        if current_user.role and current_user.role.code == "super_admin":
             return current_user
 
         # 查询用户角色关联的权限

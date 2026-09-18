@@ -48,8 +48,9 @@ async def get_site_config() -> Dict[str, str]:
     config = dict(DEFAULT_SITE_CONFIG)
 
     try:
-        for key in DEFAULT_SITE_CONFIG:
-            val = await redis.get(f"{SITE_CONFIG_PREFIX}{key}")
+        keys = [f"{SITE_CONFIG_PREFIX}{key}" for key in DEFAULT_SITE_CONFIG]
+        values = await redis.mget(keys)
+        for key, val in zip(DEFAULT_SITE_CONFIG, values):
             if val is not None:
                 config[key] = val
     except Exception as e:

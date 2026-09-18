@@ -13,6 +13,7 @@
       <el-menu :default-active="activeMenu" router class="workspace-menu">
         <el-menu-item index="/proofread/text"><el-icon><Edit /></el-icon><span>文本在线校对</span></el-menu-item>
         <el-menu-item index="/proofread/document"><el-icon><Document /></el-icon><span>文档上传校对</span></el-menu-item>
+        <el-menu-item v-if="userStore.isLoggedIn && userStore.hasPermission('fact-check:run')" index="/fact-check"><el-icon><Search /></el-icon><span>事实核查</span></el-menu-item>
       </el-menu>
 
       <template v-if="userStore.isLoggedIn">
@@ -98,6 +99,7 @@
       <el-menu :default-active="activeMenu" router @select="mobileMenuVisible = false" class="mobile-nav-menu">
         <el-menu-item index="/proofread/text"><el-icon><Edit /></el-icon><span>文本在线校对</span></el-menu-item>
         <el-menu-item index="/proofread/document"><el-icon><Document /></el-icon><span>文档上传校对</span></el-menu-item>
+        <el-menu-item v-if="userStore.isLoggedIn && userStore.hasPermission('fact-check:run')" index="/fact-check"><el-icon><Search /></el-icon><span>事实核查</span></el-menu-item>
         <el-menu-item v-if="userStore.isLoggedIn" index="/dictionary"><el-icon><Collection /></el-icon><span>个性化词库</span></el-menu-item>
         <el-menu-item v-if="userStore.isLoggedIn" index="/whitelist"><el-icon><CircleCheck /></el-icon><span>放行词管理</span></el-menu-item>
         <el-menu-item v-if="userStore.isLoggedIn" index="/history"><el-icon><Clock /></el-icon><span>校对历史</span></el-menu-item>
@@ -124,7 +126,7 @@ const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 const siteStore = useSiteStore()
-const activeMenu = computed(() => route.path)
+const activeMenu = computed(() => route.path.startsWith('/fact-check') ? '/fact-check' : route.path)
 const mobileMenuVisible = ref(false)
 
 const pageMap: Record<string, { title: string; subtitle: string }> = {
@@ -137,7 +139,7 @@ const pageMap: Record<string, { title: string; subtitle: string }> = {
   '/apikeys': { title: 'API 密钥', subtitle: '将审校能力集成到你的工作流' },
   '/profile': { title: '个人中心', subtitle: '管理账号与个人偏好' },
 }
-const currentPage = computed(() => pageMap[route.path] || { title: 'TextMirror', subtitle: siteStore.platformSubtitle })
+const currentPage = computed(() => route.path.startsWith('/fact-check') ? { title: '事实核查', subtitle: '独立核查 · 证据追溯 · 人工复核' } : pageMap[route.path] || { title: 'TextMirror', subtitle: siteStore.platformSubtitle })
 
 // ---- 今日用量与配额展示 ----
 const usage = ref<{ used_today: number; daily_quota: number | null } | null>(null)

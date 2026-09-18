@@ -86,6 +86,7 @@ declare module 'vue' {
     ElUpload: typeof import('element-plus/es')['ElUpload']
     Expand: typeof import('@element-plus/icons-vue')['Expand']
     FactCheckPanel: typeof import('./components/FactCheckPanel.vue')['default']
+    FactCheckSearchTrace: typeof import('./components/FactCheckSearchTrace.vue')['default']
     FactCheckSettings: typeof import('./components/FactCheckSettings.vue')['default']
     Filter: typeof import('@element-plus/icons-vue')['Filter']
     Fold: typeof import('@element-plus/icons-vue')['Fold']

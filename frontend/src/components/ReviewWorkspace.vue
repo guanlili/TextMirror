@@ -205,7 +205,7 @@ function resetDocument() {
   }
 }
 
-watch(() => [props.recordId, props.sourceText] as const, resetDocument, { immediate: true, flush: 'sync' })
+watch(() => [props.recordId, props.sourceText] as const, resetDocument, { immediate: true })
 watch(() => props.savedReview, review => {
   if (!review || !matchesDocument(review)) return
   // 父页导出也会保存；仅以响应内容为基线，不吞掉请求期间的本地修改。
@@ -216,7 +216,7 @@ watch(() => props.savedReview, review => {
   baseline.value = responseSnapshot(review)
   needsLoad.value = false
   conflict.value = false
-}, { flush: 'sync' })
+})
 
 onBeforeUnmount(() => {
   documentToken++

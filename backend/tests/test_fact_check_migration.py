@@ -28,6 +28,7 @@ def create_parents(connection):
     connection.execute(sa.text("PRAGMA foreign_keys=ON"))
     connection.execute(sa.text("CREATE TABLE users (id INTEGER PRIMARY KEY)"))
     connection.execute(sa.text("CREATE TABLE proofread_records (id INTEGER PRIMARY KEY)"))
+    connection.execute(sa.text("CREATE TABLE llm_configs (id INTEGER PRIMARY KEY)"))
     connection.execute(sa.text("INSERT INTO users VALUES (1)"))
     connection.execute(sa.text("INSERT INTO proofread_records VALUES (1)"))
 
@@ -49,21 +50,15 @@ def test_fact_check_migration_matches_orm_and_is_idempotent(bootstrap):
         assert provider.revision == "a2d5e9f7b304" and provider.down_revision == "f1c4d8e6a203"
         original.upgrade()
         provider.upgrade()
+        workbench = migration_for(connection, "c4f7a9b1d526_fact_check_workbench")
+        workbench.upgrade()
         original.upgrade()
         provider.upgrade()
+        workbench.upgrade()
         context = MigrationContext.configure(connection, opts={"compare_type": True, "compare_server_default": True})
         assert compare_metadata(context, Base.metadata) == []
-        provider.downgrade()
-        provider.downgrade()
-        assert "search_provider" not in {c["name"] for c in sa.inspect(connection).get_columns("fact_check_runs")}
-        provider.upgrade()
-        assert compare_metadata(context, Base.metadata) == []
-        provider.downgrade()
-        original.downgrade()
-        original.downgrade()
-        original.upgrade()
-        provider.upgrade()
-        assert compare_metadata(context, Base.metadata) == []
+        with pytest.raises(RuntimeError, match="兼容版本"):
+            workbench.downgrade()
     engine.dispose()
 
 
@@ -203,4 +198,31 @@ def test_run_constraints_and_source_record_deletion_cascade():
                     connection.execute(config.update().values(search_provider=invalid))
         connection.execute(sa.text("DELETE FROM proofread_records WHERE id=1"))
         assert connection.execute(sa.select(table)).all() == []
+    engine.dispose()
+
+
+def test_workbench_source_deletion_keeps_report_and_review_is_owned_by_run():
+    from app.models.fact_check import FactCheckReview
+    from app.models.proofread import ProofreadRecord
+    from app.models.user import User
+
+    engine = sa.create_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(sa.text("PRAGMA foreign_keys=ON"))
+        Base.metadata.create_all(connection)
+        from app.models.role import Role
+        connection.execute(Role.__table__.insert().values(id=1, code="migration-role", name="migration-role"))
+        connection.execute(User.__table__.insert().values(id=1, role_id=1, employee_id="migration-user", username="migration-user", password_hash="unused"))
+        connection.execute(ProofreadRecord.__table__.insert().values(id=1, user_id=1, type="text", original_text="原文"))
+        values = run_values(status="SUCCESS", result_json={"snapshot": "保留"})
+        connection.execute(FactCheckRun.__table__.insert().values(id=1, **values))
+        connection.execute(FactCheckReview.__table__.insert().values(
+            run_id=1, user_id=1, claim_id="c1", decision="agree", note="人工意见", request_id="review-1"))
+        connection.execute(sa.delete(ProofreadRecord).where(ProofreadRecord.id == 1))
+        stored = connection.execute(sa.select(FactCheckRun.__table__)).mappings().one()
+        assert stored["record_id"] is None and stored["source_text"] == "原文"
+        assert stored["result_json"] == {"snapshot": "保留"}
+        assert connection.scalar(sa.select(sa.func.count()).select_from(FactCheckReview)) == 1
+        connection.execute(sa.delete(FactCheckRun).where(FactCheckRun.id == 1))
+        assert connection.scalar(sa.select(sa.func.count()).select_from(FactCheckReview)) == 0
     engine.dispose()

@@ -46,6 +46,12 @@ const userRoutes: RouteRecordRaw[] = [
         meta: { title: '文档校对', icon: 'Document' },
       },
       {
+        path: 'fact-check/:id?',
+        name: 'FactCheck',
+        component: () => import('@/views/user/fact-check/index.vue'),
+        meta: { title: '事实核查', icon: 'Search', requireAuth: true },
+      },
+      {
         path: 'dictionary',
         name: 'Dictionary',
         component: () => import('@/views/user/dictionary/index.vue'),

@@ -294,8 +294,8 @@ async def quick_login(
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="操作过于频繁，请稍后再试")
     except HTTPException:
         raise
-    except Exception:
-        pass  # Redis 异常不阻塞登录
+    except Exception as e:
+        logger.error(f"一键登录 RPM 限流 Redis 异常（本次放行）: {e}")
 
     result = await db.execute(select(User).where(User.employee_id == account))
     user = result.scalar_one_or_none()

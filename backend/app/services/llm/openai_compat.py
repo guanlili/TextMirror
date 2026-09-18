@@ -130,6 +130,7 @@ class OpenAICompatProvider(BaseLLMProvider):
         max_tokens: Optional[int] = None,
         thinking: Optional[bool] = None,
         timeout: Optional[float] = None,
+        response_format: Optional[Dict[str, str]] = None,
     ) -> LLMResponse:
         """调用 Chat Completions API
 
@@ -137,6 +138,7 @@ class OpenAICompatProvider(BaseLLMProvider):
                          仅对已知方言的供应商生效（见 _THINKING_DIALECTS）
         :param timeout: 本次请求的读写超时覆盖（秒），None 用 client 配置值；
                          供思考模式等长耗时场景按请求放宽，不影响共享连接池
+        :param response_format: 显式指定响应格式，None 不发送该参数；供应商拒绝时不降级
         """
         payload = {
             "model": self.model,
@@ -146,6 +148,8 @@ class OpenAICompatProvider(BaseLLMProvider):
         }
         if max_tokens:
             payload["max_tokens"] = max_tokens
+        if response_format is not None:
+            payload["response_format"] = response_format
         if thinking is not None:
             dialect = _THINKING_DIALECTS.get(self.provider_slug or "")
             if dialect is None:

@@ -25,12 +25,17 @@ celery_app.conf.update(
     enable_utc=True,
     task_track_started=True,
     result_expires=3600 * 24,  # 结果保留24小时
-    task_soft_time_limit=300,  # 软超时5分钟
-    task_time_limit=360,  # 硬超时6分钟
+    task_soft_time_limit=600,  # 软超时10分钟（大文档审校可能耗时较长）
+    task_time_limit=720,  # 硬超时12分钟
     worker_prefetch_multiplier=1,
     worker_concurrency=2,
+    task_routes={"fact_check.*": {"queue": "fact-check"}},
     # 定时任务：审计日志每日清理（90 天保留，与后台手动清理同口径）
     beat_schedule={
+        "clean-expired-fact-checks": {
+            "task": "fact_check.clean_expired",
+            "schedule": crontab(minute=15),
+        },
         "clean-old-audit-logs-daily": {
             "task": "maintenance.clean_old_audit_logs",
             "schedule": crontab(hour=3, minute=30),  # Asia/Shanghai 每日 03:30

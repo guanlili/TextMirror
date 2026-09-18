@@ -12,6 +12,12 @@
         <el-form-item label="启用事实核查"><el-switch v-model="draft.enabled" aria-label="启用事实核查" /></el-form-item>
         <el-form-item label="每次最多核查事实数"><el-input-number v-model="draft.max_claims" :min="1" :max="10" :precision="0" :step="1" aria-label="每次最多核查事实数" /></el-form-item>
       </div>
+      <el-form-item label="事实核查模型">
+        <el-select v-model="draft.model_config_id" clearable placeholder="跟随当前活跃模型" aria-label="事实核查模型">
+          <el-option v-for="model in models" :key="model.id" :value="model.id" :label="`${model.name} · ${model.model}`" />
+        </el-select>
+        <p class="muted">留空跟随活跃模型；单独选择不会改变文字审校模型。保存时校验所选配置。</p>
+      </el-form-item>
       <el-form-item label="搜索服务">
         <el-select v-model="draft.provider" aria-label="事实核查搜索服务">
           <el-option label="模型原生联网（默认）" value="model" />
@@ -54,8 +60,12 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElButton, ElCard, ElForm, ElFormItem, ElInput, ElInputNumber, ElOption, ElSelect, ElSwitch } from 'element-plus'
 import { createFactCheckId, getFactCheckSettingsApi, saveFactCheckSettingsApi, type FactCheckSettings, type SaveFactCheckSettingsPayload } from '@/api/factCheck'
 import { getReviewErrorDetail } from '@/api/review'
+import { listLLMConfigsApi, type LLMConfigItem } from '@/api/admin'
+import { useUserStore } from '@/stores/user'
+const models = ref<LLMConfigItem[]>([])
+const savedModelId = ref<number | null>(null)
 
-const draft = ref<SaveFactCheckSettingsPayload>({ enabled: false, provider: 'model', max_claims: 10, sources: [] })
+const draft = ref<SaveFactCheckSettingsPayload>({ enabled: false, provider: 'model', model_config_id: null, max_claims: 10, sources: [] })
 const apiKey = ref('')
 const keyConfigured = ref(false)
 const modelName = ref('')
@@ -80,7 +90,7 @@ function validDomain(value: string) {
 }
 const validationError = computed(() => {
   if (!Number.isInteger(draft.value.max_claims) || draft.value.max_claims < 1 || draft.value.max_claims > 10) return '每次核查事实数必须为 1–10 之间的整数。'
-  if (draft.value.enabled && draft.value.provider === 'model' && !modelSearchSupported.value) return '当前模型配置不支持原生联网，请更新模型配置或手动选择 Tavily。'
+  if (draft.value.enabled && draft.value.provider === 'model' && (draft.value.model_config_id ?? null) === savedModelId.value && !modelSearchSupported.value) return '当前模型配置不支持原生联网，请更新模型配置或手动选择 Tavily。'
   if (draft.value.enabled && draft.value.provider === 'tavily' && !keyConfigured.value && !apiKey.value.trim()) return '启用前请填写 Tavily API Key。'
   for (const [index, source] of draft.value.sources.entries()) {
     if (!source.name.trim()) return `信源 ${index + 1}：名称必填。`
@@ -93,6 +103,8 @@ const validationError = computed(() => {
 function applySettings(response: FactCheckSettings) {
   // 只接收契约字段，绝不把响应中的任意字段回填到密钥输入框。
   draft.value = { enabled: response.enabled, provider: response.provider ?? 'model', max_claims: response.max_claims, sources: response.sources.map(source => ({ ...source })) }
+  draft.value.model_config_id = response.model_config_id ?? null
+  savedModelId.value = response.model_config_id ?? null
   keyConfigured.value = response.api_key_configured
   modelName.value = response.model_name
   modelSearchSupported.value = response.model_search_supported
@@ -111,6 +123,10 @@ async function load() {
   try {
     const response = await getFactCheckSettingsApi({ signal: controller.signal })
     if (alive && token === sequence) applySettings(response)
+    if (useUserStore().hasPermission('admin:llm:view')) {
+      const available = await listLLMConfigsApi()
+      if (alive && token === sequence) models.value = available.filter(item => item.is_enabled)
+    }
   } catch (cause) {
     if (alive && token === sequence) error.value = getReviewErrorDetail(cause)
   } finally {
@@ -155,7 +171,7 @@ async function save() {
     if (alive && token === sequence) saving.value = false
   }
 }
-watch(() => draft.value.provider, () => { apiKey.value = ''; notice.value = '' }, { flush: 'sync' })
+watch(() => draft.value.provider, () => { apiKey.value = ''; notice.value = '' })
 onMounted(() => { void load() })
 onBeforeUnmount(() => { alive = false; sequence++; controller?.abort(); apiKey.value = '' })
 </script>

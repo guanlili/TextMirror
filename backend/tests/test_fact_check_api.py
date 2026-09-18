@@ -17,6 +17,7 @@ from app.models.proofread import ProofreadRecord
 from app.models.role import Permission, Role, RolePermission
 from app.models.user import User
 from app.schemas.fact_check import DAILY_LIMIT, FactCheckReport
+from app.services.fact_check_search import SearchResult
 from app.tasks.fact_check_task import async_fact_check
 
 BASE = "/api/v1/fact-check"
@@ -31,7 +32,7 @@ async def actors(client, monkeypatch):
     monkeypatch.setattr(async_fact_check, "apply_async", dispatch)
     async with async_session_factory() as db:
         users = []
-        for name, codes in (("owner", ["proofread:text", "proofread:document"]),
+        for name, codes in (("owner", ["proofread:text", "proofread:document", "fact-check:run", "fact-check:review", "fact-check:export"]),
                             ("admin", ["admin:settings:edit"]), ("stranger", [])):
             role = Role(name=name, code=uuid.uuid4().hex)
             db.add(role)
@@ -53,6 +54,7 @@ async def actors(client, monkeypatch):
             db.add(config)
         config.enabled, config.api_key, config.sources, config.max_claims = True, encrypt_secret("test-search-key"), [SOURCE], 2
         config.search_provider = "tavily"
+        config.model_config_id = None
         model = await db.scalar(select(LLMConfig).where(LLMConfig.is_active.is_(True)))
         if model is None:
             model = LLMConfig(name=uuid.uuid4().hex, is_active=True)
@@ -141,6 +143,7 @@ async def test_saved_reports_with_and_without_audit_fields_remain_viewable(clien
             assert saved["evidence"][0]["body_sha256"] is None
         else:
             assert saved["search_rounds"][1]["kind"] == "counter"
+            assert all(item["sources"] is None for item in saved["search_rounds"])
             assert saved["evidence"][0]["context_before"] == "前文 "
             assert saved["evidence"][0]["body_sha256"] == hashlib.sha256(fetched.text.encode()).hexdigest()
             assert saved["evidence"][0]["checks"]["event_time"]["status"] == "match"
@@ -151,11 +154,11 @@ async def test_worker_preserves_counter_failure_snapshot_not_success(client, act
 
     from app.services import fact_check, proofread
 
-    extraction = {"claims": [{"original": TEXT, "statement": TEXT}]}
+    extraction = {"claims": [{"segment_id": "s1", "original": TEXT, "statement": TEXT}]}
     provider = SimpleNamespace(chat=AsyncMock(return_value=SimpleNamespace(content=json.dumps(extraction), usage={})),
                                close=AsyncMock())
     monkeypatch.setattr(proofread, "get_llm_provider", AsyncMock(return_value=provider))
-    search = AsyncMock(side_effect=[["https://example.com/news/report"],
+    search = AsyncMock(side_effect=[SearchResult(["https://example.com/news/report"], {}, 1),
                                    fact_check.FactCheckError("SEARCH_AUTH_ERROR", "检索鉴权失败")])
     monkeypatch.setattr(fact_check, "_search", search)
     monkeypatch.setattr(fact_check, "_fetch_page", AsyncMock(return_value=fact_check._Page(
@@ -169,6 +172,10 @@ async def test_worker_preserves_counter_failure_snapshot_not_success(client, act
     assert claim["verdict"] == "insufficient" and not claim["checked"]
     assert [item["status"] for item in claim["search_rounds"]] == ["complete", "failed"]
     assert claim["search_rounds"][1]["error_codes"] == ["SEARCH_AUTH_ERROR"]
+    source = claim["search_rounds"][0]["sources"][0]
+    assert source["status"] == "fetched" and source["evidence_id"] is None
+    assert "尚未完成评估" in source["reason"]
+    assert claim["search_rounds"][1]["sources"] == []
     assert search.await_count == 2 and provider.chat.await_count == 1
     provider.close.assert_awaited_once()
 
@@ -289,7 +296,7 @@ async def test_publish_failure_and_expired_task_are_visible(client, actors):
     actors.dispatch.side_effect = None
     pending = await submit(client, actors)
     async with async_session_factory() as db:
-        await db.execute(update(FactCheckRun).where(FactCheckRun.id == pending["id"]).values(created_at=datetime.now(timezone.utc) - timedelta(minutes=16)))
+        await db.execute(update(FactCheckRun).where(FactCheckRun.id == pending["id"]).values(created_at=datetime.now(timezone.utc) - timedelta(minutes=16), queued_at=datetime.now(timezone.utc) - timedelta(minutes=16)))
         await db.commit()
     response = (await client.get(f"{BASE}/runs/{pending['id']}")).json()
     assert response["status"] == "FAILURE" and response["error_code"] == "TASK_EXPIRED"
@@ -727,3 +734,382 @@ async def test_worker_runtime_error_closes_provider_and_never_retries_another_se
     assert engine.await_count == 1 and engine.call_args.kwargs["search_provider"] == selected
     get_provider.assert_awaited_once_with(native.model.id)
     provider.close.assert_awaited_once()
+
+
+def traced_report():
+    evidence = {"id": "c1-e1", "title": "正文标题", "url": "https://example.com/news/report", "quote": TEXT,
+                "retrieved_at": "2026-09-01T00:00:00Z", "publisher": "发布方", "stance": "supports"}
+    claim = {"id": "c1", "original": TEXT, "start": 0, "end": len(TEXT), "statement": TEXT,
+             "verdict": "supported", "reason": "正文支持", "evidence": [evidence], "checked": True,
+             "search_rounds": [{"kind": "initial", "query": TEXT, "status": "complete", "pages_fetched": 1,
+                                "sources": [{"url": evidence["url"], "title": evidence["title"],
+                                             "status": "fetched", "evidence_id": evidence["id"]}]}]}
+    return FactCheckReport.model_validate({**empty_report(), "claims": [claim],
+        "coverage": {"extracted": 1, "checked": 1, "unverified": 0, "status": "complete"}}).model_dump(mode="json")
+
+
+@pytest.mark.parametrize("sources", [None, []])
+async def test_api_preserves_legacy_none_versus_empty_source_trace(client, actors, sources):
+    report = traced_report()
+    report["claims"][0]["search_rounds"][0]["sources"] = sources
+    run = await submit(client, actors)
+    async with async_session_factory() as db:
+        await db.execute(update(FactCheckRun).where(FactCheckRun.id == run["id"]).values(status="SUCCESS", result_json=report))
+        await db.commit()
+    result = (await client.get(f"{BASE}/runs/{run['id']}")).json()["result"]
+    assert result["claims"][0]["search_rounds"][0]["sources"] == sources
+
+
+@pytest.mark.parametrize("action", ["execute", "deepen"])
+async def test_queued_execute_and_deepen_never_inherit_evidence_trace(client, actors, action):
+    report = traced_report()
+    run = await submit(client, actors, confirm_claims=True)
+    async with async_session_factory() as db:
+        await db.execute(update(FactCheckRun).where(FactCheckRun.id == run["id"]).values(
+            status="WAITING_CONFIRMATION" if action == "execute" else "SUCCESS", result_json=report))
+        await db.commit()
+    request = {"request_id": str(uuid.uuid4())}
+    if action == "execute":
+        request["claims"] = [{"id": "c1", "statement": "确认后的陈述"}]
+    else:
+        request.update(claim_id="c1", allow_external_search=True, supplemental_urls=["https://example.com/news/new"])
+    response = await client.post(f"{BASE}/runs/{run['id']}/{action}", json=request)
+    assert response.status_code == 202, response.text
+    result = response.json()
+    assert result["status"] == "PENDING"
+    claim = result["result"]["claims"][0]
+    assert not claim["evidence"] and not claim["checked"] and claim["verdict"] == "insufficient"
+    assert all(item["sources"] == [] and item["status"] == "pending" and not item["error_codes"]
+               and not item["pages_fetched"] for item in claim["search_rounds"])
+    assert result["result"]["coverage"]["checked"] == 0
+    if action == "execute":
+        assert claim["statement"] == "确认后的陈述" and len(claim["search_rounds"]) == 2
+        assert claim["search_rounds"][0]["query"] == claim["statement"]
+    else:
+        assert result["parent_run_id"] == run["id"]
+        assert (await client.get(f"{BASE}/runs/{run['id']}")).json()["result"] == report
+        assert result["result"]["usage"]["search_queries"] == 0
+
+
+async def test_worker_persists_each_fetch_failure_before_interruption(client, actors, monkeypatch):
+    import json
+
+    from app.services import fact_check, proofread
+
+    urls = [f"https://example.com/news/{i}" for i in range(3)]
+    provider = SimpleNamespace(chat=AsyncMock(return_value=SimpleNamespace(
+        content=json.dumps({"claims": [{"segment_id": "s1", "original": TEXT, "statement": TEXT}]}), usage={})), close=AsyncMock())
+    monkeypatch.setattr(proofread, "get_llm_provider", AsyncMock(return_value=provider))
+    monkeypatch.setattr(fact_check, "_search", AsyncMock(return_value=SearchResult(urls, {}, 1)))
+    fetch = AsyncMock(side_effect=[fact_check._FetchError("UNSAFE_ADDRESS", "页面解析到非公网或保留地址。"),
+                                  RuntimeError("interrupted before second outcome")])
+    monkeypatch.setattr(fact_check, "_fetch_page", fetch)
+    run = await submit(client, actors)
+    async_fact_check.run(run["id"])
+    result = (await client.get(f"{BASE}/runs/{run['id']}")).json()
+    assert result["status"] == "FAILURE" and fetch.await_count == 2
+    claim = result["result"]["claims"][0]
+    sources = claim["search_rounds"][0]["sources"]
+    assert [source["status"] for source in sources] == ["failed", "pending", "pending"]
+    assert sources[0]["error_code"] == "UNSAFE_ADDRESS" and "非公网" in sources[0]["reason"]
+    assert not claim["checked"] and all(source["evidence_id"] is None for source in sources)
+    provider.close.assert_awaited_once()
+
+
+def mock_extraction_backend(monkeypatch, *responses):
+    import json
+
+    from app.services import fact_check, proofread
+
+    provider = SimpleNamespace(chat=AsyncMock(side_effect=[SimpleNamespace(
+        content=response if isinstance(response, str) else json.dumps(response),
+        usage={"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+    ) for response in responses]), close=AsyncMock())
+    search = AsyncMock(return_value=SearchResult([], {}, 1))
+    native_search = AsyncMock(side_effect=AssertionError("Tavily must not use native search"))
+    fetch = AsyncMock(side_effect=AssertionError("No search results should require fetching"))
+    monkeypatch.setattr(proofread, "get_llm_provider", AsyncMock(return_value=provider))
+    monkeypatch.setattr(fact_check, "_search", search)
+    monkeypatch.setattr(fact_check, "search_model", native_search)
+    monkeypatch.setattr(fact_check, "_fetch_page", fetch)
+    return SimpleNamespace(provider=provider, search=search, native_search=native_search, fetch=fetch)
+
+
+@pytest.mark.parametrize("confirm_claims", [False, True])
+@pytest.mark.parametrize("invalid_response", [
+    pytest.param("not valid json", id="invalid-json"),
+    pytest.param({"claims": [{"segment_id": "missing", "original": TEXT, "statement": TEXT}]},
+                 id="invalid-segment-location"),
+])
+async def test_worker_db_cancellation_prevents_extraction_retry(
+    client, actors, monkeypatch, confirm_claims, invalid_response,
+):
+    import json
+
+    from sqlalchemy.orm import Session
+
+    from app.tasks import proofread_task
+
+    backend = mock_extraction_backend(monkeypatch)
+    run = await submit(client, actors, confirm_claims=confirm_claims)
+
+    async def cancel_on_response(**kwargs):
+        with Session(proofread_task._get_sync_engine()) as db:
+            db.execute(update(FactCheckRun).where(FactCheckRun.id == run["id"]).values(status="CANCELLED"))
+            db.commit()
+        return SimpleNamespace(
+            content=invalid_response if isinstance(invalid_response, str) else json.dumps(invalid_response),
+            usage={"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+        )
+
+    backend.provider.chat.side_effect = cancel_on_response
+    async_fact_check.run(run["id"])
+    result = (await client.get(f"{BASE}/runs/{run['id']}")).json()
+    assert result["status"] == "CANCELLED" and result["result"] is None
+    assert result["error_code"] is None and result["finished_at"] is None
+    assert result["progress"] < 100
+    backend.provider.chat.assert_awaited_once()
+    backend.provider.close.assert_awaited_once()
+    backend.search.assert_not_awaited()
+    backend.native_search.assert_not_awaited()
+    backend.fetch.assert_not_awaited()
+
+
+async def test_worker_db_cancellation_prevents_judgment_retry(client, actors, monkeypatch):
+    import json
+
+    from sqlalchemy.orm import Session
+
+    from app.services import fact_check
+    from app.tasks import proofread_task
+
+    backend = mock_extraction_backend(monkeypatch)
+    url = "https://example.com/news/report"
+    backend.search.side_effect = [SearchResult([url], {}, 1), SearchResult([], {}, 1)]
+    backend.fetch.side_effect = None
+    backend.fetch.return_value = fact_check._Page(
+        "", "正文标题", url, TEXT, None, "2026-09-01T00:00:00Z", "发布方",
+    )
+    run = await submit(client, actors, confirm_claims=True)
+    async with async_session_factory() as db:
+        await db.execute(update(FactCheckRun).where(FactCheckRun.id == run["id"]).values(
+            stage="check", result_json=traced_report(), selected_claim_ids=["c1"],
+        ))
+        await db.commit()
+    cancelled_report = {}
+
+    async def cancel_on_response(**kwargs):
+        with Session(proofread_task._get_sync_engine()) as db:
+            stored = db.get(FactCheckRun, run["id"])
+            cancelled_report.update(stored.result_json)
+            stored.status = "CANCELLED"
+            db.commit()
+        return SimpleNamespace(content="not valid json", usage={"total_tokens": 10})
+
+    backend.provider.chat.side_effect = cancel_on_response
+    async_fact_check.run(run["id"])
+    result = (await client.get(f"{BASE}/runs/{run['id']}")).json()
+    assert result["status"] == "CANCELLED" and result["result"] == cancelled_report
+    assert result["error_code"] is None and result["finished_at"] is None
+    assert result["progress"] < 100 and cancelled_report["coverage"]["status"] == "partial"
+    claim, = cancelled_report["claims"]
+    assert not claim["checked"] and not claim["evidence"] and claim["verdict"] == "insufficient"
+    assert [item["status"] for item in claim["search_rounds"]] == ["complete", "complete"]
+    source, = claim["search_rounds"][0]["sources"]
+    assert source["status"] == "fetched" and source["evidence_id"] is None
+    assert cancelled_report["usage"]["search_queries"] == 2
+    assert cancelled_report["usage"]["pages_fetched"] == 1
+    backend.provider.chat.assert_awaited_once()
+    messages = backend.provider.chat.await_args.kwargs["messages"]
+    assert messages[0]["content"].startswith(fact_check.JUDGMENT_PROMPT)
+    assert json.loads(messages[1]["content"])["pages"][0]["text"] == TEXT
+    backend.provider.close.assert_awaited_once()
+    assert backend.search.await_count == 2
+    backend.native_search.assert_not_awaited()
+    backend.fetch.assert_awaited_once_with(url, None)
+
+
+@pytest.mark.parametrize("confirm_claims", [False, True])
+@pytest.mark.parametrize("responses", [
+    pytest.param(("invalid", "invalid"), id="repeated-invalid-locations"),
+    pytest.param(("invalid", "empty"), id="empty-cannot-hide-invalid-locations"),
+    pytest.param(("json", "invalid"), id="json-and-location-share-one-retry"),
+])
+async def test_worker_extraction_location_failure_persists_usage_without_search(
+    client, actors, monkeypatch, confirm_claims, responses,
+):
+    contents = {
+        "invalid": {"claims": [
+            {"segment_id": "missing", "original": TEXT, "statement": TEXT},
+            {"segment_id": "s1", "original": "原文不存在的陈述", "statement": TEXT},
+        ]},
+        "empty": {"claims": []},
+        "json": "not valid json",
+    }
+    backend = mock_extraction_backend(monkeypatch, *(contents[key] for key in responses))
+    run = await submit(client, actors, confirm_claims=confirm_claims)
+    async_fact_check.run(run["id"])
+    result = (await client.get(f"{BASE}/runs/{run['id']}")).json()
+    assert result["status"] == "FAILURE" and result["error_code"] == "EXTRACTION_LOCATION_FAILED"
+    assert result["progress"] < 100 and result["finished_at"] is not None
+    assert "未执行搜索" in result["message"]
+    report = result["result"]
+    assert report["claims"] == []
+    assert report["coverage"]["status"] == "partial" and report["coverage"]["reason"]
+    assert all(report["coverage"][key] == 0 for key in ("extracted", "checked", "unverified"))
+    assert report["usage"] == {
+        "prompt_tokens": 14, "completion_tokens": 6, "total_tokens": 20,
+        "search_queries": 0, "pages_fetched": 0,
+    }
+    async with async_session_factory() as db:
+        stored = await db.get(FactCheckRun, run["id"])
+        assert stored.status == "FAILURE" and stored.error_code == "EXTRACTION_LOCATION_FAILED"
+        assert stored.result_json == report
+    assert backend.provider.chat.await_count == 2
+    backend.search.assert_not_awaited()
+    backend.native_search.assert_not_awaited()
+    backend.fetch.assert_not_awaited()
+    backend.provider.close.assert_awaited_once()
+
+
+@pytest.mark.parametrize("confirm_claims", [False, True])
+@pytest.mark.parametrize("json_retry", [False, True], ids=["first-response-empty", "first-valid-response-empty"])
+async def test_worker_genuine_empty_extraction_completes_without_confirmation_or_search(
+    client, actors, monkeypatch, confirm_claims, json_retry,
+):
+    responses = ["not valid json", {"claims": []}] if json_retry else [{"claims": []}]
+    backend = mock_extraction_backend(monkeypatch, *responses)
+    run = await submit(client, actors, confirm_claims=confirm_claims)
+    async_fact_check.run(run["id"])
+    result = (await client.get(f"{BASE}/runs/{run['id']}")).json()
+    assert result["status"] == "SUCCESS" and result["error_code"] is None
+    assert result["progress"] == 100 and result["finished_at"] is not None
+    assert result["stage"] == "complete"
+    assert result["message"] == "未识别到可核查事实，未执行搜索；不代表全文事实正确。"
+    report = result["result"]
+    assert report["claims"] == [] and report["coverage"]["status"] == "complete"
+    assert all(report["coverage"][key] == 0 for key in ("extracted", "checked", "unverified"))
+    assert report["usage"] == {
+        "prompt_tokens": 7 * len(responses), "completion_tokens": 3 * len(responses),
+        "total_tokens": 10 * len(responses), "search_queries": 0, "pages_fetched": 0,
+    }
+    async with async_session_factory() as db:
+        stored = await db.get(FactCheckRun, run["id"])
+        assert stored.status == "SUCCESS" and stored.result_json == report
+    assert actors.dispatch.call_count == 1 and backend.provider.chat.await_count == len(responses)
+    backend.search.assert_not_awaited()
+    backend.native_search.assert_not_awaited()
+    backend.fetch.assert_not_awaited()
+    backend.provider.close.assert_awaited_once()
+
+
+@pytest.mark.parametrize("confirm_claims", [False, True])
+async def test_worker_rejects_returned_empty_partial_report(client, actors, monkeypatch, confirm_claims):
+    from app.services import fact_check
+
+    backend = mock_extraction_backend(monkeypatch)
+    partial = {**empty_report(), "coverage": {
+        "extracted": 0, "checked": 0, "unverified": 0, "status": "partial", "reason": "原文定位失败",
+    }}
+    engine = AsyncMock(return_value=partial)
+    monkeypatch.setattr(fact_check, "run_fact_check", engine)
+    run = await submit(client, actors, confirm_claims=confirm_claims)
+    async_fact_check.run(run["id"])
+    result = (await client.get(f"{BASE}/runs/{run['id']}")).json()
+    assert result["status"] == "FAILURE" and result["error_code"] == "EXTRACTION_LOCATION_FAILED"
+    assert result["progress"] < 100 and result["finished_at"] is not None
+    assert result["result"] == partial
+    async with async_session_factory() as db:
+        assert (await db.get(FactCheckRun, run["id"])).result_json == partial
+    engine.assert_awaited_once()
+    assert engine.call_args.kwargs["extraction_only"] is confirm_claims
+    backend.provider.chat.assert_not_awaited()
+    backend.search.assert_not_awaited()
+    backend.native_search.assert_not_awaited()
+    backend.fetch.assert_not_awaited()
+    backend.provider.close.assert_awaited_once()
+
+
+@pytest.mark.parametrize("confirm_claims", [False, True])
+async def test_worker_retains_valid_extraction_as_partial_not_failure(client, actors, monkeypatch, confirm_claims):
+    backend = mock_extraction_backend(monkeypatch, {"claims": [
+        {"segment_id": "missing", "original": TEXT, "statement": "无法定位的事实"},
+        {"segment_id": "s1", "original": TEXT, "statement": TEXT},
+    ]})
+    run = await submit(client, actors, confirm_claims=confirm_claims)
+    async_fact_check.run(run["id"])
+    result = (await client.get(f"{BASE}/runs/{run['id']}")).json()
+    assert result["status"] == ("WAITING_CONFIRMATION" if confirm_claims else "SUCCESS")
+    assert result["error_code"] is None
+    report = result["result"]
+    assert report["coverage"]["status"] == "partial" and report["coverage"]["extracted"] == 1
+    assert "跳过" in report["coverage"]["reason"]
+    claim, = report["claims"]
+    assert (claim["original"], claim["start"], claim["end"], claim["statement"]) == (TEXT, 0, len(TEXT), TEXT)
+    assert claim["checked"] is not confirm_claims
+    assert report["coverage"]["checked"] == int(not confirm_claims)
+    assert report["usage"]["total_tokens"] == 10
+    assert report["usage"]["search_queries"] == backend.search.await_count == (0 if confirm_claims else 2)
+    backend.provider.chat.assert_awaited_once()
+    backend.native_search.assert_not_awaited()
+    backend.fetch.assert_not_awaited()
+    backend.provider.close.assert_awaited_once()
+
+
+async def test_worker_duplicate_numbered_claims_confirm_and_execute_with_exact_unicode_offsets(client, actors, monkeypatch):
+    import json
+
+    text = f"1、{TEXT}\n2、{TEXT}"
+    async with async_session_factory() as db:
+        await db.execute(update(ProofreadRecord).where(ProofreadRecord.id == actors.record.id).values(original_text=text))
+        await db.commit()
+    backend = mock_extraction_backend(monkeypatch, {"claims": [
+        {"segment_id": "s1", "original": TEXT, "statement": TEXT},
+        {"segment_id": "s2", "original": TEXT, "statement": TEXT},
+    ]})
+    run = await submit(client, actors, confirm_claims=True)
+    async_fact_check.run(run["id"])
+    waiting = (await client.get(f"{BASE}/runs/{run['id']}")).json()
+    assert waiting["status"] == "WAITING_CONFIRMATION" and waiting["error_code"] is None
+    assert waiting["finished_at"] is None and waiting["progress"] < 100
+    claims = waiting["result"]["claims"]
+    expected_spans = [(2, 2 + len(TEXT)), (5 + len(TEXT), 5 + 2 * len(TEXT))]
+    assert [(claim["start"], claim["end"]) for claim in claims] == expected_spans
+    assert all(text[claim["start"]:claim["end"]] == claim["original"] == TEXT for claim in claims)
+    assert all(not claim["checked"] and not claim["evidence"] for claim in claims)
+    assert len({claim["id"] for claim in claims}) == 2
+    segments = json.loads(backend.provider.chat.call_args.kwargs["messages"][1]["content"])["segments"]
+    assert [segment["id"] for segment in segments] == ["s1", "s2"]
+    assert "".join(segment["text"] for segment in segments) == text
+    assert waiting["result"]["usage"]["search_queries"] == 0
+    backend.search.assert_not_awaited()
+    backend.provider.close.assert_awaited_once()
+
+    edited_statement = "第二条记录中的示例事件发生于2020年。"
+    request = {"request_id": str(uuid.uuid4()), "claims": [
+        {"id": claims[0]["id"], "statement": TEXT},
+        {"id": claims[1]["id"], "statement": edited_statement},
+    ]}
+    response = await client.post(f"{BASE}/runs/{run['id']}/execute", json=request)
+    assert response.status_code == 202, response.text
+    assert response.json()["status"] == "PENDING" and response.json()["stage"] == "check"
+    assert actors.dispatch.call_count == 2
+    async_fact_check.run(run["id"])
+    result = (await client.get(f"{BASE}/runs/{run['id']}")).json()
+    assert result["status"] == "SUCCESS" and result["error_code"] is None and result["progress"] == 100
+    report = result["result"]
+    assert report["coverage"]["status"] == "complete" and report["coverage"]["checked"] == 2
+    assert [(claim["start"], claim["end"]) for claim in report["claims"]] == expected_spans
+    assert all(claim["checked"] and claim["verdict"] == "insufficient" for claim in report["claims"])
+    assert report["claims"][1]["statement"] == edited_statement
+    assert report["claims"][1]["original_statement"] == TEXT
+    assert report["usage"] == {
+        "prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10,
+        "search_queries": 4, "pages_fetched": 0,
+    }
+    assert backend.search.await_count == 4
+    assert backend.search.await_args_list[2].args[0] == edited_statement
+    backend.provider.chat.assert_awaited_once()
+    backend.native_search.assert_not_awaited()
+    backend.fetch.assert_not_awaited()
+    assert backend.provider.close.await_count == 2

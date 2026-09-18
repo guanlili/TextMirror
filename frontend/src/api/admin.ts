@@ -265,7 +265,7 @@ export interface LLMImportResult {
 
 /** 导入大模型配置（conflict: skip=跳过同名 / overwrite=覆盖同名） */
 export function importLLMConfigsApi(data: {
-  configs: Record<string, any>[]
+  configs: Record<string, unknown>[]
   conflict: 'skip' | 'overwrite'
 }): Promise<LLMImportResult> {
   return request.post('/admin/llm-config/import', data)

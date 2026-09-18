@@ -21,6 +21,55 @@ from app.services.format_rules import check_format_rules
 from app.services.llm.base import BaseLLMProvider
 from app.services.llm.openai_compat import OpenAICompatProvider
 
+# 分片缓存：任务重试时跳过已完成的分片，避免重复 LLM 调用
+_CHUNK_CACHE_TTL = 7200
+
+
+class ChunkCache:
+    """Redis -backed 分片结果缓存，支持断点续传。
+
+    以 text_hash + config_id + depth 为维度，每个分片按 chunk_index 存储。
+    读取时校验 chunk_text_hash 防止文本变更导致命中脏数据。
+    """
+
+    def __init__(self, redis_client, text_hash: str, config_id: int, depth: str):
+        self._redis = redis_client
+        self._key = f"textmirror:chunk_cache:{text_hash}:{config_id}:{depth}"
+
+    def get_chunk(self, chunk_index: int, chunk_text_hash: str) -> Optional[Dict[str, Any]]:
+        try:
+            data = self._redis.hget(self._key, str(chunk_index))
+            if not data:
+                return None
+            cached = json.loads(data)
+            if cached.get("text_hash") != chunk_text_hash:
+                return None
+            return cached
+        except Exception:
+            return None
+
+    def set_chunk(self, chunk_index: int, chunk_text_hash: str,
+                  issues: List[Dict[str, Any]], usage: Dict[str, int]):
+        try:
+            payload = json.dumps({
+                "text_hash": chunk_text_hash,
+                "issues": issues,
+                "usage": usage,
+            }, ensure_ascii=False)
+            self._redis.hset(self._key, str(chunk_index), payload)
+            self._redis.expire(self._key, _CHUNK_CACHE_TTL)
+        except Exception as e:
+            logger.warning(f"[分片缓存] 写入失败 chunk={chunk_index}: {e}")
+
+
+def _make_chunk_cache(
+    redis_client, text: str, config_id: int, depth: str,
+) -> Optional[ChunkCache]:
+    """构建分片缓存（Redis 不可用时返回 None，降级为无缓存）"""
+    import hashlib
+    text_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+    return ChunkCache(redis_client, text_hash, config_id or 0, depth)
+
 # 校对类型映射
 PROOFREAD_TYPES = {
     "typo": "错别字",
@@ -181,35 +230,118 @@ class ChunkSpan:
     core_start: int
 
 
-def split_text_into_chunk_spans(text: str, max_chunk_size: int = 800,
-                                overlap: int = 100) -> List[ChunkSpan]:
-    """正文最多 max_chunk_size 字，优先在上限前最近句界/换行切分，否则硬切。
+def split_text_into_chunk_spans(
+    text: str,
+    min_chunk_size: int = 400,
+    max_chunk_size: int = 1500,
+    target_chunk_size: int = 800,
+    overlap: int = 100,
+) -> List[ChunkSpan]:
+    """自适应分片：优先按段落边界切分，合并短段落，拆分长段落。
 
-    上下文直接取原文前 overlap 字；不重建文本，不丢空白，不靠查找片段反推坐标。
+    策略：
+    1. 识别段落边界（连续换行 \\n\\n 或 \\r\\n\\r\\n）
+    2. 短段落合并：连续段落累计 < target_chunk_size 时合并为一片
+    3. 长段落拆分：单段 > max_chunk_size 时按句子边界拆分
+    4. 每片保留前 overlap 字作为上下文重叠
+
     各 core 连续覆盖全文，只有 prefix 重叠。
     """
     if max_chunk_size <= 0 or overlap < 0:
         raise ValueError("max_chunk_size must be positive and overlap non-negative")
     if not text:
         return [ChunkSpan(0, 0, 0)]
+
+    # 识别段落边界：找到所有段落起始位置
+    paragraph_starts = [0]
+    i = 0
+    while i < len(text):
+        # 检测段落边界：连续换行
+        if text[i] in '\r\n':
+            j = i
+            while j < len(text) and text[j] in '\r\n':
+                j += 1
+            if j > i + 1 and j < len(text):  # 至少两个换行符且后面有内容
+                paragraph_starts.append(j)
+            i = j
+        else:
+            i += 1
+
+    # 构建段落列表：(start, end) 表示每段在原文中的位置
+    paragraphs = []
+    for idx, start in enumerate(paragraph_starts):
+        end = paragraph_starts[idx + 1] if idx + 1 < len(paragraph_starts) else len(text)
+        # 段落内容去掉尾部空白
+        content_end = end
+        while content_end > start and text[content_end - 1] in ' \t\r\n':
+            content_end -= 1
+        if content_end > start:  # 非空段落
+            paragraphs.append((start, content_end))
+
+    if not paragraphs:
+        return [ChunkSpan(0, 0, 0)]
+
+    # 将段落组合成片
     spans = []
-    core_start = 0
-    while core_start < len(text):
-        end = min(core_start + max_chunk_size, len(text))
-        if end < len(text):
-            boundary = max(text.rfind(sep, core_start, end) for sep in "。！？；\r\n")
-            if boundary >= core_start:
-                end = boundary + 1
-        spans.append(ChunkSpan(max(0, core_start - overlap), end, core_start))
-        core_start = end
+    chunk_start = 0  # 当前片的起始位置（含 overlap）
+    core_start = 0   # 当前片正文起始位置
+    current_end = paragraphs[0][0]  # 当前片的结束位置
+
+    for para_start, para_end in paragraphs:
+        para_len = para_end - para_start
+
+        # 情况1：单段超过 max_chunk_size，需要拆分
+        if para_len > max_chunk_size:
+            # 先把之前积累的段落成片
+            if current_end > core_start:
+                spans.append(ChunkSpan(max(0, core_start - overlap), current_end, core_start))
+            # 拆分长段落
+            chunk_start = para_start
+            while chunk_start < para_end:
+                end = min(chunk_start + max_chunk_size, para_end)
+                if end < para_end:
+                    # 在窗口内找句子边界
+                    boundary = max(
+                        (text.rfind(sep, chunk_start, end) for sep in "。！？；\r\n"),
+                        default=-1
+                    )
+                    if boundary >= chunk_start:
+                        end = boundary + 1
+                spans.append(ChunkSpan(max(0, chunk_start - overlap), end, chunk_start))
+                chunk_start = end
+            core_start = chunk_start
+            current_end = chunk_start
+            continue
+
+        # 情况2：加入当前段落后是否超限
+        new_end = para_end
+        chunk_len = new_end - core_start
+
+        if chunk_len <= target_chunk_size:
+            # 可以加入当前片段
+            current_end = new_end
+        elif chunk_len <= max_chunk_size and core_start == paragraphs[0][0] and len(spans) == 0:
+            # 第一片且不超过 max，可以放宽到 max_chunk_size
+            current_end = new_end
+        else:
+            # 超限，先结束当前片，开始新片
+            if current_end > core_start:
+                spans.append(ChunkSpan(max(0, core_start - overlap), current_end, core_start))
+            core_start = para_start
+            current_end = para_end
+
+    # 处理最后一片
+    if current_end > core_start:
+        spans.append(ChunkSpan(max(0, core_start - overlap), current_end, core_start))
+
     return spans
 
 
-def split_text_into_chunks(text: str, max_chunk_size: int = 800,
+def split_text_into_chunks(text: str, max_chunk_size: int = 1500,
                            overlap: int = 100) -> List[str]:
     """兼容公开 API；每片正文加前置上下文始终为原文的精确切片。"""
     return [text[span.start:span.end]
-            for span in split_text_into_chunk_spans(text, max_chunk_size, overlap)]
+            for span in split_text_into_chunk_spans(text, max_chunk_size=max_chunk_size, overlap=overlap)]
 
 
 async def load_global_words() -> Dict[str, List[Dict]]:
@@ -443,6 +575,15 @@ def _report_progress(on_progress: Optional[Callable[[int, str], None]], percent:
         logger.warning(f"[校对] 进度回调失败（忽略）: {e}")
 
 
+def _report_chunk_done(callback: Callable, chunk_index: int,
+                       issues: List[Dict[str, Any]], total_issues: int):
+    """分片完成回调：上报该分片的问题列表及累计问题数，供调用方流式推送。"""
+    try:
+        callback(chunk_index, issues, total_issues)
+    except Exception as e:
+        logger.warning(f"[校对] 分片回调失败（忽略）: {e}")
+
+
 async def _gather_preparation(user_id: Optional[int], domain: str, config_id: Optional[int]):
     """审校准备阶段：词库 + 领域规则 + LLM Provider 三路并行"""
     (global_words, user_words), domain_rules, provider = await asyncio.gather(
@@ -561,6 +702,8 @@ async def proofread_text(
     check_types: Optional[List[str]] = None,
     depth: str = "standard",
     on_progress: Optional[Callable[[int, str], None]] = None,
+    chunk_cache: Optional[ChunkCache] = None,
+    on_chunk_done: Optional[Callable[[int, List[Dict[str, Any]], int], None]] = None,
 ) -> Dict[str, Any]:
     """
     执行文本校对（check_types 已废弃：不再影响审校范围，仅为兼容旧调用保留入参）
@@ -646,14 +789,40 @@ async def proofread_text(
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     semaphore = asyncio.Semaphore(min(4, len(chunks)))
     done_chunks = 0
+    streamed_issue_count = 0
     # 进度映射：分片全部完成 → 70%，留 72~95 给自检/后处理（任务侧再映射到自己的进度条）
     _PROOFREAD_END_PCT = 70
     _SELF_CHECK_PCT = 72
 
     async def _process_chunk(idx: int, chunk: str):
-        nonlocal done_chunks
+        nonlocal done_chunks, streamed_issue_count
+        import hashlib as _hashlib
+        chunk_text_hash = _hashlib.sha256(chunk.encode()).hexdigest()[:16]
+
         async with semaphore:
             cstart = time.perf_counter()
+
+            if chunk_cache:
+                cached = await asyncio.to_thread(chunk_cache.get_chunk, idx, chunk_text_hash)
+                if cached is not None:
+                    issues = cached["issues"]
+                    for issue in issues:
+                        issue["chunk_index"] = idx
+                    usage = cached.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
+                    done_chunks += 1
+                    streamed_issue_count += len(issues)
+                    if len(chunks) > 1:
+                        _report_progress(
+                            on_progress,
+                            min(int(done_chunks / len(chunks) * _PROOFREAD_END_PCT), _PROOFREAD_END_PCT),
+                            f"已完成 {done_chunks}/{len(chunks)} 段文本校对",
+                        )
+                    if on_chunk_done:
+                        _report_chunk_done(on_chunk_done, idx, issues, streamed_issue_count)
+                    logger.info(f"[校对] 分片 {idx+1}/{len(chunks)} 缓存命中 "
+                                f"耗时={time.perf_counter()-cstart:.3f}s")
+                    return issues, usage
+
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": PROOFREAD_USER_PROMPT.format(text=chunk)},
@@ -668,14 +837,22 @@ async def proofread_text(
             for issue in issues:
                 issue["chunk_index"] = idx
             done_chunks += 1
+            streamed_issue_count += len(issues)
             if len(chunks) > 1:
                 _report_progress(
                     on_progress,
                     min(int(done_chunks / len(chunks) * _PROOFREAD_END_PCT), _PROOFREAD_END_PCT),
                     f"已完成 {done_chunks}/{len(chunks)} 段文本校对",
                 )
+            if on_chunk_done:
+                _report_chunk_done(on_chunk_done, idx, issues, streamed_issue_count)
             logger.info(f"[校对] 分片 {idx+1}/{len(chunks)} 长度={len(chunk)} "
                         f"耗时={time.perf_counter()-cstart:.2f}s tokens={response.usage}")
+
+            if chunk_cache:
+                await asyncio.to_thread(chunk_cache.set_chunk, idx, chunk_text_hash,
+                                        issues, dict(response.usage))
+
             return issues, response.usage
 
     try:
@@ -711,7 +888,10 @@ async def proofread_text(
         will_self_check = (depth == "deep") or _needs_self_check(merged_early)
         if will_self_check:
             _report_progress(on_progress, _SELF_CHECK_PCT, "正在二次复查遗漏问题...")
-        self_check_extra = await self_check_pass(text, merged_early, provider, force=(depth == "deep"))
+        self_check_extra = await self_check_pass(
+            text, merged_early, provider, force=(depth == "deep"),
+            chunk_spans=chunk_spans, chunks=chunks,
+        )
         all_issues.extend(self_check_extra)
         for key in total_usage:
             pass  # 自检用量计入 provider 返回但保持简单，不计入展示
@@ -817,11 +997,16 @@ def _check_suggestion_effective(issues: List[Dict[str, Any]]) -> List[Dict[str, 
 
 
 _SELF_CHECK_TEXT_LIMIT = 3000
+_SELF_CHECK_MAX_CHUNK_CALLS = 3
 
 
 def _issue_search_span(text: str, issue: Dict[str, Any],
                        chunk_spans: Optional[List[ChunkSpan]]) -> Tuple[int, int]:
     if issue.get("source") == "self_check":
+        if chunk_spans is not None and "chunk_index" in issue:
+            idx = issue["chunk_index"]
+            if type(idx) is int and 0 <= idx < len(chunk_spans):
+                return chunk_spans[idx].start, chunk_spans[idx].end
         return 0, min(len(text), _SELF_CHECK_TEXT_LIMIT)
     if issue.get("source") in ("dict_scan", "consistency", "format_rule"):
         return 0, len(text)
@@ -984,20 +1169,86 @@ async def self_check_pass(
     issues: List[Dict[str, Any]],
     provider,
     force: bool = False,
+    chunk_spans: Optional[List[ChunkSpan]] = None,
+    chunks: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     二次自检：把第一轮问题清单喂回 LLM 复查，返回补充遗漏的 issue。
+    长文档按分片聚焦复查——优先复查 error 密集的分片，而非只看开头 3000 字。
     异常自捕获——二次检查失败不影响第一轮结果（尽力而为的增益层）。
     """
     if not force and not _needs_self_check(issues):
         return []
-    # 最多带 15 条进 prompt（过长稀释注意力）
+
+    use_chunk_mode = chunk_spans is not None and chunks and len(chunks) > 1
+    if use_chunk_mode:
+        return await _self_check_chunks(text, issues, provider, chunk_spans, chunks)
+
+    return await _self_check_single(text, issues, provider)
+
+
+async def _self_check_single(
+    text: str,
+    issues: List[Dict[str, Any]],
+    provider,
+) -> List[Dict[str, Any]]:
+    """短文档/单分片：整段送 LLM 复查（保持原有行为）"""
     sample = issues[:15]
     issues_desc = "\n".join(
         f"{n}. 原文「{i.get('original', '')[:40]}」→ 建议「{i.get('suggestion', '')[:40]}」（{i.get('type')}）"
         for n, i in enumerate(sample, 1)
     )
     prompt = SELF_CHECK_PROMPT.format(text=text[:_SELF_CHECK_TEXT_LIMIT], issues=issues_desc)
+    return await _run_self_check_call(prompt, provider, chunk_index=None)
+
+
+async def _self_check_chunks(
+    text: str,
+    issues: List[Dict[str, Any]],
+    provider,
+    chunk_spans: List[ChunkSpan],
+    chunks: List[str],
+) -> List[Dict[str, Any]]:
+    """长文档分片聚焦复查：按 error 密度选分片，逐片送 LLM 复查"""
+    from collections import defaultdict
+
+    chunk_issues: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+    for issue in issues:
+        idx = issue.get("chunk_index")
+        if isinstance(idx, int) and 0 <= idx < len(chunks):
+            chunk_issues[idx].append(issue)
+
+    if not chunk_issues:
+        return []
+
+    def _chunk_score(idx: int) -> int:
+        return sum(1 for i in chunk_issues[idx] if i.get("severity") == "error")
+
+    ranked = sorted(chunk_issues.keys(), key=_chunk_score, reverse=True)
+    targets = ranked[:_SELF_CHECK_MAX_CHUNK_CALLS]
+
+    all_additions: List[Dict[str, Any]] = []
+    for idx in targets:
+        chunk_text = chunks[idx]
+        chunk_issue_list = chunk_issues[idx][:15]
+        issues_desc = "\n".join(
+            f"{n}. 原文「{i.get('original', '')[:40]}」→ 建议「{i.get('suggestion', '')[:40]}」（{i.get('type')}）"
+            for n, i in enumerate(chunk_issue_list, 1)
+        )
+        prompt = SELF_CHECK_PROMPT.format(text=chunk_text, issues=issues_desc)
+        additions = await _run_self_check_call(prompt, provider, chunk_index=idx)
+        all_additions.extend(additions)
+        logger.info(f"[自检] 分片 {idx+1}/{len(chunks)} 复查补充 {len(additions)} 条遗漏")
+
+    return all_additions
+
+
+async def _run_self_check_call(
+    prompt: str,
+    provider,
+    chunk_index: Optional[int],
+) -> List[Dict[str, Any]]:
+    """执行单次自检 LLM 调用，返回带 source/chunk_index 标记的 additions"""
     from app.services.llm.usage import usage_operation
 
     try:
@@ -1008,17 +1259,15 @@ async def self_check_pass(
                 thinking=False,
             )
         extra = parse_proofread_result(response.content)
-        # 只取 review=new 的项（LLM 复核意见不覆盖第一轮结果）
         additions = [
             {**i, "source": "self_check"} for i in extra
             if i.get("review") == "new" and i.get("original")
         ]
-        # 去掉 review 标记避免污染下游契约
         for a in additions:
             a.pop("review", None)
-        if additions:
-            logger.info(f"[自检] 二次复查补充 {len(additions)} 条遗漏")
+            if chunk_index is not None:
+                a["chunk_index"] = chunk_index
         return additions
     except Exception as e:
-        logger.warning(f"[自检] 二次复查失败（跳过，不影响第一轮结果）: {e}")
+        logger.warning(f"[自检] 复查失败（跳过，不影响第一轮结果）: {e}")
         return []

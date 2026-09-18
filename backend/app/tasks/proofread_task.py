@@ -356,16 +356,36 @@ def async_proofread_document(self, db_task_id: int):
                 db_task.message = message
                 session.commit()
 
+            # 分片完成回调：逐片写入部分问题列表，SSE 端点读取后推送给前端
+            _partial_issues: list = []
+
+            def _on_chunk_done(chunk_index: int, issues: list, total_issues: int):
+                _partial_issues.extend(issues)
+                result_payload = db_task.result_json or {}
+                result_payload["partial_issues"] = list(_partial_issues)
+                result_payload["partial_chunks"] = min(len(_partial_issues) and (chunk_index + 1), len(_partial_issues))
+                result_payload["partial_total"] = total_issues
+                db_task.result_json = result_payload
+                session.commit()
+
             try:
-                from app.services.proofread import proofread_text
+                from app.services.proofread import proofread_text, _make_chunk_cache
 
                 started_at = db_task.started_at
                 if started_at.tzinfo is None:
                     started_at = started_at.replace(tzinfo=timezone.utc)
                 remaining = _DOCUMENT_TIME_BUDGET_S - (datetime.now(timezone.utc) - started_at).total_seconds()
+
+                chunk_cache = None
+                try:
+                    chunk_cache = _make_chunk_cache(_get_sync_redis(), text, config_id, depth)
+                except Exception as e:
+                    logger.warning(f"[Task {celery_task_id}] 分片缓存初始化失败（降级为无缓存）: {e}")
+
                 result = _run_async(asyncio.wait_for(proofread_text(
                     text=text, domain=domain, config_id=config_id, user_id=user_id,
                     depth=depth, on_progress=_on_proofread_progress,
+                    chunk_cache=chunk_cache, on_chunk_done=_on_chunk_done,
                 ), timeout=max(0, remaining)))
             except (TimeoutError, SoftTimeLimitExceeded):
                 db_task.status = "FAILURE"

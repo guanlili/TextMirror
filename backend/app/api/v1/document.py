@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import os
+import tempfile
 import uuid
 from collections import OrderedDict
 from threading import Lock
@@ -13,6 +14,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from loguru import logger
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -36,9 +38,12 @@ from app.core.task_quota import refund_document_quota
 from app.models.proofread import ProofreadRecord
 from app.models.uploaded_document import UploadedDocument
 from app.schemas.document import (
+    DocumentExtractedTextResponse,
     DocumentProofreadRequest,
     DocumentProofreadResponse,
     DocumentUploadResponse,
+    ExportReportRequest,
+    ExportRevisedTextRequest,
 )
 from app.schemas.review import DocumentReviewExportRequest
 from app.services.audit_log import record_audit_log
@@ -199,6 +204,156 @@ async def export_document_review(
     )
 
 
+def _generate_revised_text_docx(text: str, output_path: str) -> None:
+    """将修订文本写入 Word 文档"""
+    from docx import Document
+    document = Document()
+    for line in text.split("\n"):
+        document.add_paragraph(line)
+    document.save(output_path)
+
+
+def _generate_report_docx(data: ExportReportRequest, output_path: str) -> None:
+    """将问题报告写入 Word 文档"""
+    from docx import Document
+    from docx.shared import RGBColor, Pt
+
+    document = Document()
+
+    # 标题
+    title = document.add_heading(f"文档校对报告 - {data.filename}", level=1)
+    title.runs[0].font.size = Pt(16)
+
+    # 状态摘要
+    status_map = {"completed": "已完成", "partial": "部分完成", "unknown": "未记录"}
+    status_text = status_map.get(data.status, data.status)
+    if data.status == "partial":
+        status_text += "（不能视为全文无误）"
+
+    document.add_paragraph(f"审校状态: {status_text}")
+    document.add_paragraph(f"共发现 {data.total_issues} 个问题")
+    document.add_paragraph(f"已接受: {data.accepted_count}  已忽略: {data.ignored_count}  待处理: {data.pending_count}")
+
+    # 覆盖范围
+    if data.coverage:
+        document.add_paragraph(f"完成范围: {data.coverage.completed_chunks}/{data.coverage.total_chunks} 段")
+        for chunk in data.coverage.failed_chunks:
+            document.add_paragraph(f"未审范围: 第 {chunk.start + 1}–{chunk.end} 字（{chunk.error_code}）")
+
+    document.add_paragraph("")
+
+    # 问题列表
+    severity_labels = {"critical": "严重", "major": "重要", "minor": "轻微", "suggestion": "建议"}
+    type_labels = {
+        "typo": "错别字", "grammar": "语法", "punctuation": "标点",
+        "formatting": "格式", "terminology": "术语", "style": "风格",
+        "fact": "事实", "other": "其他",
+    }
+    status_labels = {"accepted": "已接受", "ignored": "已忽略", "pending": "待处理"}
+
+    for i, issue in enumerate(data.issues, 1):
+        status_label = status_labels.get(issue.status, issue.status)
+        type_label = type_labels.get(issue.type, issue.type)
+        severity_label = severity_labels.get(issue.severity, issue.severity)
+
+        # 问题标题行
+        heading = document.add_paragraph()
+        heading.add_run(f"{i}. [{status_label}] ").bold = True
+        heading.add_run(f"[{type_label}] {severity_label}")
+
+        # 位置
+        if issue.context:
+            document.add_paragraph(f"   位置: {issue.context}")
+
+        # 原文
+        original_para = document.add_paragraph()
+        original_para.add_run("   原文: ").bold = True
+        original_run = original_para.add_run(issue.original)
+        original_run.font.color.rgb = RGBColor(0xCC, 0, 0)
+
+        # 建议
+        suggestion_para = document.add_paragraph()
+        suggestion_para.add_run("   建议: ").bold = True
+        suggestion_run = suggestion_para.add_run(issue.suggestion)
+        suggestion_run.font.color.rgb = RGBColor(0, 0x80, 0)
+
+        # 说明
+        if issue.explanation:
+            document.add_paragraph(f"   说明: {issue.explanation}")
+
+        document.add_paragraph("")
+
+    document.save(output_path)
+
+
+@router.post("/{file_id}/export-revised-text", summary="导出修订文本为 Word")
+async def export_revised_text(
+    file_id: str,
+    request: ExportRevisedTextRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
+):
+    """将前端编辑器的修订文本导出为 Word 文档"""
+    if current_user is None:
+        from app.services.guest_policy import get_guest_policy
+        await reject_guest_if_disabled(http_request)
+        if not (await get_guest_policy())["allow_upload"]:
+            raise HTTPException(403, "当前未开放游客文档功能，请登录后使用")
+    file_info = await _load_document_info(file_id, db)
+    await _check_document_ownership(file_info, current_user, db)
+
+    tmp_dir = tempfile.TemporaryDirectory(prefix="textmirror-revised-")
+    output_path = os.path.join(tmp_dir.name, "revised.docx")
+    try:
+        await asyncio.to_thread(_generate_revised_text_docx, request.text, output_path)
+        base = os.path.splitext(request.filename)[0] if "." in request.filename else request.filename
+        name = sanitize_filename(f"{base}.docx")
+        return FileResponse(
+            output_path,
+            filename=name,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            background=BackgroundTask(tmp_dir.cleanup),
+        )
+    except Exception as exc:
+        tmp_dir.cleanup()
+        raise HTTPException(500, f"Word 生成失败: {exc}") from exc
+
+
+@router.post("/{file_id}/export-report", summary="导出问题报告为 Word")
+async def export_report(
+    file_id: str,
+    request: ExportReportRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
+):
+    """将问题报告导出为 Word 文档"""
+    if current_user is None:
+        from app.services.guest_policy import get_guest_policy
+        await reject_guest_if_disabled(http_request)
+        if not (await get_guest_policy())["allow_upload"]:
+            raise HTTPException(403, "当前未开放游客文档功能，请登录后使用")
+    file_info = await _load_document_info(file_id, db)
+    await _check_document_ownership(file_info, current_user, db)
+
+    tmp_dir = tempfile.TemporaryDirectory(prefix="textmirror-report-")
+    output_path = os.path.join(tmp_dir.name, "report.docx")
+    try:
+        await asyncio.to_thread(_generate_report_docx, request, output_path)
+        base = os.path.splitext(request.filename)[0] if "." in request.filename else request.filename
+        name = sanitize_filename(f"{base}.docx")
+        return FileResponse(
+            output_path,
+            filename=name,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            background=BackgroundTask(tmp_dir.cleanup),
+        )
+    except Exception as exc:
+        tmp_dir.cleanup()
+        raise HTTPException(500, f"Word 生成失败: {exc}") from exc
+
+
 @router.post("/upload", response_model=DocumentUploadResponse, summary='上传文档并提取文本')
 async def upload_document(
     file: UploadFile = File(...),
@@ -332,7 +487,33 @@ async def upload_document(
         file_ext=file_ext,
         text_length=len(extracted_text),
         text_preview=text_preview,
-        extracted_text=extracted_text,
+    )
+
+
+@router.get("/{file_id}/extracted-text", response_model=DocumentExtractedTextResponse, summary='获取文档提取的文本')
+async def get_extracted_text(
+    file_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
+):
+    """
+    按 file_id 获取上传时提取的全文，供前端会话恢复使用。
+    归属校验：登录用户只能取自己的文件，游客文件仅同 IP 可取。
+    """
+    file_info = await _load_document_info(file_id, db)
+    await _check_document_ownership(file_info, current_user, db)
+
+    extracted_html = ""
+    try:
+        extracted_html = await asyncio.to_thread(
+            extract_html_from_file, file_info["file_path"], file_info["file_ext"], file_info["text"]
+        )
+    except Exception as e:
+        logger.warning(f"HTML格式提取失败，将降级使用纯文本: {e}")
+
+    return DocumentExtractedTextResponse(
+        file_id=file_id,
+        extracted_text=file_info["text"],
         extracted_html=extracted_html,
     )
 
@@ -365,14 +546,22 @@ async def document_proofread(
     text = file_info["text"]
     filename = file_info["filename"]
 
-    # 调用校对服务
+    # 调用校对服务（同步路径加超时保护，避免 LLM 卡住时请求无限挂起）
     try:
-        result = await proofread_text(
-            text=text,
-            domain=request.domain,
-            config_id=request.config_id,
-            user_id=current_user.id if current_user else None,
-            depth=request.depth,
+        async with asyncio.timeout(120):
+            result = await proofread_text(
+                text=text,
+                domain=request.domain,
+                config_id=request.config_id,
+                user_id=current_user.id if current_user else None,
+                depth=request.depth,
+            )
+    except TimeoutError:
+        logger.warning(f"文档同步校对超时(120s): {filename}, text_length={len(text)}")
+        await refund_document_quota(refund_id, quota_key)
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="校对耗时过长，请改用异步校对或缩小文档范围",
         )
     except RuntimeError as e:
         import traceback
