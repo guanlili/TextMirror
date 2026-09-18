@@ -691,10 +691,10 @@ async def run_fact_check(
     await progress(10, f"已提取{len(report['claims'])}条可定位陈述，本次核查{budget}条。", snapshot())
     if budget and search_provider == "tavily" and not api_key.strip():
         raise FactCheckError("SEARCH_AUTH_ERROR", "未配置 Tavily API 密钥。")
-    search_successes = 0
     for index, claim in enumerate(known[claim_id] for claim_id in chosen):
         pages, visited, technical = [], {}, []
         fetched_by_url, source_links = {}, []
+        claim_search_successes = 0
         for round_index, search_round in enumerate(claim["search_rounds"]):
             if search_round["kind"] == "followup":
                 focus = "统计口径 单位 数据修订" if re.search(r"\d|增长|人口|比例|金额", claim["statement"]) else "事件时间 原始公告 引用出处"
@@ -719,7 +719,7 @@ async def run_fact_check(
                 usage["search_queries"] += searched.search_queries - 1
                 for key, count in searched.usage.items():
                     usage[key] += count
-                search_successes += 1
+                claim_search_successes += 1
             except (NativeSearchError, FactCheckError) as exc:
                 search_round["status"] = "failed"
                 search_round["error_codes"].append(exc.code)
@@ -790,7 +790,7 @@ async def run_fact_check(
             search_round["status"] = "partial" if search_round["error_codes"] else "complete"
             state = "未完整完成" if search_round["error_codes"] else "已完成检索与抓取，不代表已发现反证或证实原文"
             await progress(int(base + 85 / budget * 0.3), f"第{index + 1}条事实的{label}{state}。", snapshot())
-        if not search_successes and technical:
+        if not claim_search_successes and technical:
             raise FactCheckError("SEARCH_PROVIDER_ERROR", "检索连续失败，无法完成事实核查。")
         # Always gather both rounds before ONE judgment; no first-round affirmative shortcut.
         invalid = False
