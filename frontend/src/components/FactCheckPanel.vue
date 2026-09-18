@@ -376,7 +376,7 @@ function formatDate(value: string) {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN')
 }
-watch(expanded, value => { if (value) void loadPanel(); else invalidate() })
+watch(expanded, value => { if (value) void loadPanel(); else invalidate() }, { flush: 'sync' })
 watch(() => [props.recordId, props.sourceText, user.token], () => {
   invalidate()
   options.value = null
@@ -389,7 +389,7 @@ watch(() => [props.recordId, props.sourceText, user.token], () => {
   errorKind.value = ''
   authExpired.value = false
   if (expanded.value) void loadPanel()
-})
+}, { flush: 'sync' })
 onBeforeUnmount(() => { alive = false; invalidate() })
 </script>
 

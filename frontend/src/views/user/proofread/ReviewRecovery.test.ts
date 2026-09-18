@@ -21,7 +21,7 @@ vi.mock('@/api/review', () => ({
   getReviewApi: vi.fn(), saveReviewApi: vi.fn(), createReviewVersionApi: vi.fn(),
   exportReviewApi: vi.fn(), exportDocumentReviewApi: vi.fn(), getReviewErrorDetail: () => '请求失败',
 }))
-vi.mock('@/api/document', () => ({ uploadDocumentApi: vi.fn() }))
+vi.mock('@/api/document', () => ({ uploadDocumentApi: vi.fn(), fetchExtractedTextApi: vi.fn(), exportRevisedTextApi: vi.fn(), exportReportApi: vi.fn() }))
 vi.mock('@/api/tasks', () => ({ asyncDocumentProofreadApi: vi.fn(), streamTaskStatus: vi.fn(), cancelTaskApi: vi.fn() }))
 vi.mock('@/api/polish', () => ({ getAvailableModelsCached: vi.fn().mockResolvedValue({ models: [] }) }))
 vi.mock('@/api/history', () => ({ listHistoryApi: vi.fn(), getHistoryDetailApi: vi.fn(), deleteHistoryApi: vi.fn() }))
@@ -170,6 +170,7 @@ beforeEach(() => {
   vi.mocked(ReviewApi.getReviewApi).mockImplementation(async id => response(id))
   vi.mocked(ProofreadApi.textProofreadApi).mockResolvedValue(result() as never)
   vi.mocked(DocumentApi.uploadDocumentApi).mockResolvedValue({ file_id: 'file-new', filename: '稿件.docx', extracted_text: source, text_length: 4 } as never)
+  vi.mocked(DocumentApi.fetchExtractedTextApi).mockResolvedValue({ file_id: 'file-new', extracted_text: source, extracted_html: '' } as never)
   vi.mocked(TasksApi.asyncDocumentProofreadApi).mockResolvedValue({ task_id: 'task-new' } as never)
   vi.mocked(TasksApi.streamTaskStatus).mockResolvedValue({ status: 'SUCCESS', result: result() } as never)
   vi.mocked(HistoryApi.listHistoryApi).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })

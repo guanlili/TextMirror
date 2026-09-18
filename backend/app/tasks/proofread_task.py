@@ -369,7 +369,7 @@ def async_proofread_document(self, db_task_id: int):
                 session.commit()
 
             try:
-                from app.services.proofread import proofread_text, _make_chunk_cache
+                from app.services.proofread import _make_chunk_cache, proofread_text
 
                 started_at = db_task.started_at
                 if started_at.tzinfo is None:

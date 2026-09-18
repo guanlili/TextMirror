@@ -176,7 +176,7 @@ async def test_progress_reported_per_chunk(monkeypatch):
 
     monkeypatch.setattr("app.services.proofread._gather_preparation", _fake_prep_result())
 
-    text = "甲方应按约定支付款项，双方权利义务明确。" * 60  # ~1020 字 → 2 片
+    text = "甲方应按约定支付款项，双方权利义务明确。" * 100  # ~2000 字 > max_chunk_size(1500) → 2 片
     result = await proofread_text(text=text, depth="deep", on_progress=on_progress)
     assert result["chunks_count"] >= 2
     assert any("段文本校对" in msg for _, msg in events)
