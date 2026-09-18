@@ -86,6 +86,73 @@ async def test_incomplete_response_still_keeps_usage(captured):
         await provider.close()
 
 
+@pytest.mark.parametrize("finish", ["stop", "length"])
+async def test_chat_response_format_preserves_finish_reason_and_usage(captured, finish):
+    payloads = []
+    usage = {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}
+
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json=chat_data(usage, finish))
+
+    provider = provider_with(handler)
+    try:
+        result = await provider.chat([], response_format={"type": "json_object"})
+        assert payloads == [{
+            "model": "test-model", "messages": [], "temperature": 0.3, "stream": False,
+            "response_format": {"type": "json_object"},
+        }]
+        assert result.content == "[]"
+        assert result.model == "test-model"
+        assert result.finish_reason == finish
+        assert result.usage == usage
+        assert len(captured) == 1
+        assert captured[0]["total_tokens"] == 6
+        assert captured[0]["outcome"] == ("success" if finish == "stop" else "incomplete")
+    finally:
+        await provider.close()
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"response_format": None}])
+async def test_chat_omits_unspecified_response_format(captured, kwargs):
+    payloads = []
+
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json=chat_data())
+
+    provider = provider_with(handler)
+    try:
+        await provider.chat([], **kwargs)
+        assert payloads == [{
+            "model": "test-model", "messages": [], "temperature": 0.3, "stream": False,
+        }]
+    finally:
+        await provider.close()
+
+
+async def test_chat_rejected_response_format_is_not_retried(captured):
+    payloads = []
+
+    def handler(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(400, text="response_format is not supported")
+
+    provider = provider_with(handler, retries=3)
+    try:
+        with pytest.raises(RuntimeError, match="400: response_format is not supported"):
+            await provider.chat([], response_format={"type": "json_object"})
+        assert payloads == [{
+            "model": "test-model", "messages": [], "temperature": 0.3, "stream": False,
+            "response_format": {"type": "json_object"},
+        }]
+        assert len(captured) == 1
+        assert captured[0]["outcome"] == "error"
+        assert captured[0]["total_tokens"] is None
+    finally:
+        await provider.close()
+
+
 async def test_stream_usage_only_frame_is_not_counted_twice(captured):
     chunks = [
         {"choices": [{"delta": {"content": "hello"}, "finish_reason": None}]},

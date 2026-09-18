@@ -263,7 +263,7 @@ const feishuSettings = reactive<FeishuSettingsConfig>({
 
 // 用户安全设置
 const securitySettings = reactive<SecuritySettingsConfig>({
-  default_password: 'admin123',
+  default_password: '',
 })
 
 onMounted(async () => {
@@ -285,6 +285,10 @@ onMounted(async () => {
   }
   if (securityRes.status === 'fulfilled') {
     Object.assign(securitySettings, securityRes.value)
+  }
+  // 全部失败时给出提示
+  if ([siteRes, basicRes, feishuRes, securityRes].every(r => r.status === 'rejected')) {
+    ElMessage.error('配置加载失败，请刷新页面重试')
   }
 })
 

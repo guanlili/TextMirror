@@ -94,6 +94,14 @@ def _extract_doc(file_path: str) -> str:
     """
     import platform
 
+    # Linux 前置检查：如果没有 antiword 也没有 libreoffice，直接快速失败
+    if platform.system() == "Linux":
+        if not shutil.which("antiword") and not shutil.which("libreoffice") and not shutil.which("soffice"):
+            raise ValueError(
+                "服务器未安装 .doc 提取工具（antiword 或 LibreOffice），"
+                "请联系管理员安装，或将文件另存为 .docx 格式后重新上传。"
+            )
+
     # 方式0（Windows）：使用 Word/WPS COM 自动化转换为 docx 再提取
     if platform.system() == "Windows":
         try:

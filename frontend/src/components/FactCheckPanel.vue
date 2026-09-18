@@ -2,6 +2,7 @@
   <section class="fact-check-panel" data-testid="fact-check-panel" aria-label="事实核查">
     <header class="panel-heading">
       <div><strong>事实核查</strong><span class="muted heading-note">独立证据报告 · 按需联网</span></div>
+      <router-link v-if="user.isLoggedIn && user.hasPermission('fact-check:run')" :to="active ? `/fact-check/${active.id}` : { path: '/fact-check', query: recordId ? { record_id: recordId } : {} }">进入事实核查工作台</router-link>
       <el-button text :aria-expanded="expanded" aria-controls="fact-check-content" data-testid="fact-check-toggle" @click="expanded = !expanded">
         {{ expanded ? '收起事实核查' : '展开事实核查' }}
       </el-button>
@@ -42,7 +43,7 @@
       <div class="history-row">
         <span class="muted">最近 20 次</span>
         <el-select :model-value="active?.id" aria-label="事实核查历史" placeholder="暂无核查历史" :disabled="busy === 'load' || busy === 'start' || busy === 'cancel'" @update:model-value="selectRun">
-          <el-option v-for="run in history" :key="run.id" :value="run.id" :label="`#${run.id} · ${formatDate(run.created_at)} · ${modeLabels[run.mode]} · ${providerLabels[run.provider] || '未记录'} · ${runStatusLabel(run)}`" />
+          <el-option v-for="run in history" :key="run.id" :value="run.id" :label="`#${run.id} · ${formatDate(run.created_at)} · ${modeLabels[run.mode]} · ${providerLabels[run.provider] || '未记录'} · ${runStatusLabel(run, true)}`" />
         </el-select>
         <el-button v-if="otherRunning" @click="selectRun(otherRunning.id)">查看运行中任务</el-button>
       </div>
@@ -54,20 +55,20 @@
           <el-button v-if="isRunning(active)" :disabled="busy === 'cancel' || busy === 'start' || authExpired" :loading="busy === 'cancel'" data-testid="fact-check-cancel" @click="cancelRun">取消核查</el-button>
         </div>
         <p class="muted" data-testid="fact-check-run-provider">本次搜索服务：{{ providerLabels[active.provider] || '未记录' }}</p>
-        <p v-if="active.message" :class="active.status === 'FAILURE' ? 'warning-text' : 'muted'">{{ active.message }}</p>
+        <p v-if="runMessage" :class="active.status === 'FAILURE' || (active.status === 'SUCCESS' && active.result?.coverage.status === 'partial') ? 'warning-text' : 'muted'">{{ runMessage }}</p>
         <p v-if="active.error_code" class="muted">错误代码：{{ active.error_code }}</p>
         <el-progress v-if="isRunning(active)" :percentage="Math.min(100, Math.max(0, active.progress || 0))" :stroke-width="6" />
         <p class="muted">创建：{{ formatDate(active.created_at) }}<template v-if="active.finished_at"> · 结束：{{ formatDate(active.finished_at) }}</template></p>
         <template v-if="active.result">
           <div class="coverage" data-testid="fact-check-coverage">
-            <strong>{{ active.result.coverage.status === 'partial' ? '部分完成' : '预算范围内完成' }}</strong>
+            <strong>{{ coverageLabel }}</strong>
             <span>识别 {{ active.result.coverage.extracted }} · 已检查 {{ active.result.coverage.checked }} · 未检查 {{ active.result.coverage.unverified }}</span>
           </div>
           <p class="muted">仅覆盖本次预算范围，不保证识别或核查全文所有事实。“证据不足”不是错误，也不等于原文正确。</p>
-          <p class="muted">模型的搜索回答与搜索元数据本身不是证据，请核对引用原文。</p>
+          <p v-if="active.result.claims.length" class="muted">模型的搜索回答与搜索元数据本身不是证据，请核对引用原文。</p>
           <p class="muted">口径检查是模型依据所提供正文的评估；程序校验结构、逐字引文及保守约束，并未独立验证语义。反证轮完成不代表找到反证，未找到反证也不等于证实原文。</p>
           <p v-if="active.result.coverage.reason" class="muted">{{ active.result.coverage.reason }}</p>
-          <p v-if="!active.result.claims.length" class="muted">本次没有可展示的事实条目，不代表全文事实正确。</p>
+          <p v-if="!active.result.claims.length" class="muted">{{ emptyMessage }}</p>
           <ol class="claims" aria-label="事实条目">
             <li v-for="(claim, index) in active.result.claims" :key="claim.id" class="claim">
               <div class="claim-heading">
@@ -78,7 +79,7 @@
               <p>{{ claim.reason }}</p>
               <div v-if="claim.search_rounds?.length" class="muted" data-testid="fact-check-search-rounds" aria-live="polite">
                 <p v-for="round in claim.search_rounds" :key="round.kind" :class="round.status === 'failed' || round.status === 'partial' ? 'warning-text' : 'muted'">
-                  {{ round.kind === 'counter' ? '反证/更正轮' : '初始检索轮' }}：{{ roundStatusLabels[round.status] }} · 抓取 {{ round.pages_fetched }} 页
+                  {{ round.kind === 'followup' ? '补充核查轮' : round.kind === 'counter' ? '反证/更正轮' : '初始检索轮' }}：{{ roundStatusLabels[round.status] }} · 抓取 {{ round.pages_fetched }} 页
                   <span v-if="round.error_codes.length"> · {{ round.error_codes.join('、') }}</span>
                   <span v-if="selectedClaim === index"> · 查询：{{ round.query }}</span>
                 </p>
@@ -89,8 +90,9 @@
                 <p v-if="claimContext(claim)" class="source-context" data-testid="fact-check-context">{{ claimContext(claim)!.before }}<mark>{{ claimContext(claim)!.target }}</mark>{{ claimContext(claim)!.after }}</p>
                 <p v-else class="warning-text">位置与原文不匹配，无法安全高亮，请人工核对：{{ claim.original }}</p>
                 <p v-if="claim.suggestion" class="suggestion">人工参考建议：{{ claim.suggestion }}</p>
+                <FactCheckSearchTrace :claim="claim" @show-evidence="id => showEvidence(claim.id, id)" />
                 <ul class="evidence-list" aria-label="核查证据">
-                  <li v-for="evidence in claim.evidence" :key="evidence.id">
+                  <li v-for="evidence in claim.evidence" :id="evidenceAnchor(claim.id, evidence.id)" :key="evidence.id" tabindex="-1">
                     <div class="evidence-heading">
                       <span class="muted">{{ stanceLabels[evidence.stance] }}</span>
                       <a v-if="safeEvidenceUrl(evidence.url)" :href="safeEvidenceUrl(evidence.url)" target="_blank" rel="noopener noreferrer" data-testid="fact-check-evidence-link">{{ evidence.title || '查看证据来源' }}</a>
@@ -110,6 +112,8 @@
                       </details>
                     </template>
                     <p v-else class="muted">此报告未记录正文指纹或引文上下文。</p>
+                    <details v-if="evidence.body_text" class="usage"><summary>查看当次模型可见正文</summary><pre class="body-snapshot">{{ evidence.body_text }}</pre></details>
+                    <p v-else class="muted">历史报告未保存正文快照，不能复现当时全文依据。</p>
                     <p class="muted">{{ evidence.publisher || '发布方未提供' }} · 发布：{{ evidence.published_at ? formatDate(evidence.published_at) : '未提供' }} · 检索：{{ formatDate(evidence.retrieved_at) }}</p>
                   </li>
                 </ul>
@@ -133,6 +137,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ElButton, ElCheckbox, ElFormItem, ElOption, ElProgress, ElSelect, ElTag } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { getReviewErrorDetail } from '@/api/review'
+import FactCheckSearchTrace from '@/components/FactCheckSearchTrace.vue'
 import {
   cancelFactCheckRunApi, createFactCheckId, createFactCheckRunApi, getFactCheckOptionsApi, getFactCheckRunApi, listFactCheckRunsApi,
   type CreateFactCheckPayload, type FactCheckClaim, type FactCheckMode, type FactCheckOptions, type FactCheckRun,
@@ -158,7 +163,7 @@ let sequence = 0
 let controller: AbortController | null = null
 let timer: ReturnType<typeof setTimeout> | null = null
 let alive = true
-const statusLabels = { PENDING: '等待核查', RUNNING: '正在核查', SUCCESS: '核查完成', FAILURE: '核查失败', CANCELLED: '已取消' }
+const statusLabels = { PENDING: '等待核查', RUNNING: '正在核查', WAITING_CONFIRMATION: '待确认事实，请进入工作台', SUCCESS: '核查完成', FAILURE: '核查失败', CANCELLED: '已取消' }
 const modeLabels = { web: '联网搜索', trusted: '可信信源' }
 const providerLabels = { model: '模型原生联网', tavily: 'Tavily' }
 const verdictLabels = { supported: '证据支持', refuted: '证据反驳', insufficient: '证据不足', conflicting: '证据冲突' }
@@ -278,7 +283,7 @@ async function startRun() {
     acceptRun(run)
     pendingCreate.value = null
     selectedClaim.value = null
-    emit('started', run.record_id)
+    if (run.record_id !== null) emit('started', run.record_id)
   } catch (cause) {
     if (!current(token)) return
     const status = (cause as { response?: { status?: number } })?.response?.status
@@ -319,14 +324,59 @@ function safeEvidenceUrl(raw: string): string {
     return (url.protocol === 'http:' || url.protocol === 'https:') && !url.username && !url.password ? url.href : ''
   } catch { return '' }
 }
-function runStatusLabel(run: FactCheckRun) {
+function evidenceAnchor(claimId: string, id: string) { return `panel-evidence-${active.value?.id}-${claimId}-${id}` }
+function showEvidence(claimId: string, id: string) {
+  const target = document.getElementById(evidenceAnchor(claimId, id))
+  target?.scrollIntoView({ block: 'start' }); target?.focus({ preventScroll: true })
+}
+// 兼容旧版 SUCCESS + partial 空报告，仅调整展示，不改写保存的状态。
+function extractionFailed(run: FactCheckRun) {
+  return (run.status === 'FAILURE' && run.error_code === 'EXTRACTION_LOCATION_FAILED')
+    || (run.status === 'SUCCESS' && run.result?.coverage.status === 'partial' && run.result.claims.length === 0)
+}
+function noFacts(run: FactCheckRun) {
+  return run.status === 'SUCCESS' && run.result?.coverage.status === 'complete' && run.result.claims.length === 0
+}
+function fetchBlocked(run: FactCheckRun) {
+  return run.status === 'SUCCESS' && run.result?.usage.pages_fetched === 0
+    && run.result.claims.some(claim => claim.search_rounds?.some(round => round.error_codes.length))
+}
+function runStatusLabel(run: FactCheckRun, summary = false) {
+  if (summary && run.status === 'SUCCESS' && !run.result) return '任务已结束，查看报告'
+  if (extractionFailed(run)) return '事实提取失败'
+  if (noFacts(run)) return '未识别到可核查事实'
+  if (fetchBlocked(run)) return '核查受阻'
   return run.status === 'SUCCESS' && run.result?.coverage.status === 'partial' ? '核查部分完成' : statusLabels[run.status]
 }
+const runMessage = computed(() => {
+  const run = active.value
+  if (!run) return ''
+  if (extractionFailed(run)) return '事实提取失败：未能获得可准确定位到原文的事实项；本次未完成事实核查，不代表全文没有事实或事实正确。'
+  if (noFacts(run)) return '未识别到可核查事实；本次未进行搜索或证据核查，不代表全文事实正确。'
+  if (fetchBlocked(run)) return '搜索或正文读取受阻，未取得可核对的正文；任务已结束，但不能形成可靠结论。'
+  return run.status === 'SUCCESS' && run.result?.coverage.status === 'partial'
+    ? '任务已结束，但部分核查未完整完成；请查看各条事实的资料处理情况。' : run.message
+})
+const coverageLabel = computed(() => {
+  const run = active.value
+  if (!run) return ''
+  if (run.status !== 'SUCCESS' || extractionFailed(run) || noFacts(run) || fetchBlocked(run)) return runStatusLabel(run)
+  return run.result?.coverage.status === 'partial' ? '部分完成' : '预算范围内完成'
+})
+const emptyMessage = computed(() => {
+  const run = active.value
+  if (run && (extractionFailed(run) || noFacts(run))) return runMessage.value
+  if (isRunning(run)) return '任务尚未完成，暂无法展示事实项；不代表全文没有可核查事实。'
+  if (run?.status === 'WAITING_CONFIRMATION') return '任务待确认，当前没有可展示的事实项；尚未完成核查。'
+  if (run?.status === 'CANCELLED') return '核查已取消，没有可展示的事实项；不代表全文事实正确。'
+  if (run?.status === 'FAILURE') return '核查失败，没有可展示的事实项；不能据此判断原文是否包含可核查事实。'
+  return '本次没有可展示的事实条目，不代表全文事实正确。'
+})
 function formatDate(value: string) {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN')
 }
-watch(expanded, value => { if (value) void loadPanel(); else invalidate() }, { flush: 'sync' })
+watch(expanded, value => { if (value) void loadPanel(); else invalidate() })
 watch(() => [props.recordId, props.sourceText, user.token], () => {
   invalidate()
   options.value = null
@@ -339,7 +389,7 @@ watch(() => [props.recordId, props.sourceText, user.token], () => {
   errorKind.value = ''
   authExpired.value = false
   if (expanded.value) void loadPanel()
-}, { flush: 'sync' })
+})
 onBeforeUnmount(() => { alive = false; invalidate() })
 </script>
 
@@ -374,6 +424,9 @@ mark { background: var(--el-color-warning-light-7); color: inherit; border-botto
 blockquote { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
 .usage { margin-top: 16px; overflow-wrap: anywhere; }
 .usage summary { cursor: pointer; }
+.body-snapshot { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 350px; overflow: auto; font: 12px/1.8 monospace; }
+.evidence-list li { scroll-margin-top: 24px; }
+.evidence-list li:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 3px; }
 .warning-text { color: var(--el-color-warning-dark-2); font-size: 13px; }
 .error-box { padding: 8px 12px; margin: 12px 0; background: var(--el-color-danger-light-9); color: var(--el-color-danger); }
 .fact-check-panel :deep(.el-checkbox) { white-space: normal; height: auto; }

@@ -153,6 +153,7 @@
 
 <script setup lang="ts">
 import { reactive, ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
@@ -189,7 +190,7 @@ onMounted(async () => {
     const data = await getDashboardStatsApi()
     Object.assign(stats, data)
   } catch {
-    // 拦截器已处理
+    ElMessage.error('仪表盘数据加载失败')
   }
   loadTrend()
   loadModelUsage()

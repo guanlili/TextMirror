@@ -5,7 +5,7 @@ TextMirror 全局配置管理
 import json
 from typing import List
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     GUEST_FILE_RETENTION_DAYS: int = 7
     # 孤儿目录最小年龄（小时）——避免误删正在上传中的目录
     ORPHAN_DIR_MIN_AGE_HOURS: int = 24
+    FACT_CHECK_RETENTION_DAYS: int = Field(default=90, ge=1, le=3650)
 
     # ---- 游客限流配置 ----
     GUEST_DAILY_LIMIT: int = 100

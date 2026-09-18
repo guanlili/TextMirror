@@ -16,6 +16,8 @@ export interface TaskStatus {
   result?: unknown
   error?: string
   collaboration?: CollaborationReport | null
+  partial_issues?: Array<Record<string, unknown>>
+  partial_total?: number
 }
 
 export interface SubmitResponse {

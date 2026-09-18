@@ -29,7 +29,7 @@
     </div>
     <details v-if="report?.findings.length && viewOnly" class="findings">
       <summary>已发现问题（只读，不可采纳）</summary>
-      <ol><li v-for="(finding, index) in report.findings" :key="index">
+      <ol><li v-for="(finding, index) in report.findings" :key="`${finding.start ?? ''}-${finding.end ?? ''}-${finding.type}-${index}`">
         <p>{{ finding.original }} → {{ finding.suggestion || '需人工核对' }}</p>
         <p class="muted">{{ collaborationProvenance(finding, report) }}</p>
         <p v-if="finding.explanation" class="muted">{{ finding.explanation }}</p>

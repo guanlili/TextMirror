@@ -61,6 +61,7 @@ services:
         condition: service_healthy
 
   # ---- Celery Worker（与后端共用同一镜像）----
+  # 注意：-B（Celery Beat）只能在一个 worker 中启用，否则定时任务会被重复执行
   celery-worker:
     image: textmirror-backend:latest
     build: ./backend
@@ -75,6 +76,33 @@ services:
     dns_search: []
     volumes:
       - /opt/UploadFile/textMirrorUpload:/opt/UploadFile/textMirrorUpload
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  fact-check-worker:
+    image: textmirror-backend:latest
+    build: ./backend
+    container_name: textmirror-fact-check
+    restart: unless-stopped
+    env_file: ./backend/.env.production
+    network_mode: host
+    command: celery -A app.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=1 -Q fact-check
+    volumes:
+      - /opt/UploadFile/textMirrorUpload:/opt/UploadFile/textMirrorUpload
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.celery_app:celery_app inspect ping -d celery@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     logging:
       driver: "json-file"
       options:

@@ -43,6 +43,7 @@ class BaseLLMProvider(ABC):
         max_tokens: Optional[int] = None,
         thinking: Optional[bool] = None,
         timeout: Optional[float] = None,
+        response_format: Optional[Dict[str, str]] = None,
     ) -> LLMResponse:
         """
         发送聊天请求到大模型
@@ -52,6 +53,7 @@ class BaseLLMProvider(ABC):
         :param max_tokens: 最大生成 token 数
         :param thinking: 思考模式开关（None=不干预，供应商不支持时静默忽略）
         :param timeout: 本次请求超时覆盖（秒），None 用 Provider 配置值
+        :param response_format: 显式指定响应格式，None 不发送该参数；供应商拒绝时不降级
         :return: LLMResponse
         """
         pass

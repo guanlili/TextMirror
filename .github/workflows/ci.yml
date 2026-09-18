@@ -24,6 +24,8 @@ jobs:
         run: pip install -r requirements.txt -r requirements-dev.txt
       - name: Ruff
         run: ruff check .
+      - name: Alembic check (migration/model drift)
+        run: python -m alembic check
       - name: Pytest
         run: python -m pytest tests/ -q
 

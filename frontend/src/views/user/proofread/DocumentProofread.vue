@@ -138,7 +138,7 @@
           <el-button type="warning" @click="handleAcceptAll" :disabled="pendingCount === 0">
             一键修改全部
           </el-button>
-          <el-button type="primary" @click="handleExportText">
+          <el-button type="primary" :loading="exporting" @click="handleExportText">
             <el-icon><Download /></el-icon>导出修订文本
           </el-button>
           <el-button
@@ -148,7 +148,7 @@
           >
             {{ wordExportLabel }}
           </el-button>
-          <el-button @click="handleExportReport">导出问题报告</el-button>
+          <el-button :loading="exporting" @click="handleExportReport">导出问题报告</el-button>
         </div>
       </div>
 
@@ -284,7 +284,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type UploadFile } from 'element-plus'
-import { uploadDocumentApi, type DocumentProofreadResponse } from '@/api/document'
+import { uploadDocumentApi, fetchExtractedTextApi, exportRevisedTextApi, exportReportApi, type DocumentProofreadResponse } from '@/api/document'
 import { asyncDocumentProofreadApi, streamTaskStatus, cancelTaskApi, type TaskStatus } from '@/api/tasks'
 import { getAvailableModelsCached, type AvailableModel } from '@/api/polish'
 import type { ProofreadCoverage as Coverage } from '@/api/proofread'
@@ -297,7 +297,7 @@ import {
   type ReviewResponse,
   type ReviewRestorePayload,
 } from '@/api/review'
-import { severityColor, severityLabel, typeLabel, downloadTextFile, proofreadDomainHints } from '@/utils/proofread'
+import { severityColor, severityLabel, typeLabel, proofreadDomainHints } from '@/utils/proofread'
 import { reviewStateFingerprint } from '@/utils/review'
 import { formatSize } from '@/utils/format'
 import { useProofreadReview, type ReviewIssue } from '@/composables/useProofreadReview'
@@ -513,8 +513,18 @@ async function handleReupload() {
   await router.replace({ query })
 }
 
+const MAX_FILE_SIZE = 20 * 1024 * 1024
+
 function handleFileChange(file: UploadFile) {
-  if (file.raw) selectedFile.value = file.raw
+  if (file.raw) {
+    if (file.raw.size > MAX_FILE_SIZE) {
+      ElMessage.warning('文件大小不能超过 20MB')
+      selectedFile.value = null
+      uploadRef.value?.clearFiles()
+      return
+    }
+    selectedFile.value = file.raw
+  }
 }
 
 function handleFileRemove() {
@@ -533,8 +543,6 @@ interface TaskSnapshot {
   depth?: string
   configId?: number
   accessToken?: string
-  originalText: string
-  currentHtml: string
 }
 
 function saveSnapshot(snap: TaskSnapshot) {
@@ -597,7 +605,11 @@ function applyTaskProgress(status: TaskStatus, runId: number) {
   if (typeof status.progress === 'number') {
     progress.value = Math.min(50 + Math.floor(status.progress * 0.5), 99)
   }
-  if (status.message) processingInfo.value = status.message
+  if (status.message) {
+    processingInfo.value = status.partial_total
+      ? `${status.message}（已发现 ${status.partial_total} 处问题）`
+      : status.message
+  }
 }
 
 async function completeTask(taskResult: TaskStatus, fallbackFilename: string, runId: number) {
@@ -708,9 +720,6 @@ async function restoreTaskSnapshot() {
   const snapshot = loadSnapshot()
   if (!snapshot) return
 
-  originalText.value = snapshot.originalText || ''
-  initialize(originalText.value, [])
-  originalHtml.value = snapshot.currentHtml || ''
   sourceFileId.value = snapshot.fileId
   domain.value = snapshot.domain || 'general'
   depth.value = snapshot.depth || 'standard'
@@ -722,6 +731,15 @@ async function restoreTaskSnapshot() {
   stepKey.value = 'proofread'
   proofreading.value = true
   progress.value = 50
+  processingInfo.value = '正在恢复文档内容...'
+
+  try {
+    const textRes = await fetchExtractedTextApi(snapshot.fileId)
+    originalText.value = textRes.extracted_text
+    initialize(originalText.value, [])
+  } catch {
+    processingInfo.value = '文档内容恢复失败，但任务仍可继续'
+  }
 
   const runId = startTaskRun()
   if (snapshot.taskId) {
@@ -741,7 +759,7 @@ async function restoreTaskSnapshot() {
     await submitTaskSnapshot(snapshot, runId)
   } catch (error: unknown) {
     if (!isCurrentRun(runId) || isAbortError(error)) return
-    processingInfo.value = '任务提交状态暂未确认，刷新页面后将自动重试'
+    processingInfo.value = '任务提交状态暂未确认，刷新页面后会自动重试'
     ElMessage.warning('任务提交状态暂未确认，请稍后刷新页面继续恢复')
   }
 }
@@ -776,14 +794,17 @@ async function handleStartProofread() {
     const uploadRes = await uploadDocumentApi(selectedFile.value, abortController.value?.signal)
     if (!isCurrentRun(runId)) return
 
+    const textRes = await fetchExtractedTextApi(uploadRes.file_id)
+    if (!isCurrentRun(runId)) return
+
     uploading.value = false
     proofreading.value = true
     progress.value = 50
     stepKey.value = 'proofread'
     processingInfo.value = `文本提取完成，共 ${uploadRes.text_length} 字，正在提交校对任务...`
-    originalText.value = uploadRes.extracted_text
+    originalText.value = textRes.extracted_text
     initialize(originalText.value, [])
-    originalHtml.value = uploadRes.extracted_html || ''
+    originalHtml.value = textRes.extracted_html || ''
     sourceFileId.value = uploadRes.file_id
     resultFilename.value = uploadRes.filename
 
@@ -794,8 +815,6 @@ async function handleStartProofread() {
       domain: domain.value,
       depth: depth.value,
       configId: selectedModelId.value ?? undefined,
-      originalText: uploadRes.extracted_text,
-      currentHtml: uploadRes.extracted_html || '',
     }
     saveSnapshot(snapshot)
     await submitTaskSnapshot(snapshot, runId)
@@ -913,41 +932,70 @@ async function downloadCorrected() {
   }
 }
 
-// 纯文本始终从原文和已采纳补丁派生，不包含未采纳建议。
+// 导出修订文本为 Word
 async function handleExportText() {
+  if (exporting.value) return
   const runId = activeRunId
   if (!await confirmPartialExport() || !isCurrentRun(runId)) return
-  downloadTextFile(currentText.value, `${isPartial.value ? '部分审校_' : ''}修订_${resultFilename.value || 'document'}.txt`)
-  ElMessage.success('修订文本已导出')
+  if (!sourceFileId.value) {
+    ElMessage.error('缺少文档标识，无法导出')
+    return
+  }
+  exporting.value = true
+  try {
+    const baseName = (resultFilename.value || 'document').replace(/\.[^.]+$/, '')
+    const filename = `${isPartial.value ? '部分审校_' : ''}修订_${baseName}`
+    const blob = await exportRevisedTextApi(sourceFileId.value, { text: currentText.value, filename })
+    downloadBlob(blob, `${filename}.docx`)
+    ElMessage.success('修订文本已导出为 Word')
+  } catch (error) {
+    ElMessage.error(`导出失败：${getReviewErrorDetail(error)}`)
+  } finally {
+    exporting.value = false
+  }
 }
 
-// 即使零问题，也允许导出明确标注未审范围的部分完成报告。
-function handleExportReport() {
-  const lines = [
-    `文档校对报告 - ${resultFilename.value}`,
-    isPartial.value ? '审校状态: partial（部分完成），不能视为全文无误' : coverage.value ? '审校状态: 已完成' : '审校状态: 未记录覆盖范围，无法确认全文完成',
-    `共发现 ${issues.value.length} 个问题`,
-    `已接受: ${acceptedCount.value}  已忽略: ${issues.value.filter(i => i._ignored).length}  待处理: ${pendingCount.value}`,
-    '',
-  ]
-  if (coverage.value) {
-    lines.push(`完成范围: ${coverage.value.completed_chunks}/${coverage.value.total_chunks} 段`)
-    for (const chunk of coverage.value.failed_chunks) {
-      lines.push(`未审范围: 第 ${chunk.start + 1}–${chunk.end} 字（${chunk.error_code}）`)
-    }
-    lines.push('')
+// 导出问题报告为 Word
+async function handleExportReport() {
+  if (exporting.value) return
+  if (!sourceFileId.value) {
+    ElMessage.error('缺少文档标识，无法导出')
+    return
   }
-  issues.value.forEach((issue, i) => {
-    const status = issue._accepted ? '[已接受]' : issue._ignored ? '[已忽略]' : '[待处理]'
-    lines.push(`${i + 1}. ${status} [${typeLabel(issue.type)}] ${severityLabel(issue.severity)}`)
-    lines.push(`   位置: ${issueContext(issue)}`)
-    lines.push(`   原文: ${issue.original}`)
-    lines.push(`   建议: ${issue.suggestion}`)
-    if (issue.explanation) lines.push(`   说明: ${issue.explanation}`)
-    lines.push('')
-  })
-  downloadTextFile(lines.join('\n'), `校对报告_${resultFilename.value || 'document'}.txt`)
-  ElMessage.success('报告已导出')
+  exporting.value = true
+  try {
+    const baseName = (resultFilename.value || 'document').replace(/\.[^.]+$/, '')
+    const status = isPartial.value ? 'partial' : coverage.value ? 'completed' : 'unknown'
+    const reportIssues = issues.value.map(issue => ({
+      type: issue.type,
+      severity: issue.severity,
+      original: issue.original,
+      suggestion: issue.suggestion,
+      explanation: issue.explanation || '',
+      context: issueContext(issue),
+      status: issue._accepted ? 'accepted' : issue._ignored ? 'ignored' : 'pending',
+    }))
+    const blob = await exportReportApi(sourceFileId.value, {
+      filename: `校对报告_${baseName}`,
+      status,
+      total_issues: issues.value.length,
+      accepted_count: acceptedCount.value,
+      ignored_count: issues.value.filter(i => i._ignored).length,
+      pending_count: pendingCount.value,
+      coverage: coverage.value ? {
+        total_chunks: coverage.value.total_chunks,
+        completed_chunks: coverage.value.completed_chunks,
+        failed_chunks: coverage.value.failed_chunks.map(c => ({ start: c.start, end: c.end, error_code: c.error_code })),
+      } : null,
+      issues: reportIssues,
+    })
+    downloadBlob(blob, `校对报告_${baseName}.docx`)
+    ElMessage.success('报告已导出为 Word')
+  } catch (error) {
+    ElMessage.error(`导出失败：${getReviewErrorDetail(error)}`)
+  } finally {
+    exporting.value = false
+  }
 }
 
 // 重置

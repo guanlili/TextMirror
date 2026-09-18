@@ -4,32 +4,48 @@ import * as Vue from 'vue'
 import { createRenderer, defineComponent, h, nextTick, reactive, type Component, type VNode } from 'vue'
 import { compileScript, compileTemplate, parse } from '@vue/compiler-sfc'
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript'
-import type { CreateFactCheckPayload, FactCheckClaim, FactCheckOptions, FactCheckRun } from '@/api/factCheck'
+import type { CreateFactCheckPayload, FactCheckClaim, FactCheckOptions, FactCheckRun, FactSearchSource } from '@/api/factCheck'
 
-vi.mock('@/utils/request', () => ({ default: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }))
+vi.mock('@/utils/request', () => ({ default: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() } }))
 import request from '@/utils/request'
 import * as FactCheckApi from '@/api/factCheck'
 import * as ReviewApi from '@/api/review'
 import source from './FactCheckPanel.vue?raw'
+import traceSource from './FactCheckSearchTrace.vue?raw'
+import workbenchSource from '@/views/user/fact-check/index.vue?raw'
 import textPage from '@/views/user/proofread/TextProofread.vue?raw'
 import documentPage from '@/views/user/proofread/DocumentProofread.vue?raw'
 
-const user = reactive({ token: 'token', isLoggedIn: true })
-const elements = Object.fromEntries(['ElButton', 'ElCheckbox', 'ElFormItem', 'ElOption', 'ElProgress', 'ElSelect', 'ElTag'].map(name => [name,
+const user = reactive({ token: 'token', isLoggedIn: true, userInfo: { id: 1 }, hasPermission: () => true, fetchUserInfo: vi.fn() })
+const route = reactive({ params: {} as { id?: string }, query: {}, fullPath: '/fact-check' })
+const router = { push: vi.fn(), replace: vi.fn() }
+const uploadDocumentApi = vi.fn()
+const elements = Object.fromEntries(['ElButton', 'ElCheckbox', 'ElFormItem', 'ElOption', 'ElProgress', 'ElSelect', 'ElTag', 'ElInput', 'ElRadioGroup', 'ElRadioButton', 'ElPagination'].map(name => [name,
   defineComponent({ inheritAttrs: false, setup: (_props, { slots, attrs }) => () => h(name, attrs, slots.default?.()) }),
 ]))
-const { descriptor } = parse(source)
-const script = compileScript(descriptor, { id: 'fact-check-test' })
-const template = compileTemplate({ source: descriptor.template!.content, filename: 'FactCheckPanel.vue', id: 'fact-check-test', compilerOptions: { bindingMetadata: script.bindings } })
-if (template.errors.length) throw new Error(String(template.errors[0]))
-const modules: Record<string, unknown> = { vue: Vue, 'element-plus': elements, '@/api/factCheck': FactCheckApi, '@/api/review': ReviewApi, '@/stores/user': { useUserStore: () => user } }
-const compiled = { exports: {} as { default: Component; render: () => VNode } }
-const code = transpileModule(`${script.content}\n${template.code}`, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2020 } }).outputText
-new Function('require', 'module', 'exports', code)((id: string) => {
-  if (!(id in modules)) throw new Error(`Unexpected dependency: ${id}`)
-  return modules[id]
-}, compiled, compiled.exports)
-const Panel = Object.assign(compiled.exports.default, { render: compiled.exports.render })
+const modules: Record<string, unknown> = {
+  vue: Vue, 'element-plus': { ...elements, ElMessageBox: { confirm: vi.fn() } },
+  'vue-router': { useRoute: () => route, useRouter: () => router },
+  '@/api/factCheck': FactCheckApi, '@/api/review': ReviewApi, '@/api/document': { uploadDocumentApi },
+  '@/stores/user': { useUserStore: () => user },
+}
+function compileComponent(content: string, filename: string) {
+  const { descriptor } = parse(content)
+  const script = compileScript(descriptor, { id: filename })
+  const template = compileTemplate({ source: descriptor.template!.content, filename, id: filename, compilerOptions: { bindingMetadata: script.bindings } })
+  if (template.errors.length) throw new Error(String(template.errors[0]))
+  const compiled = { exports: {} as { default: Component; render: () => VNode } }
+  const code = transpileModule(`${script.content}\n${template.code}`, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2020 } }).outputText
+  new Function('require', 'module', 'exports', code)((id: string) => {
+    if (!(id in modules)) throw new Error(`Unexpected dependency: ${id}`)
+    return modules[id]
+  }, compiled, compiled.exports)
+  return Object.assign(compiled.exports.default, { render: compiled.exports.render })
+}
+const Trace = compileComponent(traceSource, 'FactCheckSearchTrace.vue')
+modules['@/components/FactCheckSearchTrace.vue'] = { default: Trace }
+const Panel = compileComponent(source, 'FactCheckPanel.vue')
+const Workbench = compileComponent(workbenchSource, 'FactCheckWorkbench.vue')
 interface HostNode { tag: string; text: string; props: Record<string, unknown>; parent: HostNode | null; children: HostNode[] }
 const node = (text = '', tag = ''): HostNode => ({ tag, text, props: {}, parent: null, children: [] })
 function remove(child: HostNode) {
@@ -68,6 +84,7 @@ function mount(recordId: number | null = 7, sourceText = '𠮷事实甲与事实
   const started = vi.fn()
   let vnode!: VNode
   const app = renderer.createApp(defineComponent({ setup: () => () => (vnode = h(Panel, { ...props, onStarted: started })) }))
+  app.component('RouterLink', defineComponent({ setup: (_props, { slots, attrs }) => () => h('router-link', attrs, slots.default?.()) }))
   const root = node()
   app.mount(root)
   const state = (vnode.component as unknown as { setupState: State }).setupState
@@ -88,19 +105,28 @@ const configuration = (): FactCheckOptions => ({ available: true, unavailable_re
   { id: 's2', name: '来源二', domain: 'two.example.org', path_prefix: '/', is_enabled: false },
   { id: 's3', name: '来源三', domain: 'three.example.org', path_prefix: '/', is_enabled: true },
 ] })
-const run = (patch: Partial<FactCheckRun> = {}): FactCheckRun => ({ id: 21, record_id: 7, mode: 'web', provider: 'model', status: 'PENDING', progress: 0, message: '', error_code: null, result: null, source_hash: 'hash', created_at: '2026-08-01T10:00:00Z', finished_at: null, source_ids: [], ...patch })
+const run = (patch: Partial<FactCheckRun> = {}): FactCheckRun => ({ title: '材料', source_kind: 'record', file_id: null, parent_run_id: null, stage: 'extract', depth: 'standard', confirm_claims: false, max_claims: 10, id: 21, record_id: 7, mode: 'web', provider: 'model', status: 'PENDING', progress: 0, message: '', error_code: null, result: null, source_hash: 'hash', created_at: '2026-08-01T10:00:00Z', finished_at: null, source_ids: [], ...patch })
 const claim = (patch: Partial<FactCheckClaim> = {}): FactCheckClaim => ({ id: 'c1', original: '事实甲', start: 5, end: 8, statement: '事实陈述', verdict: 'insufficient', reason: '暂未取得足够证据', suggestion: '建议人工查阅原始资料', evidence: [], checked: true, ...patch })
+const report = (status: 'partial' | 'complete' = 'partial', claims: FactCheckClaim[] = []): NonNullable<FactCheckRun['result']> => ({
+  claims, coverage: { status, extracted: claims.length, checked: claims.filter(item => item.checked).length, unverified: claims.filter(item => !item.checked).length, reason: '' },
+  usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, search_queries: 0, pages_fetched: 0 }, checked_at: '2026-09-16',
+})
 let runs: FactCheckRun[]
 let options: FactCheckOptions
+let workbenchRun: FactCheckRun | null
 beforeEach(() => {
   vi.resetAllMocks()
   vi.useFakeTimers()
   user.token = 'token'; user.isLoggedIn = true
-  runs = []; options = configuration()
+  route.params = {}; route.query = {}; route.fullPath = '/fact-check'
+  runs = []; options = configuration(); workbenchRun = null
   vi.mocked(request.get).mockImplementation(async (path, config) => {
     if (path === '/fact-check/options') return options
     if (path === '/fact-check/runs') return runs.filter(item => item.record_id === (config?.params as { record_id?: number })?.record_id)
-    return run({ status: 'SUCCESS', progress: 100 })
+    if (path === '/fact-check/history') return { items: runs, total: runs.length }
+    if (path.endsWith('/source')) return { text: '𠮷事实甲与事实甲', source_hash: 'hash' }
+    if (path.endsWith('/reviews')) return []
+    return workbenchRun ?? run({ status: 'SUCCESS', progress: 100 })
   })
   vi.mocked(request.post).mockResolvedValue(run())
 })
@@ -446,5 +472,280 @@ describe('FactCheckPanel', () => {
     for (const page of [textPage, documentPage]) {
       expect(page).toContain('<FactCheckPanel :record-id="recordId" :source-text="sourceText" @started="router.replace({ query: { ...route.query, review: String($event) } })" />')
     }
+  })
+})
+
+interface WorkbenchState { run: FactCheckRun | null; history: FactCheckRun[]; verdictFilter: string }
+function mountWorkbench(current?: FactCheckRun) {
+  workbenchRun = current ?? null
+  route.params = current ? { id: String(current.id) } : {}
+  route.fullPath = current ? `/fact-check/${current.id}` : '/fact-check'
+  let vnode!: VNode
+  const app = renderer.createApp(defineComponent({ setup: () => () => (vnode = h(Workbench)) }))
+  for (const [name, component] of Object.entries(elements)) app.component(name, component)
+  app.component('RouterLink', defineComponent({ setup: (_props, { slots, attrs }) => () => h('router-link', attrs, slots.default?.()) }))
+  const root = node()
+  app.mount(root)
+  const state = (vnode.component as unknown as { setupState: WorkbenchState }).setupState
+  let mounted = true
+  const unmount = () => { if (mounted) app.unmount(); mounted = false }
+  cleanups.push(unmount)
+  return { state, root, unmount }
+}
+async function mountReport(view: 'panel' | 'workbench', current: FactCheckRun) {
+  runs = [current]
+  if (view === 'workbench') {
+    const mounted = mountWorkbench(current); await flush()
+    return { ...mounted, current: () => mounted.state.run, showClaim: async () => {} }
+  }
+  const mounted = mount(); await open(mounted.state)
+  return { ...mounted, current: () => mounted.state.active, showClaim: async () => { mounted.state.selectedClaim = 0; await flush() } }
+}
+function expectNoWrites() {
+  expect(request.post).not.toHaveBeenCalled()
+  expect(request.put).not.toHaveBeenCalled()
+  expect(request.delete).not.toHaveBeenCalled()
+  expect(uploadDocumentApi).not.toHaveBeenCalled()
+}
+function expectNoClaimInstructions(root: HostNode) {
+  for (const instruction of ['请查看各条事实', '请逐条查看', '选择一个事实项', '请核对引用原文']) expect(text(root)).not.toContain(instruction)
+  expect(descendants(root).some(item => item.props['data-testid'] === 'fact-check-claim' || String(item.props.class).includes('claim-item'))).toBe(false)
+}
+function reportLabel(root: HostNode) {
+  return text(descendants(root).find(item => item.tag === 'ElTag')!)
+}
+function coverageHeading(root: HostNode) {
+  const coverage = descendants(root).find(item => item.props['data-testid'] === 'fact-check-coverage')!
+  return text(descendants(coverage).find(item => item.tag === 'strong')!)
+}
+
+describe.each(['panel', 'workbench'] as const)('%s 实际渲染：空报告与失败语义', view => {
+  it.each(['historical', 'location', 'no-facts'] as const)('%s 区分提取失败与无事实，替换误导的完成消息且只读', async kind => {
+    const current = run({ id: 14, status: kind === 'location' ? 'FAILURE' : 'SUCCESS',
+      error_code: kind === 'location' ? 'EXTRACTION_LOCATION_FAILED' : null,
+      message: '核查完成（旧消息）', result: report(kind === 'no-facts' ? 'complete' : 'partial'),
+    })
+    const saved = structuredClone(current)
+    const mounted = await mountReport(view, current)
+    const label = kind === 'no-facts' ? '未识别到可核查事实' : '事实提取失败'
+    expect(reportLabel(mounted.root)).toBe(label)
+    expect(text(mounted.root)).not.toContain('核查完成（旧消息）')
+    expect(text(mounted.root)).not.toContain('预算范围内完成')
+    expect(text(mounted.root)).not.toContain('部分完成')
+    expectNoClaimInstructions(mounted.root)
+    if (kind === 'no-facts') {
+      expect(text(mounted.root)).toContain('本次未进行搜索或证据核查')
+      expect(text(mounted.root)).toContain('不代表全文事实正确')
+      expect(text(mounted.root)).not.toContain('事实提取失败')
+    } else {
+      expect(text(mounted.root)).toContain('未能获得可准确定位到原文的事实项')
+      expect(text(mounted.root)).toContain('不代表全文没有事实或事实正确')
+      expect(text(mounted.root)).not.toContain('未识别到可核查事实')
+    }
+    if (view === 'panel') {
+      expect(coverageHeading(mounted.root)).toBe(label)
+      expect(text(mounted.root)).toContain('识别 0 · 已检查 0 · 未检查 0')
+      expect(text(mounted.root)).toContain('查询 0 次 · 抓取 0 页')
+      const option = descendants(mounted.root).find(item => item.tag === 'ElOption' && item.props.value === current.id)!
+      expect(option.props.label).toContain(label)
+    } else {
+      for (const pane of ['claims-pane', 'evidence-pane']) {
+        expect(text(descendants(mounted.root).find(item => String(item.props.class).includes(pane))!)).toContain(label)
+      }
+      const metrics = descendants(mounted.root).find(item => item.props.class === 'metrics')!
+      expect(descendants(metrics).filter(item => item.tag === 'strong').map(text)).toEqual(['0', '0', '0', '0', '0', '0'])
+    }
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(request.get).toHaveBeenCalledTimes(view === 'panel' ? 2 : 3)
+    expectNoWrites()
+    expect(mounted.current()).toEqual(saved)
+    expect(current).toEqual(saved)
+  })
+  it.each(['MODEL_OUTPUT_INVALID', 'MODEL_UNAVAILABLE', 'SEARCH_UNAVAILABLE'])('%s 失败不推断无事实或定位失败，保留原错误', async error_code => {
+    const current = run({ status: 'FAILURE', error_code, message: '模型或网络请求失败', result: report('complete') })
+    const { root } = await mountReport(view, current)
+    expect(reportLabel(root)).toBe(view === 'panel' ? '核查失败' : '执行失败')
+    expect(text(root)).toContain('模型或网络请求失败')
+    expect(text(root)).toContain(error_code)
+    expect(text(root)).not.toContain('未识别到可核查事实')
+    expect(text(root)).not.toContain('事实提取失败')
+    expect(text(root)).not.toContain('预算范围内完成')
+    expectNoClaimInstructions(root)
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(request.get).toHaveBeenCalledTimes(view === 'panel' ? 2 : 3)
+    expectNoWrites()
+  })
+  it.each(['PENDING', 'RUNNING', 'WAITING_CONFIRMATION', 'CANCELLED'] as const)('%s 空报告不会变成成功或提取失败', async status => {
+    const labels = view === 'panel'
+      ? { PENDING: '等待核查', RUNNING: '正在核查', WAITING_CONFIRMATION: '待确认事实，请进入工作台', CANCELLED: '已取消' }
+      : { PENDING: '等待执行', RUNNING: '核查中', WAITING_CONFIRMATION: '待确认事实', CANCELLED: '已取消' }
+    for (const coverage of ['partial', 'complete'] as const) {
+      const current = run({ status, result: report(coverage), message: '当前任务状态' })
+      const mounted = await mountReport(view, current)
+      expect(reportLabel(mounted.root)).toBe(labels[status])
+      expect(text(mounted.root)).toContain('当前任务状态')
+      for (const unexpected of ['未识别到可核查事实', '事实提取失败', '预算范围内完成', '部分完成']) expect(text(mounted.root)).not.toContain(unexpected)
+      if (view === 'panel') expect(coverageHeading(mounted.root)).toBe(labels[status])
+      expectNoClaimInstructions(mounted.root)
+      expect(mounted.current()?.status).toBe(status)
+      mounted.unmount()
+    }
+    expectNoWrites()
+  })
+  it.each(['SUCCESS', 'FAILURE'] as const)('%s 缺少报告不能推断无事实或定位失败', async status => {
+    const { root } = await mountReport(view, run({ status, result: null, message: '历史任务消息' }))
+    expect(text(root)).toContain('历史任务消息')
+    expect(text(root)).not.toContain('未识别到可核查事实')
+    expect(text(root)).not.toContain('事实提取失败')
+    expectNoClaimInstructions(root)
+    expectNoWrites()
+  })
+  it('部分定位成功的报告保留事实项及未完成说明', async () => {
+    const current = run({ status: 'SUCCESS', result: report('partial', [claim({ checked: false })]) })
+    current.result!.coverage.reason = '部分事实无法准确定位，已保留有效事实项'
+    const { root, current: displayed } = await mountReport(view, current)
+    expect(reportLabel(root)).toBe(view === 'panel' ? '核查部分完成' : '核查不完整')
+    expect(text(root)).toContain('事实陈述')
+    expect(text(root)).toContain('未检查')
+    expect(text(root)).toContain(current.result!.coverage.reason)
+    expect(text(root)).not.toContain('事实提取失败')
+    expect(text(root)).not.toContain('未识别到可核查事实')
+    expect(displayed()?.result?.claims).toEqual(current.result!.claims)
+    if (view === 'panel') expect(coverageHeading(root)).toBe('部分完成')
+    expectNoWrites()
+  })
+  it('DNS 抓取失败且零正文仍显示核查受阻，保留检索资料而非无事实', async () => {
+    const current = run({ status: 'SUCCESS', result: report('partial', [claim({ search_rounds: [{
+      kind: 'initial', query: '官方成立日期', status: 'partial', pages_fetched: 0, error_codes: ['DNS_FAILED'],
+      sources: [{ url: 'https://example.org/source', title: '候选官方公告', origin: 'search', status: 'failed', reason: 'DNS 解析失败', error_code: 'DNS_FAILED', evidence_id: null }],
+    }] })]) })
+    current.result!.usage.search_queries = 1
+    const mounted = await mountReport(view, current)
+    expect(reportLabel(mounted.root)).toBe('核查受阻')
+    expect(text(mounted.root)).toContain('未取得可核对的正文')
+    await mounted.showClaim()
+    for (const expected of ['事实陈述', 'DNS_FAILED', '候选官方公告', '未读到正文，无法判断支持或反驳']) expect(text(mounted.root)).toContain(expected)
+    expect(text(mounted.root)).not.toContain('事实提取失败')
+    expect(text(mounted.root)).not.toContain('未识别到可核查事实')
+    expect(descendants(mounted.root).some(item => item.tag === 'a')).toBe(false)
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(request.get).toHaveBeenCalledTimes(view === 'panel' ? 2 : 3)
+    expectNoWrites()
+  })
+  it('轻量历史摘要不推断核查结论，也不逐条加载完整报告', async () => {
+    runs = [
+      run({ id: 14, status: 'SUCCESS', result: null }),
+      run({ id: 15, status: 'FAILURE', error_code: 'EXTRACTION_LOCATION_FAILED', result: null }),
+    ]
+    const saved = structuredClone(runs)
+    const mounted = view === 'panel' ? mount() : mountWorkbench()
+    if (view === 'panel') await open(mounted.state as State)
+    else await flush()
+    const expected = ['任务已结束，查看报告', '事实提取失败']
+    for (const [index, item] of runs.entries()) {
+      if (view === 'panel') {
+        expect(descendants(mounted.root).find(node => node.tag === 'ElOption' && node.props.value === item.id)!.props.label).toContain(expected[index])
+      } else {
+        const row = descendants(mounted.root).filter(node => node.props.class === 'history-item')[index]
+        expect(reportLabel(row)).toBe(expected[index])
+      }
+    }
+    expect(runs).toEqual(saved)
+    expect(request.get).toHaveBeenCalledTimes(2)
+    expectNoWrites()
+  })
+  it('历史标签与详情语义一致，但不重写 SUCCESS/FAILURE 等保存状态', async () => {
+    runs = [
+      run({ id: 14, status: 'SUCCESS', result: report('partial') }),
+      run({ id: 15, status: 'FAILURE', error_code: 'EXTRACTION_LOCATION_FAILED', result: report('partial') }),
+      run({ id: 16, status: 'SUCCESS', result: report('complete') }),
+      run({ id: 17, status: 'FAILURE', error_code: 'MODEL_UNAVAILABLE', result: report('complete') }),
+      run({ id: 18, status: 'SUCCESS', result: report('partial', [claim()]) }),
+      run({ id: 19, status: 'CANCELLED', result: report('complete') }),
+    ]
+    const saved = structuredClone(runs)
+    const mounted = view === 'panel' ? mount() : mountWorkbench()
+    if (view === 'panel') await open(mounted.state as State)
+    else await flush()
+    const expected = ['事实提取失败', '事实提取失败', '未识别到可核查事实', view === 'panel' ? '核查失败' : '执行失败', view === 'panel' ? '核查部分完成' : '核查不完整', '已取消']
+    for (const [index, item] of runs.entries()) {
+      if (view === 'panel') {
+        expect(descendants(mounted.root).find(node => node.tag === 'ElOption' && node.props.value === item.id)!.props.label).toContain(expected[index])
+      } else {
+        const row = descendants(mounted.root).filter(node => node.props.class === 'history-item')[index]
+        expect(reportLabel(row)).toBe(expected[index])
+      }
+    }
+    expect(mounted.state.history).toEqual(view === 'panel' ? [...saved].reverse() : saved)
+    expect(runs).toEqual(saved)
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(request.get).toHaveBeenCalledTimes(2)
+    expectNoWrites()
+  })
+})
+
+const searchSource = (patch: Partial<FactSearchSource> = {}): FactSearchSource => ({
+  url: 'https://example.org/source', title: '候选公告', origin: 'search', status: 'fetched', reason: '正文已读取', error_code: null, evidence_id: null, ...patch,
+})
+function mountTrace(current: FactCheckClaim) {
+  const props = reactive({ claim: current })
+  const showEvidence = vi.fn()
+  const app = renderer.createApp(defineComponent({ setup: () => () => h(Trace, { ...props, onShowEvidence: showEvidence }) }))
+  const root = node()
+  app.mount(root)
+  cleanups.push(() => app.unmount())
+  return { root, props, showEvidence }
+}
+
+describe('FactCheckSearchTrace', () => {
+  it('保留抓取受阻的资料名、链接与原因，不把搜索标题变成佐证', () => {
+    const current = claim({ search_rounds: [{ kind: 'initial', query: '成立日期 官方来源', status: 'partial', pages_fetched: 0, error_codes: ['UNSAFE_ADDRESS'], sources: [searchSource({ status: 'failed', error_code: 'UNSAFE_ADDRESS', reason: '页面解析到非公网或保留地址。' })] }] })
+    const { root } = mountTrace(current)
+    for (const expected of ['成立日期 官方来源', '候选公告', 'https://example.org/source', '抓取受阻', 'UNSAFE_ADDRESS', '未读到正文，无法判断支持或反驳']) expect(text(root)).toContain(expected)
+    expect(descendants(root).some(item => item.tag === 'a' || item.tag === 'blockquote')).toBe(false)
+    expect(request.post).not.toHaveBeenCalled()
+  })
+  it.each(['supports', 'refutes', 'context'] as const)('%s 显示每份资料的逐字引文、对应关系，并跳到同一事实的证据', async stance => {
+    const current = claim({ evidence: [{ id: 'c1-e1', title: '原始公告', url: 'https://example.org/source', quote: '固定测试引文', stance, publisher: '测试机构', published_at: null, retrieved_at: '2026-09-16', checks: {
+      subject: { status: 'match', reason: '正文描述同一主体和事件' }, event_time: { status: 'match', reason: '引用对应同一事件时间范围' }, scope_unit: { status: 'not_applicable', reason: '没有统计口径' },
+    } }], search_rounds: [
+      { kind: 'initial', query: '查询一', status: 'complete', pages_fetched: 1, error_codes: [], sources: [searchSource({ evidence_id: 'c1-e1' })] },
+      { kind: 'counter', query: '查询二 更正', status: 'complete', pages_fetched: 0, error_codes: [], sources: [searchSource({ status: 'duplicate', evidence_id: 'c1-e1', reason: '与上一轮同一材料，不是独立佐证' })] },
+    ] })
+    const { root, showEvidence } = mountTrace(current)
+    const labels = { supports: '支持这条事实', refutes: '反驳这条事实', context: '仅作背景，不能单独支持或反驳' }
+    expect(text(root)).toContain(labels[stance])
+    expect(text(root)).toContain('固定测试引文')
+    expect(text(root)).toContain('正文描述同一主体和事件')
+    expect(text(root)).toContain('不是独立佐证')
+    expect(text(descendants(root).find(item => item.props.class === 'trace-counts')!)).toContain('候选链接 1')
+    const jump = descendants(root).find(item => item.tag === 'button')!
+    ;(jump.props.onClick as () => void)(); await flush()
+    expect(showEvidence).toHaveBeenCalledExactlyOnceWith('c1-e1')
+  })
+  it('已读取但未引用、超出预算、等待中的材料不会编造支持或反驳理由', () => {
+    const current = claim({ checked: false, search_rounds: [{ kind: 'followup', query: '原始出处', status: 'fetching', pages_fetched: 1, error_codes: [], sources: [
+      searchSource({ title: '读取但未引用', reason: '正文未形成可用引用' }),
+      searchSource({ url: 'https://example.org/extra', title: '补充资料', status: 'skipped', origin: 'supplemental', reason: '超过本轮抓取预算' }),
+      searchSource({ url: 'https://example.org/waiting', title: '等待资料', status: 'pending', reason: '' }),
+    ] }] })
+    const { root } = mountTrace(current)
+    for (const expected of ['读取但未引用', '未形成可用引用', '超过本轮抓取预算', '用户补充', '尚未形成正文证据', '不等于该资料无关或陈述为假']) expect(text(root)).toContain(expected)
+    expect(descendants(root).some(item => item.tag === 'blockquote')).toBe(false)
+  })
+  it.each([{ sources: undefined }, { sources: null }, { sources: [] }])('区分旧记录未保存与搜索无结果 $sources', ({ sources }) => {
+    const { root } = mountTrace(claim({ search_rounds: [{ kind: 'initial', query: '查询', status: 'complete', pages_fetched: 0, error_codes: [], sources }] }))
+    expect(text(root)).toContain(sources == null ? '历史记录未保存候选资料列表' : '本轮未返回候选资料')
+    expect(text(root)).not.toContain(sources == null ? '本轮未返回候选资料' : '历史记录未保存候选资料列表')
+  })
+  it('恶意标题与错误原因仅作文本，危险地址及悬空引用不可点击或变成证据', () => {
+    const xss = '<img src=x onerror=alert(1)>'
+    const { root } = mountTrace(claim({ search_rounds: [{ kind: 'initial', query: xss, status: 'partial', pages_fetched: 0, error_codes: [], sources: [
+      searchSource({ title: xss, url: 'javascript:alert(1)', reason: xss, evidence_id: 'another-claim-evidence' }),
+      searchSource({ title: '带凭据地址', url: 'https://user:password@example.org/path' }),
+      searchSource({ title: '保留地址', url: 'http://127.0.0.1/private', status: 'failed', reason: 'UNSAFE_ADDRESS' }),
+    ] }] }))
+    expect(text(root)).toContain(xss)
+    expect(descendants(root).some(item => item.tag === 'a' || item.tag === 'img' || item.tag === 'blockquote' || 'innerHTML' in item.props)).toBe(false)
   })
 })

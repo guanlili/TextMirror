@@ -274,7 +274,7 @@ const draftTestResult = ref<LLMTestResult | null>(null)
 // 导入/导出
 const showImportDialog = ref(false)
 const importing = ref(false)
-const importPreview = ref<{ count: number; configs: Record<string, any>[] } | null>(null)
+const importPreview = ref<{ count: number; configs: Partial<LLMConfigItem>[] } | null>(null)
 const importConflict = ref<'skip' | 'overwrite'>('skip')
 
 /** 导出配置：withKeys=false 脱敏（分享用）/ true 含明文密钥（迁移用，需确认） */
@@ -405,7 +405,9 @@ onMounted(() => {
 async function fetchProviders() {
   try {
     providerOptions.value = await listLLMProvidersApi()
-  } catch (_e) { /* 静默 */ }
+  } catch {
+    ElMessage.error('加载供应商列表失败')
+  }
 }
 
 async function fetchList() {

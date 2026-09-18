@@ -20,7 +20,8 @@ const { descriptor } = parse(source)
 const script = compileScript(descriptor, { id: 'fact-check-settings-test' })
 const template = compileTemplate({ source: descriptor.template!.content, filename: 'FactCheckSettings.vue', id: 'fact-check-settings-test', compilerOptions: { bindingMetadata: script.bindings } })
 if (template.errors.length) throw new Error(String(template.errors[0]))
-const modules: Record<string, unknown> = { vue: Vue, 'element-plus': elements, '@/api/factCheck': FactCheckApi, '@/api/review': ReviewApi }
+const modules: Record<string, unknown> = { vue: Vue, 'element-plus': elements, '@/api/factCheck': FactCheckApi, '@/api/review': ReviewApi,
+  '@/api/admin': { listLLMConfigsApi: async () => [] }, '@/stores/user': { useUserStore: () => ({ hasPermission: () => false }) } }
 const compiled = { exports: {} as { default: Component; render: () => VNode } }
 const code = transpileModule(`${script.content}\n${template.code}`, { compilerOptions: { module: ModuleKind.CommonJS, target: ScriptTarget.ES2020 } }).outputText
 new Function('require', 'module', 'exports', code)((id: string) => {
@@ -97,7 +98,7 @@ afterEach(() => cleanups.splice(0).forEach(cleanup => cleanup()))
 describe('FactCheckSettings', () => {
   it('默认原生搜索、关闭、10条、空信源；只读取已有配置，不探测或启动', async () => {
     const { state, root } = mount()
-    expect(state.draft).toEqual({ enabled: false, provider: 'model', max_claims: 10, sources: [] })
+    expect(state.draft).toEqual({ enabled: false, provider: 'model', model_config_id: null, max_claims: 10, sources: [] })
     expect(state.loaded).toBe(false)
     expect(state.apiKey).toBe('')
     await flush()
@@ -140,7 +141,7 @@ describe('FactCheckSettings', () => {
     state.apiKey = 'stale-tavily-key'
     await state.save()
     expect(request.put).toHaveBeenCalledExactlyOnceWith('/admin/fact-check/settings', {
-      enabled: true, provider: 'model', max_claims: 10, sources: [],
+      enabled: true, provider: 'model', model_config_id: null, max_claims: 10, sources: [],
     }, { signal: expect.any(AbortSignal), headers: { 'X-Silent-Error': 'true' } })
     expect(state.apiKey).toBe('')
     expect(state.keyConfigured).toBe(false)
@@ -164,7 +165,7 @@ describe('FactCheckSettings', () => {
     state.draft.enabled = false
     expect(state.validationError).toBe('')
     await state.save()
-    expect(vi.mocked(request.put).mock.calls[0][1]).toEqual({ enabled: false, provider: 'model', max_claims: 10, sources: [] })
+    expect(vi.mocked(request.put).mock.calls[0][1]).toEqual({ enabled: false, provider: 'model', model_config_id: null, max_claims: 10, sources: [] })
     expect(request.get).toHaveBeenCalledTimes(1)
     expect(request.post).not.toHaveBeenCalled()
   })
@@ -188,8 +189,8 @@ describe('FactCheckSettings', () => {
     expect(text(root)).toContain('已配置 Tavily 密钥')
     await state.save()
     expect(vi.mocked(request.put).mock.calls.map(call => call[1])).toEqual([
-      { enabled: true, provider: 'model', max_claims: 10, sources: [] },
-      { enabled: true, provider: 'tavily', max_claims: 10, sources: [] },
+      { enabled: true, provider: 'model', model_config_id: null, max_claims: 10, sources: [] },
+      { enabled: true, provider: 'tavily', model_config_id: null, max_claims: 10, sources: [] },
     ])
     expect(request.get).toHaveBeenCalledTimes(1)
     expect(request.post).not.toHaveBeenCalled()
@@ -244,7 +245,7 @@ describe('FactCheckSettings', () => {
     expect(request.put).not.toHaveBeenCalled()
     state.apiKey = ' new-key '
     await state.save()
-    expect(vi.mocked(request.put).mock.calls[0][1]).toEqual({ enabled: true, provider: 'tavily', max_claims: 10, sources: [], api_key: 'new-key' })
+    expect(vi.mocked(request.put).mock.calls[0][1]).toEqual({ enabled: true, provider: 'tavily', model_config_id: null, max_claims: 10, sources: [], api_key: 'new-key' })
     expect(state.apiKey).toBe('')
     expect(state.keyConfigured).toBe(true)
     expect(state.notice).toContain('已保存')

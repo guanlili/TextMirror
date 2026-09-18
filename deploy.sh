@@ -84,11 +84,11 @@ echo ""
 # 停止旧容器
 echo "🛑 停止旧容器..."
 docker compose down 2>/dev/null || true
-docker rm -f textmirror-nginx textmirror-postgres textmirror-redis 2>/dev/null || true
+docker rm -f textmirror-frontend textmirror-postgres textmirror-redis 2>/dev/null || true
 
 # 启动（不加 --build，直接使用已加载的镜像）
 echo ""
-echo "� 启动服务..."
+echo "🚀 启动服务..."
 docker compose up -d
 
 # 等待
