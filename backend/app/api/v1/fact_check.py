@@ -436,6 +436,7 @@ async def export_run(run_id: int, format: str = Query("json", pattern="^(json|ht
 
 @router.delete("/runs/{run_id}", status_code=204)
 async def delete_run(run_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    await _lock_user(db, user.id)
     run = await _owned_run(db, run_id, user)
     if run.status in ACTIVE:
         raise HTTPException(409, "请先取消正在执行的核查")

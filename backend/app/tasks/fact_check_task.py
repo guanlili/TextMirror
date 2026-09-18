@@ -79,14 +79,13 @@ def async_fact_check(run_id: int):
         supplemental_urls, config_snapshot = run.supplemental_urls, run.config_snapshot
 
     async def on_progress(percent: int, message: str, report: dict | None = None):
-        result = _validated_report(report, source_text) if report is not None else None
         with Session(proofread_task._get_sync_engine()) as db:
             status = db.scalar(select(FactCheckRun.status).where(FactCheckRun.id == run_id))
             if status != "RUNNING":
                 raise FactCheckCancelled()
             values = dict(progress=max(1, min(99, percent)), message=message[:500])
-            if result is not None:
-                values["result_json"] = result
+            if report is not None:
+                values["result_json"] = report
             updated = db.execute(update(FactCheckRun).where(
                 FactCheckRun.id == run_id, FactCheckRun.status == "RUNNING",
             ).values(**values))
