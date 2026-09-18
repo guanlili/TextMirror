@@ -153,9 +153,15 @@ def _reset_celery_sync_engine():
 
 
 @pytest.fixture
-async def client():
+async def client(monkeypatch):
     await init_db()
-    redis_module.redis_client = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    server = fakeredis.FakeServer()
+    redis_module.redis_client = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
+    from app.tasks import proofread_task as task_module
+    monkeypatch.setattr(
+        task_module, "_get_sync_redis",
+        lambda: fakeredis.FakeRedis(server=server, decode_responses=True),
+    )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
         yield c
