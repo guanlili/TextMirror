@@ -18,7 +18,8 @@ TABLE = "llm_usage"
 
 
 def upgrade() -> None:
-    inspector = op.get_bind().dialect
+    from sqlalchemy import inspect
+    inspector = inspect(op.get_bind())
     existing = {
         idx["name"]
         for idx in inspector.get_indexes(TABLE)
