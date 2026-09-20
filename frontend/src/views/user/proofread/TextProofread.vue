@@ -968,9 +968,25 @@ async function handleProofread() {
 }
 
 // 复制结果
-function handleCopy() {
-  navigator.clipboard.writeText(currentText.value)
-  ElMessage.success('已复制到剪贴板')
+async function handleCopy() {
+  try {
+    await navigator.clipboard.writeText(currentText.value)
+    ElMessage.success('已复制到剪贴板')
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = currentText.value
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    try {
+      document.execCommand('copy')
+      ElMessage.success('已复制到剪贴板')
+    } catch {
+      ElMessage.error('复制失败，请手动选择复制')
+    }
+    document.body.removeChild(textarea)
+  }
 }
 
 // 导出：text=修改后全文；report=问题报告

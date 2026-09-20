@@ -94,7 +94,16 @@ def expire_collaboration_task(db_task_id: int) -> None:
     finish_failure(db_task_id, "TASK_EXPIRED", "任务未能按时完成，请重新发起协作审校", expired_only=True)
 
 
-@celery_app.task(name="proofread.collaborate", soft_time_limit=270, time_limit=300)
+@celery_app.task(
+    name="proofread.collaborate",
+    soft_time_limit=270,
+    time_limit=300,
+    autoretry_for=(ConnectionError, OSError, TimeoutError),
+    max_retries=2,
+    retry_backoff=True,
+    retry_backoff_max=30,
+    retry_jitter=True,
+)
 def async_collaboration(db_task_id: int):
     with Session(proofread_task._get_sync_engine()) as db:
         claimed = db.execute(update(ProofreadTask).where(

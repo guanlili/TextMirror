@@ -193,6 +193,13 @@ class ProofreadDocumentTask(celery_app.Task):
         if not args:
             return
         db_task_id = args[0]
+
+        refund_task_id = None
+        quota_key = None
+        api_key_id = None
+        refund_key = False
+        failure = None
+
         try:
             with Session(_get_sync_engine()) as session:
                 db_task = session.scalar(select(ProofreadTask).where(
@@ -218,13 +225,23 @@ class ProofreadDocumentTask(celery_app.Task):
                 failure = {"error_code": db_task.error_code or "PROOFREAD_FAILED",
                            "message": db_task.message or "校对任务最终失败"}
                 session.commit()
-            refund_document_quota_sync(refund_task_id, quota_key)
-            if refund_key and api_key_id and _refund_key_daily_quota(api_key_id, refund_task_id):
-                from app.services.webhook import build_event, dispatch_webhook
-
-                dispatch_webhook(api_key_id, build_event("document.failed", refund_task_id, failure))
         except Exception as e:
-            logger.warning(f"[on_failure] 处理失败 task_id={task_id}: {e}")
+            logger.error("[on_failure] DB update failed task_id={}: {}", task_id, e, exc_info=True)
+            return
+
+        try:
+            refund_document_quota_sync(refund_task_id, quota_key)
+        except Exception as e:
+            logger.error("[on_failure] Document quota refund failed task_id={}: {}", task_id, e, exc_info=True)
+
+        if refund_key and api_key_id:
+            try:
+                if _refund_key_daily_quota(api_key_id, refund_task_id):
+                    from app.services.webhook import build_event, dispatch_webhook
+
+                    dispatch_webhook(api_key_id, build_event("document.failed", refund_task_id, failure))
+            except Exception as e:
+                logger.error("[on_failure] Key quota refund failed task_id={}: {}", task_id, e, exc_info=True)
 
 
 def _is_invalid_config_error(exc: Exception) -> bool:

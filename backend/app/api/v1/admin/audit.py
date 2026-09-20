@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.core.database import get_db
 from app.core.dependencies import require_permission
@@ -91,8 +92,13 @@ async def list_audit_logs(
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    # 分页查询
+    # 分页查询（defer 重字段，避免加载全文快照到内存再截断）
     list_query = base_query.order_by(desc(AuditLog.created_at))
+    list_query = list_query.options(
+        defer(AuditLog.input_text),
+        defer(AuditLog.output_text),
+        defer(AuditLog.extra_params),
+    )
     list_query = list_query.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(list_query)
     logs = result.scalars().all()
@@ -229,9 +235,14 @@ async def get_action_types(
     _user=Depends(require_permission("admin:access")),
 ):
     """从审计数据聚合 distinct 动作类型（含出现次数），供筛选下拉动态渲染——
-    避免硬编码清单跟随代码漂移（新增动作自动出现）。"""
+    避免硬编码清单跟随代码漂移（新增动作自动出现）。
+    限定最近 90 天，与保留策略对齐，避免全表扫描。"""
+    from datetime import timedelta, timezone
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=90)
     rows = (await db.execute(
         select(AuditLog.action_type, func.count().label("count"))
+        .where(AuditLog.created_at >= cutoff)
         .group_by(AuditLog.action_type)
         .order_by(func.count().desc())
     )).all()

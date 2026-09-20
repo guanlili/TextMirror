@@ -147,7 +147,18 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-textmirror}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在项目根目录 .env 中设置 POSTGRES_PASSWORD}
       TZ: Asia/Shanghai
-    command: ["postgres", "-c", "listen_addresses=127.0.0.1", "-c", "max_connections=200"]
+    command:
+      - "postgres"
+      - "-c"
+      - "listen_addresses=127.0.0.1"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "statement_timeout=30000"
+      - "-c"
+      - "idle_in_transaction_session_timeout=60000"
+      - "-c"
+      - "log_min_duration_statement=5000"
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
       - ./data/backups:/backups

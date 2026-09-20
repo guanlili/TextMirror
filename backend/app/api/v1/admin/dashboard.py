@@ -86,6 +86,7 @@ async def get_dashboard_stats(
 @router.get("/model-usage", summary="按业务和模型查看实际调用用量（非费用账单）")
 async def get_model_usage(
     days: int = Query(30, ge=1, le=90),
+    limit: int = Query(200, ge=1, le=1000, description="最大返回分组数"),
     db: AsyncSession = Depends(get_db),
     _user=Depends(require_permission("admin:access")),
 ):
@@ -107,6 +108,7 @@ async def get_model_usage(
             func.avg(LLMUsage.elapsed_ms).label("average_ms"),
         ).where(LLMUsage.created_at >= start.astimezone(timezone.utc), LLMUsage.created_at <= now.astimezone(timezone.utc))
         .group_by(*columns).order_by(func.sum(LLMUsage.total_tokens).desc(), LLMUsage.business, LLMUsage.model)
+        .limit(limit)
     )).mappings().all()
     items = [{**row, "average_ms": round(float(row["average_ms"] or 0))} for row in rows]
     tracked_since = (await db.execute(select(func.min(LLMUsage.created_at)))).scalar_one()
