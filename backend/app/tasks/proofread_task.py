@@ -547,16 +547,16 @@ def clean_uploaded_documents():
 
     engine = _get_sync_engine()
     stats = {"deleted_records": 0, "orphan_dirs": 0, "expired_guest": 0, "missing_files": 0}
-    with engine.connect() as conn:
-        rows = conn.execute(sa_text(
-            "SELECT file_id, owner_kind, status, created_at FROM uploaded_documents"
-        )).fetchall()
 
-    known = {r[0]: {"owner_kind": r[1], "status": r[2], "created_at": r[3]} for r in rows}
+    with engine.connect() as conn:
+        deleted_rows = conn.execute(sa_text(
+            "SELECT file_id, owner_kind, status, created_at FROM uploaded_documents WHERE status = 'deleted'"
+        )).fetchall()
+    known = {r[0]: {"owner_kind": r[1], "status": r[2], "created_at": r[3]} for r in deleted_rows}
 
     # 1) 已删除记录的残留目录
     for file_id, info in known.items():
-        if info["status"] == "deleted" and os.path.isdir(os.path.join(upload_dir, file_id)):
+        if os.path.isdir(os.path.join(upload_dir, file_id)):
             remove_upload_dir(file_id)
             stats["deleted_records"] += 1
 
@@ -564,12 +564,12 @@ def clean_uploaded_documents():
     retention = settings.GUEST_FILE_RETENTION_DAYS
     if retention > 0:
         cutoff = datetime.now(timezone.utc) - timedelta(days=retention)
-        expired = [
-            fid for fid, info in known.items()
-            if info["owner_kind"] == "guest" and info["status"] != "deleted"
-            and info["created_at"] is not None
-            and _as_utc_naive_safe(info["created_at"]) < cutoff
-        ]
+        with engine.connect() as conn:
+            expired_rows = conn.execute(sa_text(
+                "SELECT file_id FROM uploaded_documents "
+                "WHERE owner_kind = 'guest' AND status != 'deleted' AND created_at < :cutoff"
+            ), {"cutoff": cutoff}).fetchall()
+        expired = [r[0] for r in expired_rows]
         for file_id in expired:
             remove_upload_dir(file_id)
             stats["expired_guest"] += 1
@@ -584,12 +584,16 @@ def clean_uploaded_documents():
                 )
                 conn.commit()
 
-    # 2) 孤儿目录（无任何数据库记录）
+    # 2) 孤儿目录（无任何数据库记录）— 需要全量 file_id 列表做差集
+    with engine.connect() as conn:
+        all_file_ids = {r[0] for r in conn.execute(sa_text(
+            "SELECT file_id FROM uploaded_documents"
+        )).fetchall()}
     min_age = settings.ORPHAN_DIR_MIN_AGE_HOURS * 3600
     now = time.time()
     for name in os.listdir(upload_dir):
         path = os.path.join(upload_dir, name)
-        if not os.path.isdir(path) or name == "icons" or name in known:
+        if not os.path.isdir(path) or name == "icons" or name in all_file_ids:
             continue
         try:
             if now - os.path.getmtime(path) < min_age:
@@ -600,8 +604,13 @@ def clean_uploaded_documents():
         stats["orphan_dirs"] += 1
 
     # 统计磁盘缺失的有效记录（只观察不处理）
-    for file_id, info in known.items():
-        if info["status"] != "deleted" and not os.path.isdir(os.path.join(upload_dir, file_id)):
+    with engine.connect() as conn:
+        active_rows = conn.execute(sa_text(
+            "SELECT file_id FROM uploaded_documents WHERE status != 'deleted'"
+        )).fetchall()
+    for r in active_rows:
+        file_id = r[0]
+        if not os.path.isdir(os.path.join(upload_dir, file_id)):
             stats["missing_files"] += 1
 
     logger.info(
@@ -623,6 +632,7 @@ def clean_old_audit_logs(retention_days: int = 90):
     """
     定时清理过期审计日志（默认保留 90 天，与后台手动清理同口径）。
     由 celery beat 每日 03:30 触发；audit_logs 含全文快照，只进不出会持续膨胀。
+    分批删除（每批 1000），避免大表单次长事务锁。
     """
     from datetime import datetime, timedelta, timezone
 
@@ -630,12 +640,24 @@ def clean_old_audit_logs(retention_days: int = 90):
 
     engine = _get_sync_engine()
     cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
-    with engine.connect() as conn:
-        result = conn.execute(
-            sa_text("DELETE FROM audit_logs WHERE created_at < :cutoff"),
-            {"cutoff": cutoff},
-        )
-        conn.commit()
-        deleted = result.rowcount or 0
-    logger.info(f"[定时清理] 审计日志清理完成: 删除 {deleted} 条（{retention_days} 天前）")
-    return {"deleted": deleted}
+    batch_size = 1000
+    total_deleted = 0
+
+    while True:
+        with engine.connect() as conn:
+            result = conn.execute(
+                sa_text(
+                    "DELETE FROM audit_logs WHERE id IN ("
+                    "SELECT id FROM audit_logs WHERE created_at < :cutoff LIMIT :batch_size"
+                    ")"
+                ),
+                {"cutoff": cutoff, "batch_size": batch_size},
+            )
+            conn.commit()
+            deleted = result.rowcount or 0
+        total_deleted += deleted
+        if deleted < batch_size:
+            break
+
+    logger.info(f"[定时清理] 审计日志清理完成: 删除 {total_deleted} 条（{retention_days} 天前）")
+    return {"deleted": total_deleted}

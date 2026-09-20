@@ -27,7 +27,8 @@ async def list_whitelist(
     """获取当前用户的放行词列表"""
     query = select(WhitelistWord).where(WhitelistWord.user_id == current_user.id)
     if keyword:
-        query = query.where(WhitelistWord.word.contains(keyword))
+        escaped = keyword.replace("%", "\\%").replace("_", "\\_")
+        query = query.where(WhitelistWord.word.contains(escaped))
     query = query.order_by(WhitelistWord.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
 

@@ -174,7 +174,7 @@ async def check_upload_rate_limit(request: Request, user=None) -> None:
     subject = f"user:{user.id}" if user is not None else f"ip:{get_client_ip(request)}"
     try:
         redis = get_redis()
-        minute = datetime.now().strftime("%Y%m%d%H%M")
+        minute = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d%H%M")
         key = f"textmirror:upload_rpm:{subject}:{minute}"
         count = await redis.incr(key)
         if count == 1:
@@ -198,7 +198,7 @@ async def check_api_key_rpm(api_key) -> None:
     """
     try:
         redis = get_redis()
-        minute = datetime.now().strftime("%Y%m%d%H%M")
+        minute = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d%H%M")
         rpm_key = f"textmirror:apikey_rpm:{api_key.id}:{minute}"
         rpm_count = await redis.incr(rpm_key)
         if rpm_count == 1:
