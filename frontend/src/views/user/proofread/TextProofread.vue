@@ -2,18 +2,49 @@
   <div class="text-proofread-page">
     <CollaborationProgress
       v-if="collaboration || collaborationTaskId"
-      :report="collaboration" :task-id="collaborationTaskId" :task-status="collaborationStatus"
-      :message="collaborationMessage" :error="collaborationError" :monitoring="collaborationMonitoring"
-      :cancelling="collaborationCancelling" :cancel-requested="collaborationCancelRequested" :view-only="!showResult"
-      @reconnect="reconnectCollaboration" @cancel="cancelCollaboration" @rerun="rerunCollaboration"
+      :report="collaboration"
+      :task-id="collaborationTaskId"
+      :task-status="collaborationStatus"
+      :message="collaborationMessage"
+      :error="collaborationError"
+      :monitoring="collaborationMonitoring"
+      :cancelling="collaborationCancelling"
+      :cancel-requested="collaborationCancelRequested"
+      :view-only="!showResult"
+      @reconnect="reconnectCollaboration"
+      @cancel="cancelCollaboration"
+      @rerun="rerunCollaboration"
     />
+    <ProofreadEntry v-if="!showResult" />
     <!-- 输入区域 -->
-    <div v-if="!showResult" class="input-section">
+    <div
+      v-if="!showResult"
+      class="input-section"
+    >
       <el-card class="input-card">
         <template #header>
           <div class="card-header">
-            <span class="card-title">文本在线校对</span>
-            <el-tag type="primary" effect="plain" size="small">粘贴或输入文本，AI 智能审校</el-tag>
+            <div>
+              <span class="card-title">待审校文本</span><p class="editor-caption">
+                专注内容，修改由你决定。
+              </p>
+            </div>
+            <el-button
+              v-if="!inputText"
+              text
+              :disabled="controlsLocked"
+              @click="useExample"
+            >
+              试用示例文本
+            </el-button>
+            <el-button
+              v-else
+              text
+              :disabled="controlsLocked"
+              @click="clearInput"
+            >
+              清空文本
+            </el-button>
           </div>
         </template>
 
@@ -23,89 +54,16 @@
             v-model="inputText"
             :disabled="controlsLocked"
             type="textarea"
-            :rows="10"
-            placeholder="请在此粘贴或输入需要校对的文本内容..."
+            :rows="17"
+            placeholder="在这里粘贴或写下你的内容…
+
+一封邮件、一篇文章，或一段需要仔细检查的文字。"
+            aria-label="待审校文本"
             resize="vertical"
             :maxlength="collaborationMode ? undefined : 100000"
-            :show-word-limit="!collaborationMode"
+            :show-word-limit="false"
+            @keydown="handleEditorKeydown"
           />
-        </div>
-
-        <!-- 校对设置 -->
-        <div class="proofread-settings">
-          <div class="setting-row">
-            <span class="setting-label">审校方式：</span>
-            <el-radio-group v-model="proofreadMode" :disabled="controlsLocked" aria-label="审校方式" aria-describedby="proofread-mode-help">
-              <el-radio-button value="single">单模型审校</el-radio-button>
-              <el-radio-button value="compare" :disabled="modelOptions.length < 2">多模型对比</el-radio-button>
-              <el-radio-button value="collaboration">协作审校</el-radio-button>
-            </el-radio-group>
-            <p id="proofread-mode-help" class="setting-help" aria-live="polite">{{ proofreadModeHints[proofreadMode] }}</p>
-          </div>
-          <p v-if="collaborationMode" class="collaboration-note">最多 8000 字，一轮最多复核 20 条；每任务一次应用额度，模型用量另计；不联网、不自动采纳。</p>
-          <p v-if="collaborationMode && collaborationBlocked" class="collaboration-warning" role="alert">{{ collaborationBlocked }}</p>
-          <p v-if="collaborationPending" class="collaboration-warning" role="alert">提交结果尚未确认。请保持此页，使用原参数重试同一请求，避免重复任务；取得任务编号后可通过地址刷新恢复。</p>
-          <p v-if="collaborationError && !collaborationTaskId" class="collaboration-warning" role="alert">{{ collaborationError }}</p>
-          <div class="setting-row">
-            <span class="setting-label">领域选择：</span>
-            <el-radio-group v-model="domain" :disabled="controlsLocked" class="setting-value" aria-describedby="proofread-domain-help">
-              <el-radio value="auto">自动</el-radio>
-              <el-radio value="general">通用</el-radio>
-              <el-radio value="official">公文</el-radio>
-              <el-radio value="legal">法律</el-radio>
-            </el-radio-group>
-            <p id="proofread-domain-help" class="setting-help" aria-live="polite">{{ proofreadDomainHints[domain] }}</p>
-          </div>
-          <div v-if="proofreadMode === 'single'" class="setting-row">
-            <span class="setting-label">审校深度：</span>
-            <el-radio-group v-model="depth" :disabled="controlsLocked" size="small" aria-describedby="proofread-depth-help">
-              <el-radio-button value="quick">快查</el-radio-button>
-              <el-radio-button value="standard">标准</el-radio-button>
-              <el-radio-button value="deep">深度</el-radio-button>
-            </el-radio-group>
-            <p id="proofread-depth-help" class="setting-help" aria-live="polite">{{ proofreadDepthHints[depth] }}</p>
-          </div>
-          <div v-if="modelOptions.length" class="setting-row">
-            <span class="setting-label">校对模型：</span>
-            <template v-if="compareMode">
-              <el-select
-                v-model="compareModelIds"
-                :disabled="controlsLocked"
-                multiple
-                collapse-tags
-                size="default"
-                class="setting-value"
-                style="max-width: 420px;"
-                placeholder="选择 2-4 个模型并发校对"
-                aria-describedby="proofread-model-help"
-              >
-                <el-option
-                  v-for="m in modelOptions"
-                  :key="m.id"
-                  :label="`${m.name}（${m.model}）`"
-                  :value="m.id"
-                />
-              </el-select>
-            </template>
-            <el-select
-              v-else
-              v-model="selectedModelId"
-              :disabled="controlsLocked"
-              size="default"
-              class="setting-value"
-              style="max-width: 320px;"
-              placeholder="默认当前模型"
-              aria-describedby="proofread-model-help"
-            >
-              <el-option
-                v-for="m in modelOptions"
-                :key="m.id"
-                :label="m.is_active ? `${m.name}（${m.model}）· 当前` : `${m.name}（${m.model}）`"
-                :value="m.id"
-              />
-            </el-select>
-            <p id="proofread-model-help" class="setting-help" aria-live="polite">{{ modelHint }}</p>
-          </div>
         </div>
 
         <!-- 操作按钮 -->
@@ -120,26 +78,226 @@
             <el-icon><Edit /></el-icon>
             {{ loading ? '校对中...' : collaborationMode ? (collaborationPending ? '重试提交（同一请求）' : '开始协作审校') : (compareMode ? '开始对比校对' : '开始校对') }}
           </el-button>
-          <el-button size="large" :disabled="controlsLocked" @click="inputText = ''">清空</el-button>
-          <el-button v-if="collaborationTerminal && !showResult" @click="clearCollaborationTask">返回编辑</el-button>
-          <span class="text-count">{{ Array.from(inputText).length }}{{ collaborationMode ? ' / 8000' : '' }} 字</span>
+
+          <el-button
+            v-if="collaborationTerminal && !showResult"
+            @click="clearCollaborationTask"
+          >
+            返回编辑
+          </el-button>
+          <span class="text-count">{{ Array.from(inputText).length.toLocaleString() }}{{ collaborationMode ? ' / 8,000' : ' / 100,000' }} 字<small>{{ inputText.trim() ? '⌘ / Ctrl + Enter 开始' : '输入文本后即可开始' }}</small></span>
         </div>
       </el-card>
+      <!-- 校对设置 -->
+      <aside
+        class="proofread-settings"
+        aria-label="审校设置"
+      >
+        <div class="settings-heading">
+          <span>审校设置</span><small>默认通用检查，输入后即可开始</small>
+        </div>
+        <ProfessionalRules
+          v-model="domain"
+          :disabled="controlsLocked"
+        />
+        <button
+          class="advanced-toggle"
+          :aria-expanded="advancedOpen"
+          @click="advancedOpen = !advancedOpen"
+        >
+          {{ advancedOpen ? '收起高级设置 −' : '高级设置：模型与审校方式 +' }}
+        </button>
+        <div
+          v-if="advancedOpen"
+          class="setting-row advanced-row"
+        >
+          <span class="setting-label">审校方式：</span>
+          <el-radio-group
+            v-model="proofreadMode"
+            :disabled="controlsLocked"
+            aria-label="审校方式"
+            aria-describedby="proofread-mode-help"
+          >
+            <el-radio-button value="single">
+              常规
+            </el-radio-button>
+            <el-radio-button
+              value="compare"
+              :disabled="modelOptions.length < 2"
+            >
+              多模型对比
+            </el-radio-button>
+            <el-radio-button value="collaboration">
+              协作审校
+            </el-radio-button>
+          </el-radio-group>
+          <p
+            id="proofread-mode-help"
+            class="setting-help"
+            aria-live="polite"
+          >
+            {{ proofreadModeHints[proofreadMode] }}
+          </p>
+        </div>
+        <p
+          v-if="collaborationMode"
+          class="collaboration-note"
+        >
+          最多 8000 字，一轮最多复核 20 条；每任务一次应用额度，模型用量另计；不联网、不自动采纳。
+        </p>
+        <p
+          v-if="collaborationMode && collaborationBlocked"
+          class="collaboration-warning"
+          role="alert"
+        >
+          {{ collaborationBlocked }}
+        </p>
+        <p
+          v-if="collaborationPending"
+          class="collaboration-warning"
+          role="alert"
+        >
+          提交结果尚未确认。请保持此页，使用原参数重试同一请求，避免重复任务；取得任务编号后可通过地址刷新恢复。
+        </p>
+        <p
+          v-if="collaborationError && !collaborationTaskId"
+          class="collaboration-warning"
+          role="alert"
+        >
+          {{ collaborationError }}
+        </p>
+        <div
+          v-if="proofreadMode === 'single'"
+          class="setting-row"
+        >
+          <span class="setting-label">审校深度：</span>
+          <el-radio-group
+            v-model="depth"
+            :disabled="controlsLocked"
+            size="small"
+            aria-describedby="proofread-depth-help"
+          >
+            <el-radio-button value="quick">
+              快速
+            </el-radio-button>
+            <el-radio-button value="standard">
+              标准
+            </el-radio-button>
+            <el-radio-button value="deep">
+              深度
+            </el-radio-button>
+          </el-radio-group>
+          <p
+            id="proofread-depth-help"
+            class="setting-help"
+            aria-live="polite"
+          >
+            {{ proofreadDepthHints[depth] }}
+          </p>
+        </div>
+        <div
+          v-if="modelOptions.length && advancedOpen"
+          class="setting-row"
+        >
+          <span class="setting-label">校对模型：</span>
+          <template v-if="compareMode">
+            <el-select
+              v-model="compareModelIds"
+              :disabled="controlsLocked"
+              multiple
+              collapse-tags
+              size="default"
+              class="setting-value"
+              style="max-width: 420px;"
+              placeholder="选择 2-4 个模型并发校对"
+              aria-describedby="proofread-model-help"
+            >
+              <el-option
+                v-for="m in modelOptions"
+                :key="m.id"
+                :label="`${m.name}（${m.model}）`"
+                :value="m.id"
+              />
+            </el-select>
+          </template>
+          <el-select
+            v-else
+            v-model="selectedModelId"
+            :disabled="controlsLocked"
+            size="default"
+            class="setting-value"
+            style="max-width: 320px;"
+            placeholder="默认当前模型"
+            aria-describedby="proofread-model-help"
+          >
+            <el-option
+              v-for="m in modelOptions"
+              :key="m.id"
+              :label="m.is_active ? `${m.name}（${m.model}）· 当前` : `${m.name}（${m.model}）`"
+              :value="m.id"
+            />
+          </el-select>
+          <p
+            id="proofread-model-help"
+            class="setting-help"
+            aria-live="polite"
+          >
+            {{ modelHint }}
+          </p>
+        </div>
+        <div class="settings-note">
+          <el-icon><InfoFilled /></el-icon><p>建议供你判断，不会自动改写原文。确认后可复制或导出结果。</p>
+        </div>
+      </aside>
     </div>
 
     <!-- 结果区域 -->
-    <div v-else class="result-section">
-      <ReviewWorkspace
-        :record-id="recordId" :source-text="sourceText" :issues="issues"
-        :coverage="coverage" :compare="compareSnapshot" :collaboration="collaboration" :domain="domain" :depth="depth" :config-id="compareResult ? null : selectedModelId"
-        :saved-review="savedReview" @saved="markSaved" @restore="restoreVersion"
+    <div
+      v-else
+      class="result-section"
+    >
+      <div class="review-heading">
+        <div><span class="review-eyebrow">审校结果</span><h2>逐条确认，让内容更准确</h2><p>共 {{ issues.length }} 项建议 · 已接受 {{ issues.filter(i => i._accepted).length }} 项 · 已忽略 {{ issues.filter(i => i._ignored).length }} 项</p></div>
+      </div>
+      <details class="review-tools">
+        <summary>草稿与版本管理{{ hasUnsavedChanges ? ' · 有未保存的修改' : '' }}</summary>
+        <ReviewWorkspace
+          :record-id="recordId"
+          :source-text="sourceText"
+          :issues="issues"
+          :coverage="coverage"
+          :compare="compareSnapshot"
+          :collaboration="collaboration"
+          :domain="domain"
+          :depth="depth"
+          :config-id="compareResult ? null : selectedModelId"
+          :saved-review="savedReview"
+          @saved="markSaved"
+          @restore="restoreVersion"
+        />
+      </details>
+      <QualityFeedbackDialog
+        ref="qualityFeedback"
+        :record-id="recordId"
+        :source-text="sourceText"
       />
-      <QualityFeedbackDialog ref="qualityFeedback" :record-id="recordId" :source-text="sourceText" />
-      <FactCheckPanel :record-id="recordId" :source-text="sourceText" @started="router.replace({ query: { ...route.query, review: String($event) } })" />
-      <ProofreadCoveragePanel
-        v-if="!compareResult && !collaboration" v-model:coverage="coverage" :source-text="sourceText"
-        :domain="domain" :depth="depth" :config-id="selectedModelId" @issues="mergeIssues"
-      />
+      <details class="review-tools">
+        <summary>检查覆盖范围与事实核查 · {{ compareResult ? compareCoverageLabel(compareResult) : collaboration ? collaborationCoverageLabel(collaboration) : coverage?.status === 'complete' ? '全文检查已完成' : coverage?.status === 'partial' ? '仍有未检查的内容' : '覆盖范围未确认' }}</summary>
+        <FactCheckPanel
+          :record-id="recordId"
+          :source-text="sourceText"
+          @started="router.replace({ query: { ...route.query, review: String($event) } })"
+        />
+        <ProofreadCoveragePanel
+          v-if="!compareResult && !collaboration"
+          v-model:coverage="coverage"
+          :source-text="sourceText"
+          :domain="domain"
+          :depth="depth"
+          :config-id="selectedModelId"
+          @issues="mergeIssues"
+        />
+      </details>
       <!-- ===== 多模型对比视图 ===== -->
       <template v-if="compareResult">
         <div class="result-toolbar">
@@ -147,23 +305,41 @@
             <el-icon><Back /></el-icon>返回编辑
           </el-button>
           <div class="toolbar-info">
-            <el-tag type="success">共识问题 {{ summaryStats.consensus }} 处</el-tag>
-            <el-tag type="info">领域：{{ domainLabel }}</el-tag>
-            <el-tag type="warning">已接受 {{ compareAcceptedCount }} 条</el-tag>
+            <el-tag type="success">
+              共识问题 {{ summaryStats.consensus }} 处
+            </el-tag>
+            <el-tag type="info">
+              领域：{{ domainLabel }}
+            </el-tag>
+            <el-tag type="warning">
+              已接受 {{ compareAcceptedCount }} 条
+            </el-tag>
           </div>
           <div class="toolbar-actions">
-            <el-button type="warning" @click="handleAcceptAll" :disabled="comparePendingCount === 0">
+            <el-button
+              type="warning"
+              :disabled="comparePendingCount === 0"
+              @click="handleAcceptAll"
+            >
               一键接受全部
             </el-button>
-            <el-button @click="handleCopy">复制结果</el-button>
+            <el-button @click="handleCopy">
+              复制结果
+            </el-button>
             <el-dropdown @command="handleExport">
               <el-button type="primary">
-                导出<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                导出<el-icon class="el-icon--right">
+                  <ArrowDown />
+                </el-icon>
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="text">修改后全文（TXT）</el-dropdown-item>
-                  <el-dropdown-item command="report">问题报告（TXT，含原文对照）</el-dropdown-item>
+                  <el-dropdown-item command="text">
+                    修改后全文（TXT）
+                  </el-dropdown-item>
+                  <el-dropdown-item command="report">
+                    问题报告（TXT，含原文对照）
+                  </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -171,14 +347,19 @@
         </div>
 
         <!-- 修改结果预览 -->
-        <el-card class="compare-card" style="margin-bottom: 14px;">
+        <el-card
+          class="compare-card"
+          style="margin-bottom: 14px;"
+        >
           <template #header>
             <div class="column-header">
               <span class="column-title"><el-icon><Tickets /></el-icon>修改后全文（实时预览）</span>
               <span class="text-count">{{ currentText.length }} 字</span>
             </div>
           </template>
-          <div class="compare-text-preview">{{ currentText }}</div>
+          <div class="compare-text-preview">
+            {{ currentText }}
+          </div>
         </el-card>
 
         <!-- 各模型结果标签页 -->
@@ -188,39 +369,88 @@
             <el-tab-pane name="__summary__">
               <template #label>
                 <span style="font-weight: 600;">综合建议</span>
-                <el-tag type="danger" size="small" style="margin-left: 6px;">{{ summaryStats.total }}</el-tag>
+                <el-tag
+                  type="danger"
+                  size="small"
+                  style="margin-left: 6px;"
+                >
+                  {{ summaryStats.total }}
+                </el-tag>
               </template>
 
-              <el-alert v-if="compareIncomplete" type="warning" :closable="false" :title="`${compareCoverageLabel(compareResult)}；请查看模型明细，当前共识仅代表已发现的问题。`" />
+              <el-alert
+                v-if="compareIncomplete"
+                type="warning"
+                :closable="false"
+                :title="`${compareCoverageLabel(compareResult)}；请查看模型明细，当前共识仅代表已发现的问题。`"
+              />
               <div class="summary-stats">
                 <div class="stat-item">
-                  <div class="stat-num is-consensus">{{ summaryStats.consensus }}</div>
-                  <div class="stat-label">多模型一致</div>
+                  <div class="stat-num is-consensus">
+                    {{ summaryStats.consensus }}
+                  </div>
+                  <div class="stat-label">
+                    多模型一致
+                  </div>
                 </div>
                 <div class="stat-item">
-                  <div class="stat-num is-unique">{{ summaryStats.unique }}</div>
-                  <div class="stat-label">单模型发现（待把关）</div>
+                  <div class="stat-num is-unique">
+                    {{ summaryStats.unique }}
+                  </div>
+                  <div class="stat-label">
+                    单模型发现（待把关）
+                  </div>
                 </div>
                 <div class="stat-item">
-                  <div class="stat-num is-accepted">{{ compareAcceptedCount }}</div>
-                  <div class="stat-label">已接受</div>
+                  <div class="stat-num is-accepted">
+                    {{ compareAcceptedCount }}
+                  </div>
+                  <div class="stat-label">
+                    已接受
+                  </div>
                 </div>
-                <div class="stat-item" v-for="r in summaryStats.models" :key="r.id">
-                  <div class="stat-num">{{ r.count }}</div>
-                  <div class="stat-label">{{ r.name }}</div>
+                <div
+                  v-for="r in summaryStats.models"
+                  :key="r.id"
+                  class="stat-item"
+                >
+                  <div class="stat-num">
+                    {{ r.count }}
+                  </div>
+                  <div class="stat-label">
+                    {{ r.name }}
+                  </div>
                 </div>
               </div>
 
               <!-- 分级接受策略 -->
               <div class="summary-strategy">
                 <span class="strategy-label">一键应用：</span>
-                <el-button size="small" type="success" plain @click="handleAcceptByStrategy('consensus')" :disabled="summaryStats.consensusPending === 0">
+                <el-button
+                  size="small"
+                  type="success"
+                  plain
+                  :disabled="summaryStats.consensusPending === 0"
+                  @click="handleAcceptByStrategy('consensus')"
+                >
                   只接受多模型一致（{{ summaryStats.consensusPending }} 条）
                 </el-button>
-                <el-button size="small" type="warning" plain @click="handleAcceptByStrategy('high')" :disabled="summaryStats.highPending === 0">
+                <el-button
+                  size="small"
+                  type="warning"
+                  plain
+                  :disabled="summaryStats.highPending === 0"
+                  @click="handleAcceptByStrategy('high')"
+                >
                   一致 + 高严重度独有（{{ summaryStats.highPending }} 条）
                 </el-button>
-                <el-button size="small" type="danger" plain @click="handleAcceptByStrategy('all')" :disabled="comparePendingCount === 0">
+                <el-button
+                  size="small"
+                  type="danger"
+                  plain
+                  :disabled="comparePendingCount === 0"
+                  @click="handleAcceptByStrategy('all')"
+                >
                   全部（{{ comparePendingCount }} 条）
                 </el-button>
               </div>
@@ -234,38 +464,106 @@
                   :class="{ 'is-consensus': item.isConsensus, 'is-accepted': item.issue._accepted, 'is-ignored': item.issue._ignored }"
                 >
                   <div class="issue-head">
-                    <el-tag :type="severityColor(item.issue.severity)" size="small">{{ typeLabel(item.issue.type) }}</el-tag>
-                    <el-tag :type="item.isConsensus ? 'success' : 'warning'" size="small" effect="plain">
+                    <el-tag
+                      :type="severityColor(item.issue.severity)"
+                      size="small"
+                    >
+                      {{ typeLabel(item.issue.type) }}
+                    </el-tag>
+                    <el-tag
+                      :type="item.isConsensus ? 'success' : 'warning'"
+                      size="small"
+                      effect="plain"
+                    >
                       {{ item.isConsensus ? `${item.modelCount} 个模型一致` : '仅 1 个模型发现' }}
                     </el-tag>
                     <span class="issue-source">{{ item.sources }}</span>
                   </div>
                   <div class="issue-body">
-                    <div class="issue-context">{{ issueContext(item.issue) }}</div>
+                    <div class="issue-context">
+                      {{ issueContext(item.issue) }}
+                    </div>
                     <div><span class="label">原文：</span><span class="text-del">{{ item.issue.original }}</span></div>
                     <div><span class="label">建议：</span><span class="text-add">{{ item.issue.suggestion }}</span></div>
-                    <div v-if="item.issue.explanation"><span class="label">说明：</span><span class="text-muted">{{ item.issue.explanation }}</span></div>
+                    <div v-if="item.issue.explanation">
+                      <span class="label">说明：</span><span class="text-muted">{{ item.issue.explanation }}</span>
+                    </div>
                   </div>
-                  <div class="issue-actions" v-if="!item.issue._accepted && !item.issue._ignored">
-                    <el-button v-if="item.issue.suggestion" type="primary" size="small" @click="acceptIssue(item.issue)">
+                  <div
+                    v-if="!item.issue._accepted && !item.issue._ignored"
+                    class="issue-actions"
+                  >
+                    <el-button
+                      v-if="item.issue.suggestion"
+                      type="primary"
+                      size="small"
+                      @click="acceptIssue(item.issue)"
+                    >
                       <el-icon><Check /></el-icon>仅修改此处
                     </el-button>
-                    <el-button v-else-if="item.issue.type === 'sensitive' && item.issue.original" type="warning" size="small" @click="deleteIssue(item.issue)">
+                    <el-button
+                      v-else-if="item.issue.type === 'sensitive' && item.issue.original"
+                      type="warning"
+                      size="small"
+                      @click="deleteIssue(item.issue)"
+                    >
                       <el-icon><Delete /></el-icon>删除该词
                     </el-button>
-                    <el-button v-if="item.issue.suggestion || item.issue.type === 'sensitive'" size="small" @click="acceptMatching(item.issue)">全文同类</el-button>
-                    <el-button size="small" @click="ignoreIssue(item.issue)">
+                    <el-button
+                      v-if="item.issue.suggestion || item.issue.type === 'sensitive'"
+                      size="small"
+                      @click="acceptMatching(item.issue)"
+                    >
+                      全文同类
+                    </el-button>
+                    <el-button
+                      size="small"
+                      @click="ignoreIssue(item.issue)"
+                    >
                       <el-icon><Close /></el-icon>忽略
                     </el-button>
                   </div>
-                  <div class="issue-status" v-else>
-                    <el-tag v-if="item.issue._accepted" type="success" size="small">已接受</el-tag>
-                    <el-tag v-if="item.issue._ignored" type="info" size="small">已忽略</el-tag>
-                    <el-button v-if="item.issue._ignored" text size="small" :disabled="recordId === null" @click="qualityFeedback?.open(item.issue)">补充原因（可选）</el-button>
-                    <el-button text size="small" @click="undoIssue(item.issue)">撤销</el-button>
+                  <div
+                    v-else
+                    class="issue-status"
+                  >
+                    <el-tag
+                      v-if="item.issue._accepted"
+                      type="success"
+                      size="small"
+                    >
+                      已接受
+                    </el-tag>
+                    <el-tag
+                      v-if="item.issue._ignored"
+                      type="info"
+                      size="small"
+                    >
+                      已忽略
+                    </el-tag>
+                    <el-button
+                      v-if="item.issue._ignored"
+                      text
+                      size="small"
+                      :disabled="recordId === null"
+                      @click="qualityFeedback?.open(item.issue)"
+                    >
+                      补充原因（可选）
+                    </el-button>
+                    <el-button
+                      text
+                      size="small"
+                      @click="undoIssue(item.issue)"
+                    >
+                      撤销
+                    </el-button>
                   </div>
                 </div>
-                <el-empty v-if="summaryIssues.length === 0" description="当前结果暂无问题，请同时确认各模型是否完整审校" :image-size="60" />
+                <el-empty
+                  v-if="summaryIssues.length === 0"
+                  description="当前结果暂无问题，请同时确认各模型是否完整审校"
+                  :image-size="60"
+                />
               </div>
             </el-tab-pane>
 
@@ -281,18 +579,52 @@
                   :type="r.success ? (comparePendingCountOf(r) > 0 ? 'danger' : 'success') : 'info'"
                   size="small"
                   style="margin-left: 6px;"
-                >{{ r.success ? comparePendingCountOf(r) : '失败' }}</el-tag>
+                >
+                  {{ r.success ? comparePendingCountOf(r) : '失败' }}
+                </el-tag>
               </template>
 
-              <div v-if="!r.success" class="compare-error">
-                <el-alert type="error" :closable="false" show-icon :title="`校对失败：${r.error || '未知错误'}`" />
+              <div
+                v-if="!r.success"
+                class="compare-error"
+              >
+                <el-alert
+                  type="error"
+                  :closable="false"
+                  show-icon
+                  :title="`校对失败：${r.error || '未知错误'}`"
+                />
               </div>
               <template v-else>
-                <ProofreadCoveragePanel :coverage="r.coverage" :source-text="sourceText" :domain="r.domain || domain" :depth="r.depth || 'standard'" :config-id="r.config_id" @update:coverage="updateCompareCoverage(r.config_id, $event)" @issues="mergeCompareRetry(r.config_id, $event)" />
+                <ProofreadCoveragePanel
+                  :coverage="r.coverage"
+                  :source-text="sourceText"
+                  :domain="r.domain || domain"
+                  :depth="r.depth || 'standard'"
+                  :config-id="r.config_id"
+                  @update:coverage="updateCompareCoverage(r.config_id, $event)"
+                  @issues="mergeCompareRetry(r.config_id, $event)"
+                />
                 <div class="compare-meta">
-                  <el-tag type="info" effect="plain" size="small">模型：{{ r.model }}</el-tag>
-                  <el-tag type="info" effect="plain" size="small">耗时 {{ (r.elapsed_ms / 1000).toFixed(1) }}s</el-tag>
-                  <el-tag type="success" effect="plain" size="small">
+                  <el-tag
+                    type="info"
+                    effect="plain"
+                    size="small"
+                  >
+                    模型：{{ r.model }}
+                  </el-tag>
+                  <el-tag
+                    type="info"
+                    effect="plain"
+                    size="small"
+                  >
+                    耗时 {{ (r.elapsed_ms / 1000).toFixed(1) }}s
+                  </el-tag>
+                  <el-tag
+                    type="success"
+                    effect="plain"
+                    size="small"
+                  >
                     独有 {{ summaryIssues.filter(item => item.modelCount === 1 && item.modelIds.includes(r.config_id)).length }} 个
                   </el-tag>
                 </div>
@@ -304,40 +636,105 @@
                     :class="{ 'is-consensus': isConsensusIssue(issue), 'is-accepted': issue._accepted, 'is-ignored': issue._ignored }"
                   >
                     <div class="issue-head">
-                      <el-tag :type="severityColor(issue.severity)" size="small">{{ typeLabel(issue.type) }}</el-tag>
+                      <el-tag
+                        :type="severityColor(issue.severity)"
+                        size="small"
+                      >
+                        {{ typeLabel(issue.type) }}
+                      </el-tag>
                       <el-tag
                         :type="isConsensusIssue(issue) ? 'success' : 'warning'"
-                        size="small" effect="plain"
+                        size="small"
+                        effect="plain"
                       >
                         {{ isConsensusIssue(issue) ? '共识' : '独有' }}
                       </el-tag>
                     </div>
                     <div class="issue-body">
-                      <div class="issue-context">{{ issueContext(issue) }}</div>
+                      <div class="issue-context">
+                        {{ issueContext(issue) }}
+                      </div>
                       <div><span class="label">原文：</span><span class="text-del">{{ issue.original }}</span></div>
                       <div><span class="label">建议：</span><span class="text-add">{{ issue.suggestion }}</span></div>
-                      <div v-if="issue.explanation"><span class="label">说明：</span><span class="text-muted">{{ issue.explanation }}</span></div>
+                      <div v-if="issue.explanation">
+                        <span class="label">说明：</span><span class="text-muted">{{ issue.explanation }}</span>
+                      </div>
                     </div>
-                    <div class="issue-actions" v-if="!issue._accepted && !issue._ignored">
-                      <el-button v-if="issue.suggestion" type="primary" size="small" @click="acceptIssue(issue)">
+                    <div
+                      v-if="!issue._accepted && !issue._ignored"
+                      class="issue-actions"
+                    >
+                      <el-button
+                        v-if="issue.suggestion"
+                        type="primary"
+                        size="small"
+                        @click="acceptIssue(issue)"
+                      >
                         <el-icon><Check /></el-icon>仅修改此处
                       </el-button>
-                      <el-button v-else-if="issue.type === 'sensitive' && issue.original" type="warning" size="small" @click="deleteIssue(issue)">
+                      <el-button
+                        v-else-if="issue.type === 'sensitive' && issue.original"
+                        type="warning"
+                        size="small"
+                        @click="deleteIssue(issue)"
+                      >
                         <el-icon><Delete /></el-icon>删除该词
                       </el-button>
-                      <el-button v-if="issue.suggestion || issue.type === 'sensitive'" size="small" @click="acceptMatching(issue)">全文同类</el-button>
-                      <el-button size="small" @click="ignoreIssue(issue)">
+                      <el-button
+                        v-if="issue.suggestion || issue.type === 'sensitive'"
+                        size="small"
+                        @click="acceptMatching(issue)"
+                      >
+                        全文同类
+                      </el-button>
+                      <el-button
+                        size="small"
+                        @click="ignoreIssue(issue)"
+                      >
                         <el-icon><Close /></el-icon>忽略
                       </el-button>
                     </div>
-                    <div class="issue-status" v-else>
-                      <el-tag v-if="issue._accepted" type="success" size="small">已接受</el-tag>
-                      <el-tag v-if="issue._ignored" type="info" size="small">已忽略</el-tag>
-                      <el-button v-if="issue._ignored" text size="small" :disabled="recordId === null" @click="qualityFeedback?.open(issue)">补充原因（可选）</el-button>
-                      <el-button text size="small" @click="undoIssue(issue)">撤销</el-button>
+                    <div
+                      v-else
+                      class="issue-status"
+                    >
+                      <el-tag
+                        v-if="issue._accepted"
+                        type="success"
+                        size="small"
+                      >
+                        已接受
+                      </el-tag>
+                      <el-tag
+                        v-if="issue._ignored"
+                        type="info"
+                        size="small"
+                      >
+                        已忽略
+                      </el-tag>
+                      <el-button
+                        v-if="issue._ignored"
+                        text
+                        size="small"
+                        :disabled="recordId === null"
+                        @click="qualityFeedback?.open(issue)"
+                      >
+                        补充原因（可选）
+                      </el-button>
+                      <el-button
+                        text
+                        size="small"
+                        @click="undoIssue(issue)"
+                      >
+                        撤销
+                      </el-button>
                     </div>
                   </div>
-                  <el-empty v-if="r.issues.length === 0" :description="r.coverage?.status === 'partial' ? '已完成范围暂无问题，仍有未审段落' : '该模型未发现问题'" :image-size="60" />
+                  <el-empty
+                    v-if="r.issues.length === 0"
+                    :description="r.coverage?.status === 'partial' ? '已完成范围暂无问题，仍有未审段落' : '该模型未发现问题'"
+                    :image-size="60"
+                  />
                 </div>
               </template>
             </el-tab-pane>
@@ -347,164 +744,312 @@
 
       <!-- ===== 普通单模型视图 ===== -->
       <template v-else>
-      <!-- 顶部操作栏 -->
-      <div class="result-toolbar">
-        <el-button @click="goBack">
-          <el-icon><Back /></el-icon>返回编辑
-        </el-button>
-        <div class="toolbar-info">
-          <el-tag type="success">共发现 {{ issues.length }} 个问题</el-tag>
-          <el-tag type="info">领域：{{ domainLabel }}</el-tag>
-        </div>
-        <div class="toolbar-actions">
-          <el-button type="warning" @click="handleAcceptAll" :disabled="issues.length === 0">
-            一键修改全部
+        <!-- 顶部操作栏 -->
+        <div class="result-toolbar">
+          <el-button @click="goBack">
+            <el-icon><Back /></el-icon>返回编辑
           </el-button>
-          <el-button @click="handleCopy">复制结果</el-button>
-          <el-dropdown @command="handleExport">
-            <el-button type="primary">
-              导出<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="text">修改后全文（TXT）</el-dropdown-item>
-                <el-dropdown-item command="report">问题报告（TXT，含原文对照）</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </div>
-      </div>
-
-      <!-- 双栏对照 -->
-      <div class="result-columns">
-        <!-- 左栏：原文展示 -->
-        <el-card class="column-card original-column">
-          <template #header>
-            <div class="column-header">
-              <span class="column-title">
-                <el-icon><Tickets /></el-icon>
-                原文对照
-              </span>
-              <span class="text-count">{{ currentText.length }} 字</span>
-            </div>
-          </template>
-          <ReviewPreview :source-text="sourceText" :current-text="currentText" :issues="issues" :patches="patches" :active-index="activeIssueIndex" />
-        </el-card>
-
-        <!-- 右栏：问题列表 -->
-        <el-card class="column-card issues-column">
-          <template #header>
-            <div class="issues-header">
-              <span class="issues-title">
-                <el-icon><Document /></el-icon>
-                问题列表
-                <el-tag type="info" effect="plain" size="small" round>{{ filteredIssues.length }}</el-tag>
-              </span>
-              <el-select
-                v-model="filterType"
-                placeholder="全部类型"
-                clearable
-                size="default"
-                class="filter-select"
-              >
-                <template #prefix>
-                  <el-icon><Filter /></el-icon>
-                </template>
-                <el-option label="全部类型" value="">
-                  <el-icon style="vertical-align:middle;margin-right:6px;"><Menu /></el-icon>全部类型
-                </el-option>
-                <el-option label="错别字" value="typo">
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;"><EditPen /></el-icon>错别字
-                </el-option>
-                <el-option label="语法错误" value="grammar">
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#e6a23c;"><Reading /></el-icon>语法错误
-                </el-option>
-                <el-option label="标点符号" value="punctuation">
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#909399;"><Operation /></el-icon>标点符号
-                </el-option>
-                <el-option label="表达优化" value="style">
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#409eff;"><MagicStick /></el-icon>表达优化
-                </el-option>
-                <el-option label="敏感词" value="sensitive">
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;"><Warning /></el-icon>敏感词
-                </el-option>
-                <el-option label="逻辑问题" value="logic">
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#67c23a;"><Connection /></el-icon>逻辑问题
-                </el-option>
-              </el-select>
-            </div>
-          </template>
-          <div class="issues-list">
-            <div
-              v-for="(issue, index) in filteredIssues"
-              :key="index"
-              class="issue-item"
-              :class="{
-                'is-accepted': issue._accepted,
-                'is-ignored': issue._ignored,
-                'is-active': activeIssueIndex === getGlobalIndex(issue),
-              }"
-              @mouseenter="activeIssueIndex = getGlobalIndex(issue)"
-              @mouseleave="activeIssueIndex = -1"
-            >
-              <div class="issue-header">
-                <span class="issue-number">#{{ getGlobalIndex(issue) + 1 }}</span>
-                <el-tag :type="severityColor(issue.severity)" size="small" effect="dark">
-                  {{ typeLabel(issue.type) }}
-                </el-tag>
-                <el-tag :type="severityTagType(issue.severity)" size="small" effect="plain">
-                  {{ severityLabel(issue.severity) }}
-                </el-tag>
-              </div>
-              <div class="issue-body">
-                <div class="issue-context">{{ issueContext(issue) }}</div>
-                <div class="issue-diff">
-                  <span class="text text-del" :title="issue.original">{{ issue.original }}</span>
-                  <el-icon class="arrow-icon"><Right /></el-icon>
-                  <span class="text text-add" :title="issue.suggestion">{{ issue.suggestion }}</span>
-                </div>
-                <div v-if="issue.explanation" class="issue-explanation">
-                  <el-icon><InfoFilled /></el-icon>
-                  <span>{{ issue.explanation }}</span>
-                </div>
-                <p v-if="collaboration" class="collaboration-note" data-testid="collaboration-provenance">{{ issueProvenance(issue) }}</p>
-              </div>
-              <div class="issue-actions" v-if="!issue._accepted && !issue._ignored">
-                <el-button v-if="issue.suggestion" type="primary" size="small" @click="acceptIssue(issue)">
-                  <el-icon><Check /></el-icon>仅修改此处
-                </el-button>
-                <el-button v-else-if="issue.type === 'sensitive' && issue.original" type="warning" size="small" @click="deleteIssue(issue)">
-                  <el-icon><Delete /></el-icon>删除该词
-                </el-button>
-                <el-button v-if="issue.suggestion || issue.type === 'sensitive'" size="small" @click="acceptMatching(issue)">全文同类</el-button>
-                <el-button size="small" @click="ignoreIssue(issue)">
-                  <el-icon><Close /></el-icon>忽略
-                </el-button>
-              </div>
-              <div class="issue-status" v-else>
-                <el-tag v-if="issue._accepted" type="success" size="small">已接受</el-tag>
-                <el-tag v-if="issue._ignored" type="info" size="small">已忽略</el-tag>
-                <el-button v-if="issue._ignored" text size="small" :disabled="recordId === null" @click="qualityFeedback?.open(issue)">补充原因（可选）</el-button>
-                <el-button text size="small" @click="undoIssue(issue)">撤销</el-button>
-              </div>
-            </div>
-            <el-empty v-if="filteredIssues.length === 0" :description="collaboration?.status === 'partial' ? '已发现范围暂无问题，协作流程尚未完整完成' : coverage?.status === 'partial' ? '已完成范围暂无问题，仍有未审段落' : (filterType ? '此类型暂无问题' : '没有发现问题，仍需人工复核')" />
+          <div class="toolbar-info">
+            <el-tag type="success">
+              共发现 {{ issues.length }} 个问题
+            </el-tag>
+            <el-tag type="info">
+              领域：{{ domainLabel }}
+            </el-tag>
           </div>
-        </el-card>
-      </div>
+          <div class="toolbar-actions">
+            <el-button
+              type="warning"
+              :disabled="issues.length === 0"
+              @click="handleAcceptAll"
+            >
+              一键修改全部
+            </el-button>
+            <el-button @click="handleCopy">
+              复制结果
+            </el-button>
+            <el-dropdown @command="handleExport">
+              <el-button type="primary">
+                导出<el-icon class="el-icon--right">
+                  <ArrowDown />
+                </el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="text">
+                    修改后全文（TXT）
+                  </el-dropdown-item>
+                  <el-dropdown-item command="report">
+                    问题报告（TXT，含原文对照）
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
+        </div>
+
+        <!-- 双栏对照 -->
+        <div class="result-columns">
+          <!-- 左栏：原文展示 -->
+          <el-card class="column-card original-column">
+            <template #header>
+              <div class="column-header">
+                <span class="column-title">
+                  <el-icon><Tickets /></el-icon>
+                  文本与修订预览
+                </span>
+                <span class="text-count">{{ currentText.length }} 字</span>
+              </div>
+            </template>
+            <ReviewPreview
+              :source-text="sourceText"
+              :current-text="currentText"
+              :issues="issues"
+              :patches="patches"
+              :active-index="activeIssueIndex"
+            />
+          </el-card>
+
+          <!-- 右栏：问题列表 -->
+          <el-card class="column-card issues-column">
+            <template #header>
+              <div class="issues-header">
+                <span class="issues-title">
+                  <el-icon><Document /></el-icon>
+                  修改建议
+                  <el-tag
+                    type="info"
+                    effect="plain"
+                    size="small"
+                    round
+                  >{{ filteredIssues.length }}</el-tag>
+                </span>
+                <el-select
+                  v-model="filterType"
+                  placeholder="全部类型"
+                  clearable
+                  size="default"
+                  class="filter-select"
+                >
+                  <template #prefix>
+                    <el-icon><Filter /></el-icon>
+                  </template>
+                  <el-option
+                    label="全部类型"
+                    value=""
+                  >
+                    <el-icon style="vertical-align:middle;margin-right:6px;">
+                      <Menu />
+                    </el-icon>全部类型
+                  </el-option>
+                  <el-option
+                    label="错别字"
+                    value="typo"
+                  >
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;">
+                      <EditPen />
+                    </el-icon>错别字
+                  </el-option>
+                  <el-option
+                    label="语法错误"
+                    value="grammar"
+                  >
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:#e6a23c;">
+                      <Reading />
+                    </el-icon>语法错误
+                  </el-option>
+                  <el-option
+                    label="标点符号"
+                    value="punctuation"
+                  >
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:#909399;">
+                      <Operation />
+                    </el-icon>标点符号
+                  </el-option>
+                  <el-option
+                    label="表达优化"
+                    value="style"
+                  >
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:#409eff;">
+                      <MagicStick />
+                    </el-icon>表达优化
+                  </el-option>
+                  <el-option
+                    label="敏感词"
+                    value="sensitive"
+                  >
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;">
+                      <Warning />
+                    </el-icon>敏感词
+                  </el-option>
+                  <el-option
+                    label="逻辑问题"
+                    value="logic"
+                  >
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:#67c23a;">
+                      <Connection />
+                    </el-icon>逻辑问题
+                  </el-option>
+                </el-select>
+              </div>
+            </template>
+            <div class="issues-list">
+              <div
+                v-for="(issue, index) in filteredIssues"
+                :key="index"
+                class="issue-item"
+                :class="{
+                  'is-accepted': issue._accepted,
+                  'is-ignored': issue._ignored,
+                  'is-active': activeIssueIndex === getGlobalIndex(issue),
+                }"
+                tabindex="0"
+                @focus="activeIssueIndex = getGlobalIndex(issue)"
+                @click="activeIssueIndex = getGlobalIndex(issue)"
+                @mouseenter="activeIssueIndex = getGlobalIndex(issue)"
+                @mouseleave="activeIssueIndex = -1"
+              >
+                <div class="issue-header">
+                  <span class="issue-number">#{{ getGlobalIndex(issue) + 1 }}</span>
+                  <el-tag
+                    :type="severityColor(issue.severity)"
+                    size="small"
+                    effect="dark"
+                  >
+                    {{ typeLabel(issue.type) }}
+                  </el-tag>
+                  <el-tag
+                    :type="severityTagType(issue.severity)"
+                    size="small"
+                    effect="plain"
+                  >
+                    {{ severityLabel(issue.severity) }}
+                  </el-tag>
+                </div>
+                <div class="issue-body">
+                  <div class="issue-context">
+                    {{ issueContext(issue) }}
+                  </div>
+                  <div class="issue-diff">
+                    <span
+                      class="text text-del"
+                      :title="issue.original"
+                    >{{ issue.original }}</span>
+                    <el-icon class="arrow-icon">
+                      <Right />
+                    </el-icon>
+                    <span
+                      class="text text-add"
+                      :title="issue.suggestion"
+                    >{{ issue.suggestion }}</span>
+                  </div>
+                  <div
+                    v-if="issue.explanation"
+                    class="issue-explanation"
+                  >
+                    <el-icon><InfoFilled /></el-icon>
+                    <span>{{ issue.explanation }}</span>
+                  </div>
+                  <p
+                    v-if="collaboration"
+                    class="collaboration-note"
+                    data-testid="collaboration-provenance"
+                  >
+                    {{ issueProvenance(issue) }}
+                  </p>
+                </div>
+                <div
+                  v-if="!issue._accepted && !issue._ignored"
+                  class="issue-actions"
+                >
+                  <el-button
+                    v-if="issue.suggestion"
+                    type="primary"
+                    size="small"
+                    @click="acceptIssue(issue)"
+                  >
+                    <el-icon><Check /></el-icon>仅修改此处
+                  </el-button>
+                  <el-button
+                    v-else-if="issue.type === 'sensitive' && issue.original"
+                    type="warning"
+                    size="small"
+                    @click="deleteIssue(issue)"
+                  >
+                    <el-icon><Delete /></el-icon>删除该词
+                  </el-button>
+                  <el-button
+                    v-if="issue.suggestion || issue.type === 'sensitive'"
+                    size="small"
+                    @click="acceptMatching(issue)"
+                  >
+                    全文同类
+                  </el-button>
+                  <el-button
+                    size="small"
+                    @click="ignoreIssue(issue)"
+                  >
+                    <el-icon><Close /></el-icon>忽略
+                  </el-button>
+                </div>
+                <div
+                  v-else
+                  class="issue-status"
+                >
+                  <el-tag
+                    v-if="issue._accepted"
+                    type="success"
+                    size="small"
+                  >
+                    已接受
+                  </el-tag>
+                  <el-tag
+                    v-if="issue._ignored"
+                    type="info"
+                    size="small"
+                  >
+                    已忽略
+                  </el-tag>
+                  <el-button
+                    v-if="issue._ignored"
+                    text
+                    size="small"
+                    :disabled="recordId === null"
+                    @click="qualityFeedback?.open(issue)"
+                  >
+                    补充原因（可选）
+                  </el-button>
+                  <el-button
+                    text
+                    size="small"
+                    @click="undoIssue(issue)"
+                  >
+                    撤销
+                  </el-button>
+                </div>
+              </div>
+              <el-empty
+                v-if="filteredIssues.length === 0"
+                :description="collaboration?.status === 'partial' ? '已发现范围暂无问题，协作流程尚未完整完成' : coverage?.status === 'partial' ? '已完成范围暂无问题，仍有未审段落' : (filterType ? '此类型暂无问题' : '没有发现问题，仍需人工复核')"
+              />
+            </div>
+          </el-card>
+        </div>
       </template>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import ProfessionalRules from '@/components/ProfessionalRules.vue'
+import ProofreadEntry from '@/components/ProofreadEntry.vue'
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { textProofreadApi, proofreadCompareApi, type ProofreadCompareResponse, type ProofreadCoverage, type ProofreadIssue } from '@/api/proofread'
 import { getAvailableModelsCached, type AvailableModel } from '@/api/polish'
 import { getReviewApi, type ReviewResponse, type ReviewRestorePayload } from '@/api/review'
-import { severityColor, severityLabel, typeLabel, downloadTextFile, proofreadModeHints, proofreadDomainHints, proofreadDepthHints } from '@/utils/proofread'
+import { severityColor, severityLabel, typeLabel, downloadTextFile, proofreadModeHints, proofreadDepthHints } from '@/utils/proofread'
 import { useProofreadReview, type ReviewIssue } from '@/composables/useProofreadReview'
 import { expandReviewIssues, reviewIssueKey } from '@/utils/review'
 import { serializeReviewDraft } from '@/utils/reviewVersions'
@@ -606,15 +1151,15 @@ async function confirmLeave() {
       await ElMessageBox.confirm('协作提交结果尚未确认，离开将丢失本次请求编号，重新提交可能重复计费。建议留在此页重试同一请求。', '提交尚未确认', { type: 'warning', confirmButtonText: '仍然离开', cancelButtonText: '留在此页' })
     } catch { return false }
   }
-  if (!hasUnsavedChanges.value) return true
+  if (!hasUnsavedChanges.value && (showResult.value || !inputText.value.trim())) return true
   try {
-    await ElMessageBox.confirm('尚有未保存的审阅修改，离开后将丢失。请先保存草稿，或确认离开。', '未保存的审阅', { confirmButtonText: '离开', cancelButtonText: '继续审阅', type: 'warning' })
+    await ElMessageBox.confirm(showResult.value ? '尚有未保存的审阅修改，离开后将丢失。请先保存草稿，或确认离开。' : '输入的文本尚未提交，离开后将丢失。确定离开吗？', '未保存的审阅', { confirmButtonText: '离开', cancelButtonText: '继续审阅', type: 'warning' })
     return true
   } catch { return false }
 }
 onBeforeRouteLeave(confirmLeave)
 function handleBeforeUnload(event: { preventDefault(): void; returnValue: string }) {
-  if (!hasUnsavedChanges.value && !collaborationPending.value) return
+  if (!hasUnsavedChanges.value && !collaborationPending.value && (showResult.value || !inputText.value.trim())) return
   event.preventDefault()
   event.returnValue = ''
 }
@@ -679,8 +1224,25 @@ onMounted(async () => {
 })
 
 // 设置
-const domain = ref('auto')
+const domain = ref('general')
 const depth = ref('standard')
+
+const advancedOpen = ref(false)
+function useExample() {
+  inputText.value = '关于举办读书分享活动的通知\n\n为了丰富大家的业余生活，提高阅读兴去，我们计划于本周五下午举办读书分享活动。欢迎各位同事踊跃参加，分享自己最喜爱的一本书。\n\n请参加活动的同事提前做好准备，并准时按时到达会议室。让我们一起在阅读中收获知识，在交流中共同进步。'
+}
+async function clearInput() {
+  if (inputText.value) {
+    try { await ElMessageBox.confirm('清空后无法恢复尚未提交的文本。', '清空文本', { confirmButtonText: '清空', cancelButtonText: '保留' }) } catch { return }
+  }
+  inputText.value = ''
+}
+function handleEditorKeydown(event: { preventDefault(): void; metaKey?: boolean; ctrlKey?: boolean; key?: string; isComposing?: boolean }) {
+  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !event.isComposing) {
+    event.preventDefault()
+    if (!controlsLocked.value) void handleProofread()
+  }
+}
 
 // 校对模型选择（默认当前活跃模型）
 const modelOptions = ref<AvailableModel[]>([])
@@ -1554,4 +2116,26 @@ async function goBack() {
 @media (max-width: 768px) {
   .setting-help { flex-basis: auto; padding-left: 0; }
 }
+
+/* Content-first editing workspace. */
+.input-section { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
+.input-card { border-radius: 12px; box-shadow: none; border: 1px solid var(--color-border); }
+.input-card .card-header { justify-content: space-between; }.editor-caption { margin-top: 6px; color: var(--color-text-secondary); font-size: 12px; }
+.input-card :deep(.el-card__body) { padding: 0; }
+.editor-wrapper { margin: 0; }.editor-wrapper :deep(.el-textarea__inner) { background: var(--surface); border-radius: 0; box-shadow: none; padding: 28px; font-size: 16px; line-height: 1.9; min-height: 430px !important; resize: vertical; }
+.editor-wrapper :deep(.el-textarea__inner:focus) { box-shadow: inset 0 0 0 2px var(--el-color-primary-light-5); }
+.action-bar { border-top: 1px solid var(--color-border); padding: 16px 22px; position: sticky; bottom: 0; background: var(--surface); z-index: 5; flex-direction: row-reverse; border-radius: 0 0 12px 12px; }
+.action-bar .text-count { margin-left: 0; margin-right: auto; font-size: 12px; }.action-bar small { display: block; margin-top: 5px; color: var(--color-text-secondary); font-size: 11px; }
+.proofread-settings { background: transparent; padding: 4px 0; border: none; border-radius: 0; display: flex; flex-direction: column; gap: 18px; }
+.settings-heading { font-size: 15px; font-weight: 600; }.settings-heading small { display: block; margin-top: 7px; color: var(--color-text-secondary); font-size: 12px; font-weight: 400; }
+.scenario-list { display: grid; gap: 8px; }.scenario-list button { text-align: left; border: 1px solid var(--color-border); background: var(--surface); border-radius: 10px; padding: 15px; cursor: pointer; color: var(--color-text); }.scenario-list button.selected { border-color: var(--color-primary); background: var(--el-color-primary-light-9); }.scenario-list button:disabled { cursor: not-allowed; opacity: .65; }.scenario-list span { display: block; font-weight: 600; font-size: 13px; }.scenario-list small { display: block; color: var(--color-text-secondary); margin-top: 6px; font-size: 12px; }
+.proofread-settings .setting-row { display: flex; flex-direction: column; align-items: stretch; margin: 0; gap: 10px; }.proofread-settings .setting-label { width: auto; font-size: 13px; }.proofread-settings .setting-help { flex-basis: auto; padding-left: 0; margin: 0; font-size: 12px; line-height: 1.8; color: var(--color-text-secondary); }.proofread-settings .setting-value { width: 100%; }
+.advanced-toggle { text-align: left; border: 0; background: none; padding: 12px 0 0; border-top: 1px solid var(--color-border); color: var(--color-primary); cursor: pointer; font-size: 12px; order: 2; }.advanced-row { order: 3; }.proofread-settings > .setting-row:has(.el-select) { order: 4; }.settings-note { order: 5; display: flex; gap: 8px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.8; padding-top: 6px; }.settings-note .el-icon { flex-shrink: 0; margin-top: 4px; }
+.review-heading { margin: 4px 0 24px; }.review-eyebrow { font-size: 12px; color: var(--color-primary); }.review-heading h2 { font-size: 24px; font-weight: 600; margin: 10px 0; }.review-heading p { color: var(--color-text-secondary); font-size: 13px; }
+.review-tools { border: 1px solid var(--color-border); background: var(--surface); border-radius: 8px; margin-bottom: 10px; }.review-tools summary { cursor: pointer; padding: 13px 16px; font-size: 13px; color: var(--color-text-secondary); }.review-tools[open] { padding-bottom: 14px; }
+.result-toolbar { box-shadow: none; border: 1px solid var(--color-border); margin-top: 16px; flex-wrap: wrap; }.result-columns { grid-template-columns: minmax(0, 1.35fr) minmax(340px, 1fr); height: max(600px, calc(100vh - 230px)); }.column-card { box-shadow: none; }.issue-item { scroll-margin-top: 20px; }.issue-item:focus-visible { outline: 2px solid var(--color-primary); }
+@media(max-width:1150px) { .input-section { grid-template-columns: minmax(0, 1fr) 270px; gap: 16px; }.result-columns { grid-template-columns: 1fr; height: auto; }.result-columns .column-card { max-height: 650px; } }
+@media(max-width:700px) { .input-section { grid-template-columns: 1fr; }.proofread-settings { padding: 8px 0; }.scenario-list { grid-template-columns: 1fr 1fr; }.editor-wrapper :deep(.el-textarea__inner) { min-height: 280px !important; padding: 20px; }.action-bar { padding: 14px; }.action-bar :deep(.el-button--large) { min-width: 110px; }.result-toolbar .toolbar-info { flex-wrap: wrap; }.review-heading h2 { font-size: 21px; } }
+
+@media(max-width:700px) { .input-section { padding-bottom: 84px; }.input-section .action-bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 18px max(12px, env(safe-area-inset-bottom)); border-radius: 0; box-shadow: 0 -4px 18px rgba(0,0,0,.04); }.editor-wrapper :deep(.el-textarea__inner) { height: 330px; } }
 </style>

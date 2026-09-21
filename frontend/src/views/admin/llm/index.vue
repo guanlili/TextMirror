@@ -3,51 +3,161 @@
     <!-- 顶部操作栏 -->
     <div class="top-bar">
       <div>
-        <span class="page-title">大模型配置管理</span>
-        <el-tag v-if="activeConfig" type="success" size="small" style="margin-left: 12px;">
+        <span class="page-title">模型服务</span>
+        <el-tag
+          v-if="activeConfig"
+          type="success"
+          size="small"
+          style="margin-left: 12px;"
+        >
           当前使用：{{ activeConfig.name }} ({{ activeConfig.model }})
         </el-tag>
       </div>
       <div style="display: flex; gap: 8px;">
         <el-dropdown @command="(cmd: string | number | object) => handleExport(cmd === 'with-keys')">
           <el-button>
-            <el-icon><Download /></el-icon>导出配置<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            <el-icon><Download /></el-icon>导出配置<el-icon class="el-icon--right">
+              <ArrowDown />
+            </el-icon>
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item command="masked">脱敏导出（分享用，密钥打码）</el-dropdown-item>
-              <el-dropdown-item command="with-keys">完整导出（含密钥，迁移用）</el-dropdown-item>
+              <el-dropdown-item command="masked">
+                脱敏导出（分享用，密钥打码）
+              </el-dropdown-item>
+              <el-dropdown-item command="with-keys">
+                完整导出（含密钥，迁移用）
+              </el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <el-button @click="showImportDialog = true"><el-icon><Upload /></el-icon>导入配置</el-button>
-        <el-button type="primary" @click="openAddDialog"><el-icon><Plus /></el-icon>添加模型</el-button>
+        <el-button @click="showImportDialog = true">
+          <el-icon><Upload /></el-icon>导入配置
+        </el-button>
+        <el-button
+          type="primary"
+          @click="openAddDialog"
+        >
+          <el-icon><Plus /></el-icon>添加模型
+        </el-button>
       </div>
     </div>
 
+    <p class="model-caption">
+      选择默认模型，管理可供用户选择的服务。连接状态以实际测试结果为准。
+    </p>
+    <div class="model-summary">
+      <div><small>已接入</small><strong>{{ loading || listError ? '—' : configList.length }}</strong></div><div><small>可供选择</small><strong>{{ loading || listError ? '—' : configList.filter(item => item.is_enabled).length }}</strong></div><div><small>默认服务</small><strong class="default-name">{{ loading ? '正在读取…' : listError ? '读取失败' : activeConfig?.name || '未设置' }}</strong></div>
+    </div>
+    <div class="model-filters">
+      <el-input
+        v-model="modelQuery"
+        clearable
+        placeholder="搜索名称、模型或供应商"
+        aria-label="搜索模型服务"
+      /><el-select
+        v-model="modelStatus"
+        aria-label="模型服务状态"
+      >
+        <el-option
+          label="全部服务"
+          value="all"
+        /><el-option
+          label="已启用"
+          value="enabled"
+        /><el-option
+          label="已停用"
+          value="disabled"
+        />
+      </el-select><el-button
+        :loading="loading"
+        @click="fetchList"
+      >
+        刷新列表
+      </el-button>
+    </div>
+    <el-alert
+      v-if="listError"
+      title="模型列表加载失败，请刷新重试。"
+      type="error"
+      :closable="false"
+    />
+    <el-empty
+      v-else-if="!loading && configList.length && !filteredConfigs.length"
+      description="没有匹配的模型服务"
+    />
     <!-- 模型卡片列表 -->
-    <div class="config-grid" v-loading="loading">
+    <div
+      v-loading="loading"
+      class="config-grid"
+    >
       <el-card
-        v-for="item in configList" :key="item.id"
+        v-for="item in filteredConfigs"
+        :key="item.id"
         :class="['config-card', { 'active-card': item.is_active, 'disabled-card': !item.is_enabled }]"
         shadow="hover"
       >
         <div class="card-top">
           <div class="card-name">
             <span class="name-text">{{ item.name }}</span>
-            <el-tag v-if="item.is_active" type="success" size="small" effect="dark">使用中</el-tag>
-            <el-tag v-if="!item.is_enabled" type="info" size="small">已停用</el-tag>
+            <el-tag
+              v-if="item.is_active"
+              type="success"
+              size="small"
+              effect="dark"
+            >
+              使用中
+            </el-tag>
+            <el-tag
+              v-if="!item.is_enabled"
+              type="info"
+              size="small"
+            >
+              已停用
+            </el-tag>
           </div>
-          <el-dropdown trigger="click" @command="(cmd: string) => handleCommand(cmd, item)">
-            <el-button :icon="MoreFilled" link />
+          <el-dropdown
+            trigger="click"
+            @command="(cmd: string) => handleCommand(cmd, item)"
+          >
+            <el-button
+              :icon="MoreFilled"
+              link
+            />
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="edit">编辑</el-dropdown-item>
-                <el-dropdown-item command="test">测试连接</el-dropdown-item>
-                <el-dropdown-item v-if="!item.is_active && item.is_enabled" command="activate">设为当前使用</el-dropdown-item>
-                <el-dropdown-item v-if="item.is_enabled" command="disable">停用</el-dropdown-item>
-                <el-dropdown-item v-if="!item.is_enabled" command="enable">启用</el-dropdown-item>
-                <el-dropdown-item v-if="!item.is_active" command="delete" divided style="color: #f56c6c;">删除</el-dropdown-item>
+                <el-dropdown-item command="edit">
+                  编辑
+                </el-dropdown-item>
+                <el-dropdown-item command="test">
+                  测试连接
+                </el-dropdown-item>
+                <el-dropdown-item
+                  v-if="!item.is_active && item.is_enabled"
+                  command="activate"
+                >
+                  设为当前使用
+                </el-dropdown-item>
+                <el-dropdown-item
+                  v-if="item.is_enabled"
+                  command="disable"
+                >
+                  停用
+                </el-dropdown-item>
+                <el-dropdown-item
+                  v-if="!item.is_enabled"
+                  command="enable"
+                >
+                  启用
+                </el-dropdown-item>
+                <el-dropdown-item
+                  v-if="!item.is_active"
+                  command="delete"
+                  divided
+                  style="color: #f56c6c;"
+                >
+                  删除
+                </el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -56,7 +166,12 @@
         <div class="card-info">
           <div class="info-row">
             <span class="info-label">供应商</span>
-            <el-tag size="small" type="info">{{ providerNameMap[item.provider] || item.provider }}</el-tag>
+            <el-tag
+              size="small"
+              type="info"
+            >
+              {{ providerNameMap[item.provider] || item.provider }}
+            </el-tag>
           </div>
           <div class="info-row">
             <span class="info-label">模型</span>
@@ -64,11 +179,20 @@
           </div>
           <div class="info-row">
             <span class="info-label">密钥</span>
-            <span class="info-value" style="font-family: monospace; color: #999;">{{ item.api_key_masked }}</span>
+            <span
+              class="info-value"
+              style="font-family: monospace; color: #999;"
+            >{{ item.api_key_masked }}</span>
           </div>
-          <div v-if="testResults[item.id]" class="info-row">
+          <div
+            v-if="testResults[item.id]"
+            class="info-row"
+          >
             <span class="info-label">测试</span>
-            <span class="info-value" :style="{ fontSize: '12px', color: testResults[item.id].success ? '#67C23A' : '#F56C6C' }">
+            <span
+              class="info-value"
+              :style="{ fontSize: '12px', color: testResults[item.id].success ? '#67C23A' : '#F56C6C' }"
+            >
               {{ testResults[item.id].success ? `通过 · ${testResults[item.id].latency}` : testResults[item.id].message }}
             </span>
           </div>
@@ -77,20 +201,40 @@
         <div class="card-footer">
           <el-button
             v-if="!item.is_active && item.is_enabled"
-            type="primary" size="small" plain
+            type="primary"
+            size="small"
+            plain
             @click="handleActivate(item.id)"
-          >设为当前使用</el-button>
-          <el-button size="small" plain :loading="testingId === item.id" @click="handleTest(item.id)">
+          >
+            设为当前使用
+          </el-button>
+          <el-button
+            size="small"
+            plain
+            :loading="testingId === item.id"
+            @click="handleTest(item.id)"
+          >
             {{ testingId === item.id ? '测试中...' : '测试连接' }}
           </el-button>
         </div>
       </el-card>
 
-      <div v-if="!loading && configList.length === 0" class="empty-guide">
+      <div
+        v-if="!loading && !listError && configList.length === 0"
+        class="empty-guide"
+      >
         <el-empty description="还没有模型配置，两步即可完成接入">
           <div class="quick-start">
-            <p style="color: #999; font-size: 13px; margin-bottom: 12px;">选择常用供应商快速开始：</p>
-            <el-button v-for="p in quickStartProviders" :key="p.code" size="small" plain @click="quickAdd(p.code)">
+            <p style="color: #999; font-size: 13px; margin-bottom: 12px;">
+              选择常用供应商快速开始：
+            </p>
+            <el-button
+              v-for="p in quickStartProviders"
+              :key="p.code"
+              size="small"
+              plain
+              @click="quickAdd(p.code)"
+            >
               {{ p.name }}
             </el-button>
           </div>
@@ -99,19 +243,50 @@
     </div>
 
     <!-- 添加/编辑弹窗 -->
-    <el-dialog v-model="showFormDialog" :title="editingId ? '编辑模型配置' : '添加模型配置'" width="600px" destroy-on-close>
-      <el-form :model="formData" label-width="100px">
-        <el-form-item label="供应商" required>
-          <el-select v-model="formData.provider" placeholder="选择供应商" style="width: 100%;" @change="onProviderChange">
+    <el-dialog
+      v-model="showFormDialog"
+      :title="editingId ? '编辑模型配置' : '添加模型配置'"
+      width="600px"
+      destroy-on-close
+    >
+      <el-form
+        :model="formData"
+        label-width="100px"
+      >
+        <el-form-item
+          label="供应商"
+          required
+        >
+          <el-select
+            v-model="formData.provider"
+            placeholder="选择供应商"
+            style="width: 100%;"
+            @change="onProviderChange"
+          >
             <el-option
-              v-for="p in providerOptions" :key="p.code"
-              :label="p.name" :value="p.code"
+              v-for="p in providerOptions"
+              :key="p.code"
+              :label="p.name"
+              :value="p.code"
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="API Key" required>
-          <el-input v-model="formData.api_key" type="password" show-password placeholder="sk-..." />
-          <div v-if="editingId" style="font-size: 12px; color: #999; margin-top: 4px;">留空则保持原密钥不变</div>
+        <el-form-item
+          label="API Key"
+          required
+        >
+          <el-input
+            v-model="formData.api_key"
+            type="password"
+            show-password
+            placeholder="sk-..."
+          />
+          <div
+            v-if="editingId"
+            style="font-size: 12px; color: #999; margin-top: 4px;"
+          >
+            留空则保持原密钥不变
+          </div>
         </el-form-item>
         <el-form-item label="模型名称">
           <el-select
@@ -122,11 +297,20 @@
             :placeholder="currentProviderModels.length ? '选择或输入模型名' : '输入模型名'"
             style="width: 100%;"
           >
-            <el-option v-for="m in currentProviderModels" :key="m" :label="m" :value="m" />
+            <el-option
+              v-for="m in currentProviderModels"
+              :key="m"
+              :label="m"
+              :value="m"
+            />
           </el-select>
           <div style="font-size: 12px; color: #999; margin-top: 4px;">
-            <template v-if="currentProviderModels.length">已预置主流模型，其他型号直接输入</template>
-            <template v-else>请输入模型名称</template>
+            <template v-if="currentProviderModels.length">
+              已预置主流模型，其他型号直接输入
+            </template>
+            <template v-else>
+              请输入模型名称
+            </template>
             <a
               v-if="currentProviderDocs"
               :href="currentProviderDocs"
@@ -136,37 +320,87 @@
             >如何获取模型名称？<el-icon style="vertical-align: -2px;"><Link /></el-icon></a>
           </div>
         </el-form-item>
-        <el-form-item v-if="formData.provider === 'custom'" label="API 地址" required>
-          <el-input v-model="formData.api_base" placeholder="https://your-endpoint.com/v1" />
+        <el-form-item
+          v-if="formData.provider === 'custom'"
+          label="API 地址"
+          required
+        >
+          <el-input
+            v-model="formData.api_base"
+            placeholder="https://your-endpoint.com/v1"
+          />
         </el-form-item>
-        <el-form-item v-else-if="currentProviderBase" label="API 地址">
-          <el-input :model-value="currentProviderBase" readonly>
-            <template #suffix><el-icon style="color: #67C23A;"><CircleCheckFilled /></el-icon></template>
+        <el-form-item
+          v-else-if="currentProviderBase"
+          label="API 地址"
+        >
+          <el-input
+            :model-value="currentProviderBase"
+            readonly
+          >
+            <template #suffix>
+              <el-icon style="color: #67C23A;">
+                <CircleCheckFilled />
+              </el-icon>
+            </template>
           </el-input>
-          <div style="font-size: 12px; color: #999; margin-top: 4px;">已使用官方地址，无需填写</div>
+          <div style="font-size: 12px; color: #999; margin-top: 4px;">
+            已使用官方地址，无需填写
+          </div>
         </el-form-item>
         <el-form-item label="配置名称">
-          <el-input v-model="formData.name" placeholder="留空自动使用供应商名" />
+          <el-input
+            v-model="formData.name"
+            placeholder="留空自动使用供应商名"
+          />
         </el-form-item>
 
         <!-- 高级参数：默认值即可用，折叠收纳 -->
         <el-collapse style="margin: 4px 0 12px;">
-          <el-collapse-item title="高级设置（温度 / Token 上限 / 超时 / 重试）" name="advanced">
+          <el-collapse-item
+            title="高级设置（温度 / Token 上限 / 超时 / 重试）"
+            name="advanced"
+          >
             <el-form-item label="温度">
-              <el-slider v-model="formData.temperature" :min="0" :max="2" :step="0.1" show-input style="width: 100%;" />
+              <el-slider
+                v-model="formData.temperature"
+                :min="0"
+                :max="2"
+                :step="0.1"
+                show-input
+                style="width: 100%;"
+              />
             </el-form-item>
             <el-form-item label="最大 Token">
-              <el-input-number v-model="formData.max_tokens" :min="0" :max="128000" placeholder="0 表示不限" />
+              <el-input-number
+                v-model="formData.max_tokens"
+                :min="0"
+                :max="128000"
+                placeholder="0 表示不限"
+              />
               <span style="margin-left: 8px; font-size: 12px; color: #999;">0 或空表示不限制</span>
             </el-form-item>
             <el-form-item label="超时(秒)">
-              <el-input-number v-model="formData.timeout" :min="10" :max="600" />
+              <el-input-number
+                v-model="formData.timeout"
+                :min="10"
+                :max="600"
+              />
             </el-form-item>
             <el-form-item label="重试次数">
-              <el-input-number v-model="formData.max_retries" :min="0" :max="10" />
+              <el-input-number
+                v-model="formData.max_retries"
+                :min="0"
+                :max="10"
+              />
             </el-form-item>
             <el-form-item label="备注">
-              <el-input v-model="formData.remark" type="textarea" :rows="2" placeholder="备注说明" />
+              <el-input
+                v-model="formData.remark"
+                type="textarea"
+                :rows="2"
+                placeholder="备注说明"
+              />
             </el-form-item>
           </el-collapse-item>
         </el-collapse>
@@ -188,20 +422,38 @@
 
       <template #footer>
         <div style="display: flex; justify-content: space-between; width: 100%;">
-          <el-button :loading="draftTesting" @click="handleDraftTest">
-            <el-icon v-if="!draftTesting"><Connection /></el-icon>
+          <el-button
+            :loading="draftTesting"
+            @click="handleDraftTest"
+          >
+            <el-icon v-if="!draftTesting">
+              <Connection />
+            </el-icon>
             {{ draftTesting ? '测试中...' : '测试连接' }}
           </el-button>
           <div>
-            <el-button @click="showFormDialog = false">取消</el-button>
-            <el-button type="primary" :loading="submitting" @click="handleSubmit">{{ editingId ? '保存' : '添加' }}</el-button>
+            <el-button @click="showFormDialog = false">
+              取消
+            </el-button>
+            <el-button
+              type="primary"
+              :loading="submitting"
+              @click="handleSubmit"
+            >
+              {{ editingId ? '保存' : '添加' }}
+            </el-button>
           </div>
         </div>
       </template>
     </el-dialog>
 
     <!-- 导入配置弹窗 -->
-    <el-dialog v-model="showImportDialog" title="导入模型配置" width="560px" destroy-on-close>
+    <el-dialog
+      v-model="showImportDialog"
+      title="导入模型配置"
+      width="560px"
+      destroy-on-close
+    >
       <el-upload
         drag
         :auto-upload="false"
@@ -209,35 +461,70 @@
         :on-change="handleImportFileChange"
         accept=".json"
       >
-        <el-icon style="font-size: 36px; color: #909399;"><UploadFilled /></el-icon>
-        <div class="el-upload__text">将导出的 JSON 文件拖到此处，或 <em>点击选择</em></div>
+        <el-icon style="font-size: 36px; color: #909399;">
+          <UploadFilled />
+        </el-icon>
+        <div class="el-upload__text">
+          将导出的 JSON 文件拖到此处，或 <em>点击选择</em>
+        </div>
       </el-upload>
 
-      <div v-if="importPreview" class="import-preview">
-        <el-alert type="info" :closable="false" show-icon :title="`文件包含 ${importPreview.count} 条配置`" />
+      <div
+        v-if="importPreview"
+        class="import-preview"
+      >
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          :title="`文件包含 ${importPreview.count} 条配置`"
+        />
         <div class="import-list">
-          <div v-for="c in importPreview.configs" :key="c.name" class="import-item">
+          <div
+            v-for="c in importPreview.configs"
+            :key="c.name"
+            class="import-item"
+          >
             <span>{{ c.name }}</span>
             <span class="import-model">{{ c.model }}</span>
-            <el-tag v-if="c.api_key && c.api_key.includes('****')" size="small" type="warning" effect="plain">密钥脱敏</el-tag>
+            <el-tag
+              v-if="c.api_key && c.api_key.includes('****')"
+              size="small"
+              type="warning"
+              effect="plain"
+            >
+              密钥脱敏
+            </el-tag>
           </div>
         </div>
-        <el-form-item label="同名冲突" label-width="80px" style="margin-top: 12px;">
+        <el-form-item
+          label="同名冲突"
+          label-width="80px"
+          style="margin-top: 12px;"
+        >
           <el-radio-group v-model="importConflict">
-            <el-radio value="skip">跳过（保留现有配置）</el-radio>
-            <el-radio value="overwrite">覆盖（密钥为脱敏时保留已存密钥）</el-radio>
+            <el-radio value="skip">
+              跳过（保留现有配置）
+            </el-radio>
+            <el-radio value="overwrite">
+              覆盖（密钥为脱敏时保留已存密钥）
+            </el-radio>
           </el-radio-group>
         </el-form-item>
       </div>
 
       <template #footer>
-        <el-button @click="showImportDialog = false">取消</el-button>
+        <el-button @click="showImportDialog = false">
+          取消
+        </el-button>
         <el-button
           type="primary"
           :disabled="!importPreview"
           :loading="importing"
           @click="handleImportSubmit"
-        >导入</el-button>
+        >
+          导入
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -258,6 +545,13 @@ import { invalidateAvailableModelsCache } from '@/api/polish'
 import { getErrorDetail } from '@/utils/request'
 
 const loading = ref(false)
+const listError = ref(false)
+const modelQuery = ref('')
+const modelStatus = ref('all')
+const filteredConfigs = computed(() => configList.value.filter(item => {
+ const query = modelQuery.value.trim().toLowerCase()
+ return (!query || `${item.name} ${item.model} ${item.provider}`.toLowerCase().includes(query)) && (modelStatus.value === 'all' || (modelStatus.value === 'enabled' ? item.is_enabled : !item.is_enabled))
+}))
 const submitting = ref(false)
 const testingId = ref<number | null>(null)
 const configList = ref<LLMConfigItem[]>([])
@@ -412,9 +706,11 @@ async function fetchProviders() {
 
 async function fetchList() {
   loading.value = true
+  listError.value = false
   try {
     configList.value = await listLLMConfigsApi()
   } catch (_e) {
+    listError.value = true
     ElMessage.error('加载模型配置失败')
   } finally {
     loading.value = false
@@ -686,4 +982,10 @@ function handleCommand(cmd: string, item: LLMConfigItem) {
     }
   }
 }
+
+.model-caption { color:var(--color-text-secondary); font-size:13px; margin:8px 0 24px; line-height:1.8; }.model-summary { display:grid; grid-template-columns:1fr 1fr 2fr; gap:16px; margin-bottom:24px; }.model-summary > div { background:var(--surface); border:1px solid var(--color-border); border-radius:12px; padding:20px; }.model-summary small { display:block; color:var(--color-text-secondary); font-size:12px; margin-bottom:12px; }.model-summary strong { font-size:26px; color:var(--color-text); }.model-summary .default-name { font-size:18px; overflow-wrap:anywhere; }.model-filters { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:20px; }.model-filters .el-input { width:320px; max-width:100%; }.model-filters .el-select { width:140px; }.top-bar { flex-wrap:wrap; gap:16px; }.top-bar > div:last-child { flex-wrap:wrap; }.config-card { box-shadow:none; }.config-card.active-card { border-color:var(--color-primary); }
+@media(max-width:600px) { .model-summary { grid-template-columns:1fr 1fr; gap:10px; }.model-summary > div:last-child { grid-column:1/-1; }.model-filters .el-input { width:100%; }.config-grid { grid-template-columns:1fr; } }
+
+.top-bar > div:first-child { min-width:0; }.top-bar :deep(.el-tag) { max-width:100%; height:auto; white-space:normal; }.top-bar :deep(.el-tag__content) { overflow-wrap:anywhere; white-space:normal; }
+@media(max-width:600px) { .top-bar > div:first-child { display:flex; flex-direction:column; align-items:flex-start; gap:8px; }.top-bar :deep(.el-tag) { margin-left:0 !important; line-height:1.6; } }
 </style>

@@ -1,43 +1,94 @@
 <template>
   <el-container class="user-layout">
     <aside class="workspace-sidebar desktop-only">
-      <div class="brand" @click="router.push('/proofread/text')">
-        <div class="brand-mark"><img :src="siteStore.faviconUrl" alt="" /></div>
+      <div
+        class="brand"
+        @click="router.push('/workbench')"
+      >
+        <div class="brand-mark">
+          <img
+            :src="siteStore.faviconUrl"
+            alt=""
+          >
+        </div>
         <div class="brand-copy">
           <strong>{{ siteStore.platformName }}</strong>
           <span>{{ siteStore.platformSubtitle }}</span>
         </div>
       </div>
 
-      <div class="sidebar-label">智能审校</div>
-      <el-menu :default-active="activeMenu" router class="workspace-menu">
-        <el-menu-item index="/proofread/text"><el-icon><Edit /></el-icon><span>文本在线校对</span></el-menu-item>
-        <el-menu-item index="/proofread/document"><el-icon><Document /></el-icon><span>文档上传校对</span></el-menu-item>
-        <el-menu-item v-if="userStore.isLoggedIn && userStore.hasPermission('fact-check:run')" index="/fact-check"><el-icon><Search /></el-icon><span>事实核查</span></el-menu-item>
+      <div class="sidebar-label">
+        创作空间
+      </div>
+      <el-menu
+        :default-active="activeMenu"
+        router
+        class="workspace-menu"
+      >
+        <el-menu-item index="/workbench">
+          <el-icon><House /></el-icon><span>工作台</span>
+        </el-menu-item>
+        <el-menu-item index="/proofread/text">
+          <el-icon><Edit /></el-icon><span>新建审校</span>
+        </el-menu-item>
+        <el-menu-item
+          v-if="userStore.isLoggedIn && userStore.hasPermission('fact-check:run')"
+          index="/fact-check"
+        >
+          <el-icon><Search /></el-icon><span>事实核查</span>
+        </el-menu-item>
       </el-menu>
 
       <template v-if="userStore.isLoggedIn">
-        <div class="sidebar-label secondary-label">知识与记录</div>
-        <el-menu :default-active="activeMenu" router class="workspace-menu">
-          <el-menu-item index="/dictionary"><el-icon><Collection /></el-icon><span>个性化词库</span></el-menu-item>
-          <el-menu-item index="/whitelist"><el-icon><CircleCheck /></el-icon><span>放行词管理</span></el-menu-item>
-          <el-menu-item index="/history"><el-icon><Clock /></el-icon><span>校对历史</span></el-menu-item>
-          <el-menu-item index="/apikeys"><el-icon><Key /></el-icon><span>API 密钥</span></el-menu-item>
+        <div class="sidebar-label secondary-label">
+          我的内容
+        </div>
+        <el-menu
+          :default-active="activeMenu"
+          router
+          class="workspace-menu"
+        >
+          <el-menu-item index="/dictionary">
+            <el-icon><Collection /></el-icon><span>个性化词库</span>
+          </el-menu-item>
+          <el-menu-item index="/whitelist">
+            <el-icon><CircleCheck /></el-icon><span>放行词管理</span>
+          </el-menu-item>
+          <el-menu-item index="/history">
+            <el-icon><Clock /></el-icon><span>我的审校记录</span>
+          </el-menu-item>
+          <el-menu-item index="/apikeys">
+            <el-icon><Key /></el-icon><span>API 密钥</span>
+          </el-menu-item>
         </el-menu>
       </template>
 
-      <div class="sidebar-label secondary-label">更多工具</div>
-      <el-menu :default-active="activeMenu" router class="workspace-menu">
-        <el-menu-item index="/polish"><el-icon><MagicStick /></el-icon><span>AI 智能润色</span></el-menu-item>
+      <div class="sidebar-label secondary-label">
+        更多工具
+      </div>
+      <el-menu
+        :default-active="activeMenu"
+        router
+        class="workspace-menu"
+      >
+        <el-menu-item index="/polish">
+          <el-icon><MagicStick /></el-icon><span>AI 智能润色</span>
+        </el-menu-item>
       </el-menu>
 
       <div class="sidebar-spacer" />
-      <button class="theme-toggle" :title="isDark ? '切换到亮色模式' : '切换到暗色模式'" @click="toggle">
+      <button
+        class="theme-toggle"
+        :title="isDark ? '切换到亮色模式' : '切换到暗色模式'"
+        @click="toggle"
+      >
         <el-icon><component :is="isDark ? Sunny : Moon" /></el-icon>
         <span>{{ isDark ? '亮色模式' : '暗色模式' }}</span>
       </button>
       <div class="security-note">
-        <div class="security-icon"><el-icon><Lock /></el-icon></div>
+        <div class="security-icon">
+          <el-icon><Lock /></el-icon>
+        </div>
         <div><strong>内容安全保护</strong><span>传输加密 · 权限隔离</span></div>
       </div>
     </aside>
@@ -45,9 +96,23 @@
     <el-container class="workspace-shell">
       <el-header class="workspace-header">
         <div class="header-left">
-          <el-button class="mobile-menu-btn" text circle aria-label="打开导航菜单" @click="mobileMenuVisible = true"><el-icon><Operation /></el-icon></el-button>
-          <div class="mobile-brand" @click="router.push('/proofread/text')">
-            <img :src="siteStore.faviconUrl" alt="" /><strong>{{ siteStore.platformName }}</strong>
+          <el-button
+            class="mobile-menu-btn"
+            text
+            circle
+            aria-label="打开导航菜单"
+            @click="mobileMenuVisible = true"
+          >
+            <el-icon><Operation /></el-icon>
+          </el-button>
+          <div
+            class="mobile-brand"
+            @click="router.push('/workbench')"
+          >
+            <img
+              :src="siteStore.faviconUrl"
+              alt=""
+            ><strong>{{ siteStore.platformName }}</strong>
           </div>
           <div class="page-context desktop-only">
             <h1>{{ currentPage.title }}</h1>
@@ -62,49 +127,131 @@
             placement="bottom"
           >
             <div class="status-pill desktop-only">
-              <span class="status-dot" :class="{ 'is-warning': quotaWarning }" />
+              <span
+                class="status-dot"
+                :class="{ 'is-warning': quotaWarning }"
+              />
               {{ quotaText }}
             </div>
           </el-tooltip>
           <template v-if="userStore.isLoggedIn">
             <el-dropdown trigger="click">
               <div class="user-info">
-                <el-avatar :size="34" :src="userStore.userInfo?.avatar">{{ userStore.userInfo?.username?.charAt(0) }}</el-avatar>
-                <div class="user-copy desktop-only"><strong>{{ userStore.userInfo?.username }}</strong><span>已登录</span></div>
-                <el-icon class="chevron desktop-only"><ArrowDown /></el-icon>
+                <el-avatar
+                  :size="34"
+                  :src="userStore.userInfo?.avatar"
+                >
+                  {{ userStore.userInfo?.username?.charAt(0) }}
+                </el-avatar>
+                <div class="user-copy desktop-only">
+                  <strong>{{ userStore.userInfo?.username }}</strong><span>已登录</span>
+                </div>
+                <el-icon class="chevron desktop-only">
+                  <ArrowDown />
+                </el-icon>
               </div>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item @click="router.push('/profile')"><el-icon><User /></el-icon>个人中心</el-dropdown-item>
-                  <el-dropdown-item v-if="userStore.isSuperAdmin || userStore.hasPermission('admin:access')" @click="router.push('/admin')"><el-icon><Setting /></el-icon>管理后台</el-dropdown-item>
-                  <el-dropdown-item divided @click="handleLogout"><el-icon><SwitchButton /></el-icon>退出登录</el-dropdown-item>
+                  <el-dropdown-item @click="router.push('/profile')">
+                    <el-icon><User /></el-icon>个人中心
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    v-if="userStore.isSuperAdmin || userStore.hasPermission('admin:access')"
+                    @click="router.push('/admin')"
+                  >
+                    <el-icon><Setting /></el-icon>管理后台
+                  </el-dropdown-item>
+                  <el-dropdown-item
+                    divided
+                    @click="handleLogout"
+                  >
+                    <el-icon><SwitchButton /></el-icon>退出登录
+                  </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
           </template>
-          <el-button v-else type="primary" @click="router.push('/login')">登录</el-button>
+          <el-button
+            v-else
+            type="primary"
+            @click="router.push('/login')"
+          >
+            登录
+          </el-button>
         </div>
       </el-header>
 
       <el-main class="user-main">
         <router-view />
-        <footer v-if="siteStore.footerText" class="app-footer">{{ siteStore.footerText }}</footer>
+        <footer
+          v-if="siteStore.footerText"
+          class="app-footer"
+        >
+          {{ siteStore.footerText }}
+        </footer>
       </el-main>
     </el-container>
 
-    <el-drawer v-model="mobileMenuVisible" direction="ltr" size="286px" :show-close="false" class="mobile-drawer">
+    <el-drawer
+      v-model="mobileMenuVisible"
+      direction="ltr"
+      size="286px"
+      :show-close="false"
+      class="mobile-drawer"
+    >
       <template #header>
-        <div class="drawer-brand"><img :src="siteStore.faviconUrl" alt="" /><div><strong>{{ siteStore.platformName }}</strong><span>{{ siteStore.platformSubtitle }}</span></div></div>
+        <div class="drawer-brand">
+          <img
+            :src="siteStore.faviconUrl"
+            alt=""
+          ><div><strong>{{ siteStore.platformName }}</strong><span>{{ siteStore.platformSubtitle }}</span></div>
+        </div>
       </template>
-      <el-menu :default-active="activeMenu" router @select="mobileMenuVisible = false" class="mobile-nav-menu">
-        <el-menu-item index="/proofread/text"><el-icon><Edit /></el-icon><span>文本在线校对</span></el-menu-item>
-        <el-menu-item index="/proofread/document"><el-icon><Document /></el-icon><span>文档上传校对</span></el-menu-item>
-        <el-menu-item v-if="userStore.isLoggedIn && userStore.hasPermission('fact-check:run')" index="/fact-check"><el-icon><Search /></el-icon><span>事实核查</span></el-menu-item>
-        <el-menu-item v-if="userStore.isLoggedIn" index="/dictionary"><el-icon><Collection /></el-icon><span>个性化词库</span></el-menu-item>
-        <el-menu-item v-if="userStore.isLoggedIn" index="/whitelist"><el-icon><CircleCheck /></el-icon><span>放行词管理</span></el-menu-item>
-        <el-menu-item v-if="userStore.isLoggedIn" index="/history"><el-icon><Clock /></el-icon><span>校对历史</span></el-menu-item>
-        <el-menu-item index="/polish"><el-icon><MagicStick /></el-icon><span>AI 智能润色</span></el-menu-item>
-        <el-menu-item v-if="userStore.isLoggedIn" index="/apikeys"><el-icon><Key /></el-icon><span>API 密钥</span></el-menu-item>
+      <el-menu
+        :default-active="activeMenu"
+        router
+        class="mobile-nav-menu"
+        @select="mobileMenuVisible = false"
+      >
+        <el-menu-item index="/workbench">
+          <el-icon><House /></el-icon><span>工作台</span>
+        </el-menu-item>
+        <el-menu-item index="/proofread/text">
+          <el-icon><Edit /></el-icon><span>新建审校</span>
+        </el-menu-item>
+        <el-menu-item
+          v-if="userStore.isLoggedIn && userStore.hasPermission('fact-check:run')"
+          index="/fact-check"
+        >
+          <el-icon><Search /></el-icon><span>事实核查</span>
+        </el-menu-item>
+        <el-menu-item
+          v-if="userStore.isLoggedIn"
+          index="/dictionary"
+        >
+          <el-icon><Collection /></el-icon><span>个性化词库</span>
+        </el-menu-item>
+        <el-menu-item
+          v-if="userStore.isLoggedIn"
+          index="/whitelist"
+        >
+          <el-icon><CircleCheck /></el-icon><span>放行词管理</span>
+        </el-menu-item>
+        <el-menu-item
+          v-if="userStore.isLoggedIn"
+          index="/history"
+        >
+          <el-icon><Clock /></el-icon><span>我的审校记录</span>
+        </el-menu-item>
+        <el-menu-item index="/polish">
+          <el-icon><MagicStick /></el-icon><span>AI 智能润色</span>
+        </el-menu-item>
+        <el-menu-item
+          v-if="userStore.isLoggedIn"
+          index="/apikeys"
+        >
+          <el-icon><Key /></el-icon><span>API 密钥</span>
+        </el-menu-item>
       </el-menu>
     </el-drawer>
   </el-container>
@@ -126,13 +273,14 @@ const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 const siteStore = useSiteStore()
-const activeMenu = computed(() => route.path.startsWith('/fact-check') ? '/fact-check' : route.path)
+const activeMenu = computed(() => route.path.startsWith('/fact-check') ? '/fact-check' : route.path.startsWith('/proofread/') ? '/proofread/text' : route.path)
 const mobileMenuVisible = ref(false)
 
 const pageMap: Record<string, { title: string; subtitle: string }> = {
+  '/workbench': { title: '工作台', subtitle: '从这里开始你的内容审校' },
   '/polish': { title: 'AI 智能润色', subtitle: '让表达更准确、更自然、更有说服力' },
-  '/proofread/text': { title: '文本在线校对', subtitle: '快速识别文字、语法与表达问题' },
-  '/proofread/document': { title: '文档上传校对', subtitle: '上传完整文档，获得逐条审校建议' },
+  '/proofread/text': { title: '内容审校', subtitle: '快速识别文字、语法与表达问题' },
+  '/proofread/document': { title: '内容审校', subtitle: '上传完整文档，获得逐条审校建议' },
   '/dictionary': { title: '个性化词库', subtitle: '沉淀团队专有表达与规范术语' },
   '/whitelist': { title: '放行词管理', subtitle: '管理无需提示的特殊词语' },
   '/history': { title: '校对历史', subtitle: '回顾并继续之前的审校任务' },
@@ -288,4 +436,20 @@ html.dark .app-footer { color: #7a8797; border-top-color: #202b3d; }
   .mobile-brand strong { color: #18365e; font-size: 17px; }
   .user-main { padding: 14px; }
 }
+
+/* User workspace: quiet navigation, content first. */
+.workspace-sidebar { width: 220px; flex-basis: 220px; background: var(--surface); border-right: 1px solid var(--color-border); padding: 24px 12px 16px; }
+.workspace-sidebar::before { display: none; }
+.brand .brand-copy strong { color: var(--color-text); font-size: 17px; }
+.brand .brand-copy span { color: var(--color-text-secondary); letter-spacing: 0; }
+.brand .brand-mark { box-shadow: none; border-radius: 10px; }
+.sidebar-label { color: var(--color-text-secondary); letter-spacing: .6px; }
+.workspace-menu :deep(.el-menu-item) { color: var(--color-text-secondary); height: 44px; border-radius: 8px; }
+.workspace-menu :deep(.el-menu-item:hover) { color: var(--color-text); background: var(--surface-soft); }
+.workspace-menu :deep(.el-menu-item.is-active) { color: var(--color-primary); background: var(--el-color-primary-light-9); box-shadow: none; }
+.theme-toggle, .security-note { background: var(--surface-soft); border-color: var(--color-border); color: var(--color-text-secondary); }
+.theme-toggle:hover { background: var(--surface-soft); color: var(--color-primary); }
+.security-note strong { color: var(--color-text); }.security-note span { color: var(--color-text-secondary); }
+.user-main { background: var(--color-bg); }.workspace-header { height: 68px; }
+@media(max-width:900px) { .workspace-header { height:60px; } }
 </style>

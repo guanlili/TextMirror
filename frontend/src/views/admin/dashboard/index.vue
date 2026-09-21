@@ -1,57 +1,203 @@
 <template>
   <div class="admin-dashboard">
-    <div class="stats-row">
-      <el-card class="stat-card" shadow="hover">
+    <div class="overview-heading">
+      <div><span class="overview-eyebrow">运营概览</span><h2>让内容质量，持续可控。</h2><p>了解平台使用情况，管理审校标准与模型服务。</p></div><el-button
+        :loading="statsLoading || trendLoading"
+        @click="loadStats(); loadTrend()"
+      >
+        刷新数据
+      </el-button>
+    </div>
+    <div class="admin-shortcuts">
+      <router-link
+        v-if="user.hasPermission('admin:settings:edit')"
+        to="/admin/domain-rules"
+      >
+        <el-icon><Reading /></el-icon><strong>维护审校标准</strong><span>查看与编辑专业规范 →</span>
+      </router-link>
+      <router-link
+        v-if="user.hasPermission('admin:global_dict:edit')"
+        to="/admin/quality"
+      >
+        <el-icon><ChatDotRound /></el-icon><strong>处理质量反馈</strong><span>审核样例与评测结果 →</span>
+      </router-link>
+      <router-link
+        v-if="user.hasPermission('admin:llm:edit')"
+        to="/admin/llm"
+      >
+        <el-icon><Cpu /></el-icon><strong>管理模型服务</strong><span>连接测试与默认模型 →</span>
+      </router-link>
+      <router-link to="/admin/usage">
+        <el-icon><TrendCharts /></el-icon><strong>查看调用用量</strong><span>模型消耗与异常请求 →</span>
+      </router-link>
+    </div>
+    <div class="section-label">
+      <h3>平台使用情况</h3><span v-if="refreshedAt && !statsError">更新于 {{ refreshedAt }}</span>
+    </div>
+    <el-alert
+      v-if="statsError"
+      title="概览数据暂不可用，请刷新重试。"
+      type="error"
+      :closable="false"
+    />
+    <div
+      v-if="!statsError"
+      v-loading="statsLoading"
+      class="stats-row"
+    >
+      <el-card
+        class="stat-card"
+        shadow="hover"
+      >
         <div class="stat-content">
-          <div class="stat-icon" style="background: #ecf5ff;"><el-icon :size="28" color="#409eff"><Edit /></el-icon></div>
+          <div
+            class="stat-icon"
+            style="background: #ecf5ff;"
+          >
+            <el-icon
+              :size="28"
+              color="#409eff"
+            >
+              <Edit />
+            </el-icon>
+          </div>
           <div class="stat-info">
-            <div class="stat-value">{{ stats.today_proofread_count }}</div>
-            <div class="stat-label">今日校对次数</div>
+            <div class="stat-value">
+              {{ stats.today_proofread_count }}
+            </div>
+            <div class="stat-label">
+              今日校对次数
+            </div>
           </div>
         </div>
       </el-card>
-      <el-card class="stat-card" shadow="hover">
+      <el-card
+        class="stat-card"
+        shadow="hover"
+      >
         <div class="stat-content">
-          <div class="stat-icon" style="background: #f0f9eb;"><el-icon :size="28" color="#67c23a"><Document /></el-icon></div>
+          <div
+            class="stat-icon"
+            style="background: #f0f9eb;"
+          >
+            <el-icon
+              :size="28"
+              color="#67c23a"
+            >
+              <Document />
+            </el-icon>
+          </div>
           <div class="stat-info">
-            <div class="stat-value">{{ stats.total_proofread_count }}</div>
-            <div class="stat-label">累计校对次数</div>
+            <div class="stat-value">
+              {{ stats.total_proofread_count }}
+            </div>
+            <div class="stat-label">
+              累计校对次数
+            </div>
           </div>
         </div>
       </el-card>
-      <el-card class="stat-card" shadow="hover">
+      <el-card
+        class="stat-card"
+        shadow="hover"
+      >
         <div class="stat-content">
-          <div class="stat-icon" style="background: #fdf6ec;"><el-icon :size="28" color="#e6a23c"><User /></el-icon></div>
+          <div
+            class="stat-icon"
+            style="background: #fdf6ec;"
+          >
+            <el-icon
+              :size="28"
+              color="#e6a23c"
+            >
+              <User />
+            </el-icon>
+          </div>
           <div class="stat-info">
-            <div class="stat-value">{{ stats.total_users }}</div>
-            <div class="stat-label">总用户数</div>
+            <div class="stat-value">
+              {{ stats.total_users }}
+            </div>
+            <div class="stat-label">
+              总用户数
+            </div>
           </div>
         </div>
       </el-card>
-      <el-card class="stat-card" shadow="hover">
+      <el-card
+        class="stat-card"
+        shadow="hover"
+      >
         <div class="stat-content">
-          <div class="stat-icon" style="background: #fef0f0;"><el-icon :size="28" color="#f56c6c"><UserFilled /></el-icon></div>
+          <div
+            class="stat-icon"
+            style="background: #fef0f0;"
+          >
+            <el-icon
+              :size="28"
+              color="#f56c6c"
+            >
+              <UserFilled />
+            </el-icon>
+          </div>
           <div class="stat-info">
-            <div class="stat-value">{{ stats.active_users_today }}</div>
-            <div class="stat-label">今日活跃用户</div>
+            <div class="stat-value">
+              {{ stats.active_users_today }}
+            </div>
+            <div class="stat-label">
+              今日活跃用户
+            </div>
           </div>
         </div>
       </el-card>
-      <el-card class="stat-card" shadow="hover">
+      <el-card
+        class="stat-card"
+        shadow="hover"
+      >
         <div class="stat-content">
-          <div class="stat-icon" style="background: #f3e8ff;"><el-icon :size="28" color="#7c3aed"><Folder /></el-icon></div>
+          <div
+            class="stat-icon"
+            style="background: #f3e8ff;"
+          >
+            <el-icon
+              :size="28"
+              color="#7c3aed"
+            >
+              <Folder />
+            </el-icon>
+          </div>
           <div class="stat-info">
-            <div class="stat-value">{{ stats.today_document_count }} / {{ stats.total_document_count }}</div>
-            <div class="stat-label">今日/累计上传文档</div>
+            <div class="stat-value">
+              {{ stats.today_document_count }} / {{ stats.total_document_count }}
+            </div>
+            <div class="stat-label">
+              今日/累计上传文档
+            </div>
           </div>
         </div>
       </el-card>
-      <el-card class="stat-card" shadow="hover">
+      <el-card
+        class="stat-card"
+        shadow="hover"
+      >
         <div class="stat-content">
-          <div class="stat-icon" style="background: #e0f2fe;"><el-icon :size="28" color="#0284c7"><Coin /></el-icon></div>
+          <div
+            class="stat-icon"
+            style="background: #e0f2fe;"
+          >
+            <el-icon
+              :size="28"
+              color="#0284c7"
+            >
+              <Coin />
+            </el-icon>
+          </div>
           <div class="stat-info">
-            <div class="stat-value">{{ formatTokens(stats.total_token_usage) }}</div>
-            <div class="stat-label">调用账本已知 Token</div>
+            <div class="stat-value">
+              {{ formatTokens(stats.total_token_usage) }}
+            </div>
+            <div class="stat-label">
+              调用账本已知 Token
+            </div>
           </div>
         </div>
       </el-card>
@@ -62,96 +208,97 @@
         <template #header>
           <div class="card-header-flex">
             <span style="font-weight: 600;">校对趋势（近 {{ trendDays }} 日）</span>
-            <el-radio-group v-model="trendDays" size="small" @change="loadTrend">
-              <el-radio-button :value="7">7日</el-radio-button>
-              <el-radio-button :value="30">30日</el-radio-button>
-              <el-radio-button :value="90">90日</el-radio-button>
+            <el-radio-group
+              v-model="trendDays"
+              size="small"
+              @change="loadTrend"
+            >
+              <el-radio-button :value="7">
+                7日
+              </el-radio-button>
+              <el-radio-button :value="30">
+                30日
+              </el-radio-button>
+              <el-radio-button :value="90">
+                90日
+              </el-radio-button>
             </el-radio-group>
           </div>
         </template>
-        <div ref="trendChartRef" class="trend-chart" v-loading="trendLoading">
-          <el-empty v-if="trendError && !trendLoading" description="趋势数据加载失败">
-            <el-button size="small" @click="loadTrend">重试</el-button>
+        <div
+          ref="trendChartRef"
+          v-loading="trendLoading"
+          class="trend-chart"
+        >
+          <el-empty
+            v-if="trendError && !trendLoading"
+            description="趋势数据加载失败"
+          >
+            <el-button
+              size="small"
+              @click="loadTrend"
+            >
+              重试
+            </el-button>
           </el-empty>
         </div>
       </el-card>
 
       <el-card class="top-card">
-        <template #header><span style="font-weight: 600;">校对量 Top 用户（近 {{ trendDays }} 日）</span></template>
-        <el-table :data="topUsers" v-loading="topLoading" size="small" stripe>
-          <el-table-column type="index" label="#" width="44" align="center" />
-          <el-table-column prop="username" label="用户" min-width="100" show-overflow-tooltip />
-          <el-table-column prop="employee_id" label="工号" min-width="90" show-overflow-tooltip />
-          <el-table-column prop="count" label="校对次数" width="90" align="center">
+        <template #header>
+          <span style="font-weight: 600;">校对量 Top 用户（近 {{ trendDays }} 日）</span>
+        </template>
+        <el-alert
+          v-if="trendError"
+          title="排行暂不可用，请刷新重试"
+          type="error"
+          :closable="false"
+        />
+        <el-table
+          v-else
+          v-loading="topLoading"
+          :data="topUsers"
+          size="small"
+          stripe
+        >
+          <el-table-column
+            type="index"
+            label="#"
+            width="44"
+            align="center"
+          />
+          <el-table-column
+            prop="username"
+            label="用户"
+            min-width="100"
+            show-overflow-tooltip
+          />
+          <el-table-column
+            prop="employee_id"
+            label="工号"
+            min-width="90"
+            show-overflow-tooltip
+          />
+          <el-table-column
+            prop="count"
+            label="校对次数"
+            width="90"
+            align="center"
+          >
             <template #default="{ row }">
-              <el-tag v-if="row.count > 0" size="small" type="primary">{{ row.count }}</el-tag>
+              <el-tag
+                v-if="row.count > 0"
+                size="small"
+                type="primary"
+              >
+                {{ row.count }}
+              </el-tag>
               <span v-else>0</span>
             </template>
           </el-table-column>
         </el-table>
       </el-card>
     </div>
-
-    <el-card class="usage-card">
-      <template #header>
-        <div class="card-header-flex usage-header">
-          <span style="font-weight: 600;">模型调用账本</span>
-          <el-radio-group v-model="usageDays" size="small" @change="loadModelUsage">
-            <el-radio-button :value="7">7日</el-radio-button>
-            <el-radio-button :value="30">30日</el-radio-button>
-            <el-radio-button :value="90">90日</el-radio-button>
-          </el-radio-group>
-        </div>
-      </template>
-      <div v-loading="usageLoading">
-        <el-alert v-if="usageError" title="调用账本加载失败，请重试" type="error" :closable="false">
-          <el-button link type="primary" @click="loadModelUsage">重新加载</el-button>
-        </el-alert>
-        <template v-else-if="modelUsage">
-          <div class="usage-totals">
-            <span><strong>{{ modelUsage.calls }}</strong> 次实际请求</span>
-            <span><strong>{{ formatTokens(modelUsage.total_tokens) }}</strong> 已知 Token</span>
-            <el-tag :type="modelUsage.unknown_usage_calls ? 'warning' : 'info'" size="small">
-              {{ modelUsage.unknown_usage_calls }} 次未返回用量
-            </el-tag>
-          </div>
-          <p class="usage-note">含自检、润色、评测、协作及事实核查；重试按实际请求计数。未返回用量不等于零消耗，Token 不等于费用账单，搜索工具费用请以供应商为准。</p>
-          <p class="usage-note">{{ modelUsage.tracked_since ? `首条记录：${formatTime(modelUsage.tracked_since)}` : '暂无调用记录' }}。仅记录启用账本后的调用，不回填或叠加旧审校记录中的估算用量。</p>
-          <el-table :data="modelUsage.items" size="small" stripe empty-text="所选时间范围内暂无调用">
-            <el-table-column label="业务 / 阶段" min-width="145">
-              <template #default="{ row }">{{ businessLabel(row.business) }} / {{ operationLabel(row.operation) }}</template>
-            </el-table-column>
-            <el-table-column label="模型" min-width="190" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.config_name || '未保存配置' }} · {{ row.model }}</template>
-            </el-table-column>
-            <el-table-column prop="calls" label="请求数" width="75" />
-            <el-table-column label="已知 Token" width="110">
-              <template #default="{ row }">{{ row.unknown_usage_calls === row.calls ? '未知' : formatTokens(row.total_tokens) }}</template>
-            </el-table-column>
-            <el-table-column prop="unknown_usage_calls" label="用量未知" width="90" />
-            <el-table-column label="失败 / 未完整 / 取消" min-width="160">
-              <template #default="{ row }">{{ row.errors }} / {{ row.incomplete }} / {{ row.cancelled }}</template>
-            </el-table-column>
-            <el-table-column label="平均耗时" width="100">
-              <template #default="{ row }">{{ (row.average_ms / 1000).toFixed(2) }}s</template>
-            </el-table-column>
-            <el-table-column prop="search_queries" label="联网检索" width="90" />
-          </el-table>
-        </template>
-      </div>
-    </el-card>
-
-    <el-card style="margin-top: 16px;">
-      <template #header><span style="font-weight: 600;">系统信息</span></template>
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="平台名称">{{ siteStore.platformName }} {{ siteStore.platformSubtitle }}</el-descriptions-item>
-        <el-descriptions-item label="后端框架">FastAPI + SQLAlchemy</el-descriptions-item>
-        <el-descriptions-item label="前端框架">Vue 3 + Element Plus</el-descriptions-item>
-        <el-descriptions-item label="AI 模型">DeepSeek</el-descriptions-item>
-        <el-descriptions-item label="数据库">PostgreSQL</el-descriptions-item>
-        <el-descriptions-item label="缓存">Redis</el-descriptions-item>
-      </el-descriptions>
-    </el-card>
   </div>
 </template>
 
@@ -163,15 +310,18 @@ import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import {
-  getDashboardStatsApi, getUsageTrendApi, getTopUsersApi, getModelUsageApi,
-  type DashboardStats, type TrendPoint, type TopUserItem, type ModelUsageSummary,
+  getDashboardStatsApi, getUsageTrendApi, getTopUsersApi,
+  type DashboardStats, type TrendPoint, type TopUserItem,
 } from '@/api/admin'
-import { useSiteStore } from '@/stores/site'
-import { formatTime } from '@/utils/format'
+import { useUserStore } from '@/stores/user'
+
 
 echarts.use([LineChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
-const siteStore = useSiteStore()
+const user = useUserStore()
+const statsLoading = ref(true)
+const statsError = ref(false)
+const refreshedAt = ref('')
 
 const stats = reactive<DashboardStats>({
   today_proofread_count: 0,
@@ -189,47 +339,14 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
-onMounted(async () => {
-  try {
-    const data = await getDashboardStatsApi()
-    Object.assign(stats, data)
-  } catch {
-    ElMessage.error('仪表盘数据加载失败')
-  }
-  loadTrend()
-  loadModelUsage()
-  window.addEventListener('resize', handleResize)
-})
-
-const usageDays = ref(30)
-const modelUsage = ref<ModelUsageSummary | null>(null)
-const usageLoading = ref(false)
-const usageError = ref(false)
-let usageRequest = 0
-
-async function loadModelUsage() {
-  const requestId = ++usageRequest
-  usageLoading.value = true
-  usageError.value = false
-  try {
-    const result = await getModelUsageApi(usageDays.value)
-    if (requestId === usageRequest) modelUsage.value = result
-  } catch {
-    if (requestId === usageRequest) usageError.value = true
-  } finally {
-    if (requestId === usageRequest) usageLoading.value = false
-  }
+async function loadStats() {
+  statsLoading.value = true
+  statsError.value = false
+  try { Object.assign(stats, await getDashboardStatsApi()); refreshedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false }) }
+  catch { statsError.value = true; ElMessage.error('运营数据加载失败，请重试') }
+  finally { statsLoading.value = false }
 }
-
-function businessLabel(value: string): string {
-  const labels: Record<string, string> = { proofread: '审校', polish: '润色', evaluation: '质量评测', fact_check: '事实核查', collaboration: '协作审校', other: '其他' }
-  return labels[value] || value
-}
-
-function operationLabel(value: string): string {
-  const labels: Record<string, string> = { chat: '生成', stream: '流式生成', self_check: '二次自检', native_search: '联网搜索', connection_test: '连接测试' }
-  return labels[value] || value
-}
+onMounted(() => { void loadStats(); void loadTrend(); window.addEventListener('resize', handleResize) })
 
 const trendDays = ref<number>(30)
 const trendLoading = ref(false)
@@ -268,7 +385,9 @@ function renderTrend() {
   })
 }
 
+let trendRequest = 0
 async function loadTrend() {
+  const requestId = ++trendRequest
   trendLoading.value = true
   topLoading.value = true
   trendError.value = false
@@ -277,15 +396,16 @@ async function loadTrend() {
       getUsageTrendApi(trendDays.value),
       getTopUsersApi(trendDays.value),
     ])
+    if (requestId !== trendRequest) return
     trendDaily.value = trend.daily
     topUsers.value = top.items
     await nextTick()
     renderTrend()
   } catch {
+    if (requestId !== trendRequest) return
     trendError.value = true
   }
-  trendLoading.value = false
-  topLoading.value = false
+  if (requestId === trendRequest) { trendLoading.value = false; topLoading.value = false }
 }
 
 function handleResize() {
@@ -293,6 +413,7 @@ function handleResize() {
 }
 
 onBeforeUnmount(() => {
+  trendRequest++
   window.removeEventListener('resize', handleResize)
   chart?.dispose()
   chart = null
@@ -341,4 +462,9 @@ onBeforeUnmount(() => {
     .stat-label { font-size: 13px; color: #999; margin-top: 4px; }
   }
 }
+
+.overview-heading { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:28px; }.overview-eyebrow { font-size:12px; color:var(--color-primary); letter-spacing:2px; }.overview-heading h2 { font-size:28px; font-weight:600; margin:12px 0; }.overview-heading p { color:var(--color-text-secondary); font-size:13px; }
+.admin-shortcuts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-bottom:32px; }.admin-shortcuts a { display:flex; flex-direction:column; align-items:flex-start; gap:14px; padding:22px; border:1px solid var(--color-border); border-radius:12px; background:var(--surface); color:var(--color-text); text-decoration:none; }.admin-shortcuts a:hover { border-color:var(--color-primary); }.admin-shortcuts .el-icon { font-size:22px; color:var(--color-primary); }.admin-shortcuts strong { font-size:14px; }.admin-shortcuts span { color:var(--color-text-secondary); font-size:12px; }
+.section-label { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }.section-label h3 { font-size:16px; }.section-label span { color:var(--color-text-secondary); font-size:12px; }.stat-card { box-shadow:none; }.stat-card .stat-info .stat-value { color:var(--color-text); font-size:26px; }.stat-card .stat-info .stat-label { color:var(--color-text-secondary); }.stat-card .stat-icon { width:42px; height:42px; }.report-row .el-card { box-shadow:none; }
+@media(max-width:1100px) { .admin-shortcuts { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media(max-width:600px) { .overview-heading h2 { font-size:22px; }.overview-heading { align-items:flex-start; }.admin-shortcuts a { padding:16px; }.stat-card .stat-icon { display:none; }.stat-card .stat-info .stat-value { font-size:22px; }.card-header-flex { flex-wrap:wrap; gap:12px; } }
 </style>
