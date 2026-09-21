@@ -113,7 +113,7 @@ async def _run_proofread(monkeypatch, depth, timeout=60):
         user_words = {"correction": [], "whitelist": []}
         return (global_words, user_words, ""), provider
 
-    monkeypatch.setattr("app.services.proofread._gather_preparation", fake_prep)
+    monkeypatch.setattr("app.services.proofread.orchestrator._gather_preparation", fake_prep)
     result = await proofread_text(text="这是一段测试文本，包含明确的校对内容。" * 3, depth=depth)
     return result, provider
 
@@ -174,7 +174,7 @@ async def test_progress_reported_per_chunk(monkeypatch):
     def on_progress(pct, msg):
         events.append((pct, msg))
 
-    monkeypatch.setattr("app.services.proofread._gather_preparation", _fake_prep_result())
+    monkeypatch.setattr("app.services.proofread.orchestrator._gather_preparation", _fake_prep_result())
 
     text = "甲方应按约定支付款项，双方权利义务明确。" * 100  # ~2000 字 > max_chunk_size(1500) → 2 片
     result = await proofread_text(text=text, depth="deep", on_progress=on_progress)
@@ -190,7 +190,7 @@ async def test_progress_callback_error_isolated(monkeypatch):
     def bad_on_progress(pct, msg):
         raise RuntimeError("callback boom")
 
-    monkeypatch.setattr("app.services.proofread._gather_preparation", _fake_prep_result())
+    monkeypatch.setattr("app.services.proofread.orchestrator._gather_preparation", _fake_prep_result())
 
     result = await proofread_text(text="测试文本。" * 100, depth="deep",
                                   on_progress=bad_on_progress)
@@ -200,7 +200,7 @@ async def test_progress_callback_error_isolated(monkeypatch):
 async def test_single_chunk_no_chunk_progress(monkeypatch):
     # 单分片不上报分片进度（快速文本不产生噪音事件）；deep 档仍报自检
     events = []
-    monkeypatch.setattr("app.services.proofread._gather_preparation", _fake_prep_result())
+    monkeypatch.setattr("app.services.proofread.orchestrator._gather_preparation", _fake_prep_result())
 
     await proofread_text(text="短文本一段。", depth="deep",
                          on_progress=lambda p, m: events.append((p, m)))

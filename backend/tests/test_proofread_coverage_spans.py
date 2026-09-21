@@ -46,6 +46,9 @@ def prepare(monkeypatch):
         monkeypatch.setattr(service, "_gather_preparation", AsyncMock(return_value=(
             (words, {"correction": [], "whitelist": []}, service.DOMAIN_PROMPTS["general"]), provider,
         )))
+        monkeypatch.setattr("app.services.proofread.orchestrator._gather_preparation", AsyncMock(return_value=(
+            (words, {"correction": [], "whitelist": []}, service.DOMAIN_PROMPTS["general"]), provider,
+        )))
         return provider
     return install
 
@@ -291,8 +294,11 @@ async def test_provider_remembers_actual_active_config(monkeypatch):
         yield session
 
     monkeypatch.setattr(service, "async_session_factory", factory)
+    monkeypatch.setattr("app.services.proofread.provider.async_session_factory", factory)
     monkeypatch.setattr(service, "decrypt_secret", lambda value: value)
+    monkeypatch.setattr("app.services.proofread.provider.decrypt_secret", lambda value: value)
     monkeypatch.setattr(service, "OpenAICompatProvider", lambda **kw: FakeProvider([]))
+    monkeypatch.setattr("app.services.proofread.provider.OpenAICompatProvider", lambda **kw: FakeProvider([]))
     provider = await service.get_llm_provider()
     assert provider.config_id == 91 and provider.default_temperature == 0.2
 

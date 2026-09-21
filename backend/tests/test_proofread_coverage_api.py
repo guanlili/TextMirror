@@ -3,6 +3,7 @@ import json
 import uuid
 from types import SimpleNamespace
 
+import fakeredis
 import pytest
 from sqlalchemy import func, select, update
 
@@ -73,6 +74,9 @@ def fake_llm(monkeypatch):
             pass
 
     monkeypatch.setattr(service, "OpenAICompatProvider", Provider)
+    monkeypatch.setattr("app.services.proofread.provider.OpenAICompatProvider", Provider)
+    from app.tasks import proofread_task
+    monkeypatch.setattr(proofread_task, "_get_sync_redis", lambda: fakeredis.FakeRedis(decode_responses=True))
     return state
 
 
