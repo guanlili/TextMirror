@@ -39,7 +39,7 @@
 
 ## 开发与验证
 
-服务启动见 [README.md](README.md)；测试环境使用 Python 3.11+、Node.js 22。以下命令分别在对应目录执行，与 [CI](.github/workflows/ci.yml) 保持一致。
+服务启动见 [README.md](README.md)；测试环境使用 Python 3.11+、Node.js 22.x（至少 22.13，满足锁定依赖要求）。以下命令分别在对应目录执行，与 [CI](.github/workflows/ci.yml) 保持一致。
 
 后端（建议先创建并激活虚拟环境）：
 
@@ -68,6 +68,19 @@ npm run build
 - `python -m eval.eval` 是真实模型评测，不是离线单元测试；运行前确认使用的配置、样例可对外发送及费用授权。
 - PR 中注明测试结果、跳过项和未验收范围；不提交 `.env`、密钥、真实敏感样例或本地数据。
 - 代码、测试、文档和维护改动均使用分支 + PR 审核，不直接推送 `main`。
+
+### 文章级评测
+
+除固定集 `python -m eval.eval` 外，`python -m eval.articles` 支持整篇文章评测与离线重评分。在 `backend` 目录执行 `python -m eval.articles --help` 查看参数；输入 JSON 可参考 [article_examples.json](backend/eval/article_examples.json)，须符合 [article_metrics.py](backend/eval/article_metrics.py) 的 `validate_samples` 约定，未确认标注不能当作质量真值。
+
+先在仓库外准备私有输入目录及可写输出目录。以下路径需替换，输出文件必须尚不存在；在线运行前配置可访问的数据库 / Redis，选择本环境实际可用的模型配置 ID，并确认材料外发与费用授权：
+
+```bash
+python -m eval.articles --input /私有目录/articles.json --output /私有目录/results.json --config-id "$MODEL_CONFIG_ID" --depth standard --rounds 1
+python -m eval.articles --input /私有目录/articles.json --rescore /私有目录/results.json --output /私有目录/rescored.json
+```
+
+`MODEL_CONFIG_ID` 需先设为正整数；在线评测必须显式传 `--config-id`，不照抄其他环境的 ID。默认重复 3 轮，示例限制为 1 轮；超时和不完整结果不按零错误计分。`--rescore` 只重新计算已有结果，不调用模型，也不要求模型配置；原文和领域必须与采集时一致，可修订人工标注。原文、标注和逐条结果留在私有目录，不提交到仓库。
 
 ## 代码规范
 
