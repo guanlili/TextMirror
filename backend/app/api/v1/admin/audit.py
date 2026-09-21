@@ -92,19 +92,22 @@ async def list_audit_logs(
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    # 分页查询（defer 重字段，避免加载全文快照到内存再截断）
-    list_query = base_query.order_by(desc(AuditLog.created_at))
+    # 多取一个字符判断省略号，避免访问延迟字段触发异步懒加载。
+    list_query = base_query.add_columns(
+        func.substr(func.coalesce(AuditLog.input_text, ""), 1, 81),
+        func.substr(func.coalesce(AuditLog.output_text, ""), 1, 81),
+    ).order_by(desc(AuditLog.created_at))
     list_query = list_query.options(
-        defer(AuditLog.input_text),
-        defer(AuditLog.output_text),
-        defer(AuditLog.extra_params),
+        defer(AuditLog.input_text, raiseload=True),
+        defer(AuditLog.output_text, raiseload=True),
+        defer(AuditLog.extra_params, raiseload=True),
     )
     list_query = list_query.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(list_query)
-    logs = result.scalars().all()
+    logs = result.all()
 
     items = []
-    for log in logs:
+    for log, input_preview, output_preview in logs:
         items.append({
             "id": log.id,
             "action_type": log.action_type,
@@ -114,8 +117,8 @@ async def list_audit_logs(
             "is_guest": log.is_guest,
             "client_ip": log.client_ip,
             "device_type": log.device_type,
-            "input_preview": (log.input_text or "")[:80] + ("..." if log.input_text and len(log.input_text) > 80 else ""),
-            "output_preview": (log.output_text or "")[:80] + ("..." if log.output_text and len(log.output_text) > 80 else ""),
+            "input_preview": input_preview[:80] + ("..." if len(input_preview) > 80 else ""),
+            "output_preview": output_preview[:80] + ("..." if len(output_preview) > 80 else ""),
             "file_name": log.file_name,
             "status": log.status,
             "duration_ms": log.duration_ms,
