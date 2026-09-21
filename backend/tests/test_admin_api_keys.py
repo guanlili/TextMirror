@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.database import async_session_factory
 from app.core.security import generate_api_key, hash_password
 from app.models.api_key import ApiKey
+from app.models.audit_log import AuditLog
 from app.models.role import Role
 from app.models.user import User
 
@@ -222,3 +223,95 @@ async def test_audit_action_types_endpoint(client, admin):
     # 形态校验（共享库动作不确定，只验字段存在）
     for it in items:
         assert "action" in it and "count" in it
+
+
+@pytest.mark.parametrize(
+    ("input_text", "output_text", "input_preview", "output_preview"),
+    [
+        (None, None, "", ""),
+        ("", "", "", ""),
+        ("输入内容", "输出内容", "输入内容", "输出内容"),
+        ("中" * 80, "文" * 80, "中" * 80, "文" * 80),
+        ("中" * 81, "文" * 81, "中" * 80 + "...", "文" * 80 + "..."),
+        ("入" * 10000, "出" * 10000, "入" * 80 + "...", "出" * 80 + "..."),
+    ],
+)
+async def test_audit_list_previews(client, admin, input_text, output_text, input_preview, output_preview):
+    async with async_session_factory() as session:
+        log = AuditLog(
+            action_type="proofread_text",
+            input_text=input_text,
+            output_text=output_text,
+            extra_params={"mode": "standard"},
+        )
+        session.add(log)
+        await session.commit()
+        log_id = log.id
+
+    headers = await _admin_headers(client, admin)
+    resp = await client.get("/api/v1/admin/audit/logs", headers=headers)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["page"] == 1
+    assert data["page_size"] == 20
+    item = data["items"][0]
+    assert item["id"] == log_id
+    assert item["input_preview"] == input_preview
+    assert item["output_preview"] == output_preview
+    assert not {"input_text", "output_text", "extra_params"} & item.keys()
+
+    detail = await client.get(f"/api/v1/admin/audit/logs/{log_id}", headers=headers)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["input_text"] == input_text
+    assert detail.json()["output_text"] == output_text
+    assert detail.json()["extra_params"] == {"mode": "standard"}
+
+
+@pytest.mark.parametrize("field", ["input_text", "output_text"])
+async def test_audit_list_searches_full_text(client, admin, field):
+    async with async_session_factory() as session:
+        log = AuditLog(action_type="proofread_text", **{field: "正文" * 80 + "匹配%_末尾"})
+        session.add_all([log, AuditLog(action_type="proofread_text", **{field: "匹配其他末尾"})])
+        await session.commit()
+        log_id = log.id
+
+    resp = await client.get(
+        "/api/v1/admin/audit/logs",
+        params={"keyword": "匹配%_末尾"},
+        headers=await _admin_headers(client, admin),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["total"] == 1
+    assert [item["id"] for item in resp.json()["items"]] == [log_id]
+
+
+async def test_audit_list_pagination_and_empty_result(client, admin):
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    async with async_session_factory() as session:
+        older = AuditLog(action_type="proofread_text", input_text="旧记录", created_at=now - timedelta(seconds=1))
+        newer = AuditLog(action_type="polish", output_text="新记录", created_at=now)
+        session.add_all([older, newer])
+        await session.commit()
+        older_id, newer_id = older.id, newer.id
+
+    headers = await _admin_headers(client, admin)
+    for page, expected_ids in [(1, [newer_id]), (2, [older_id]), (3, [])]:
+        resp = await client.get(
+            "/api/v1/admin/audit/logs", params={"page": page, "page_size": 1}, headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["total"] == 2
+        assert data["page"] == page
+        assert data["page_size"] == 1
+        assert [item["id"] for item in data["items"]] == expected_ids
+
+    resp = await client.get(
+        "/api/v1/admin/audit/logs", params={"action_type": "login_failed"}, headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["items"] == []
+    assert resp.json()["total"] == 0
