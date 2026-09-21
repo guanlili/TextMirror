@@ -80,6 +80,12 @@ request.interceptors.response.use(
             return Promise.reject(error)
           }
 
+          // 已经重试过一次，刷新后的 token 仍然 401 → 直接跳登录
+          if (failConfig._retried) {
+            clearAuthAndRedirect()
+            return Promise.reject(error)
+          }
+
           // 防循环：刷新接口本身返回 401 说明 refresh token 也失效了
           if (failConfig.url?.includes('/auth/refresh')) {
             clearAuthAndRedirect()
@@ -97,6 +103,7 @@ request.interceptors.response.use(
             return new Promise((resolve) => {
               pendingRequests.push((newToken: string) => {
                 failConfig.headers.Authorization = `Bearer ${newToken}`
+                failConfig._retried = true
                 resolve(request(failConfig))
               })
             })
@@ -106,6 +113,7 @@ request.interceptors.response.use(
           try {
             const newToken = await refreshAccessToken()
             if (newToken) {
+              failConfig._retried = true
               pendingRequests.forEach((cb) => cb(newToken))
               pendingRequests = []
 

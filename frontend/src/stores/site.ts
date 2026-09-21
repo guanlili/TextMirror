@@ -44,7 +44,6 @@ export const useSiteStore = defineStore('site', () => {
       updateFavicon()
     } catch (e) {
       console.warn('[站点配置] 加载失败，使用默认值', e)
-      loaded.value = true
     }
   }
 

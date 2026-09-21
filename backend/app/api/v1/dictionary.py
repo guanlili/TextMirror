@@ -166,9 +166,10 @@ async def list_entries(
 
     query = select(DictionaryEntry).where(DictionaryEntry.dictionary_id == dict_id)
     if keyword:
+        escaped = keyword.replace("%", "\\%").replace("_", "\\_")
         query = query.where(
-            DictionaryEntry.wrong_word.contains(keyword) |
-            DictionaryEntry.correct_word.contains(keyword)
+            DictionaryEntry.wrong_word.contains(escaped) |
+            DictionaryEntry.correct_word.contains(escaped)
         )
     query = query.order_by(DictionaryEntry.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)

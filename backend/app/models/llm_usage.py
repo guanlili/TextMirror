@@ -8,7 +8,12 @@ from app.core.database import Base
 
 class LLMUsage(Base):
     __tablename__ = "llm_usage"
-    __table_args__ = (Index("ix_llm_usage_created_at", "created_at"),)
+    __table_args__ = (
+        Index("ix_llm_usage_created_at", "created_at"),
+        Index("ix_llm_usage_config_id", "config_id"),
+        Index("ix_llm_usage_business", "business"),
+        Index("ix_llm_usage_config_created", "config_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

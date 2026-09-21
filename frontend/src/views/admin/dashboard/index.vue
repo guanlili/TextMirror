@@ -69,7 +69,11 @@
             </el-radio-group>
           </div>
         </template>
-        <div ref="trendChartRef" class="trend-chart" v-loading="trendLoading"></div>
+        <div ref="trendChartRef" class="trend-chart" v-loading="trendLoading">
+          <el-empty v-if="trendError && !trendLoading" description="趋势数据加载失败">
+            <el-button size="small" @click="loadTrend">重试</el-button>
+          </el-empty>
+        </div>
       </el-card>
 
       <el-card class="top-card">
@@ -230,6 +234,7 @@ function operationLabel(value: string): string {
 const trendDays = ref<number>(30)
 const trendLoading = ref(false)
 const topLoading = ref(false)
+const trendError = ref(false)
 const trendChartRef = ref<HTMLElement>()
 const trendDaily = ref<TrendPoint[]>([])
 const topUsers = ref<TopUserItem[]>([])
@@ -266,6 +271,7 @@ function renderTrend() {
 async function loadTrend() {
   trendLoading.value = true
   topLoading.value = true
+  trendError.value = false
   try {
     const [trend, top] = await Promise.all([
       getUsageTrendApi(trendDays.value),
@@ -276,7 +282,7 @@ async function loadTrend() {
     await nextTick()
     renderTrend()
   } catch {
-    // 拦截器已处理
+    trendError.value = true
   }
   trendLoading.value = false
   topLoading.value = false

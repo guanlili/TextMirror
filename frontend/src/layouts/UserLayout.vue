@@ -161,16 +161,24 @@ const quotaTooltip = computed(() => {
     : `今日已用 ${u.used_today} / 配额 ${u.daily_quota} 次，北京时间零点重置`
 })
 
+// 登录态变化与路由切换（新记录产生）时刷新（路由切换节流 60s，避免频繁请求）
+let lastUsageFetch = 0
 async function loadUsage() {
   if (!userStore.isLoggedIn) { usage.value = null; return }
   try {
+    lastUsageFetch = Date.now()
     usage.value = await getTodayUsageApi()
   } catch { usage.value = null }
 }
 
-// 登录态变化与路由切换（新记录产生）时刷新
 watch(() => userStore.isLoggedIn, loadUsage, { immediate: true })
-watch(() => route.path, () => { if (userStore.isLoggedIn) loadUsage() })
+watch(() => route.path, () => {
+  if (!userStore.isLoggedIn) return
+  const now = Date.now()
+  if (now - lastUsageFetch < 60_000) return
+  lastUsageFetch = now
+  loadUsage()
+})
 
 function handleLogout() {
   userStore.logout()

@@ -18,6 +18,7 @@ import asyncio  # noqa: E402
 import fakeredis.aioredis  # noqa: E402
 import httpx  # noqa: E402
 import pytest  # noqa: E402
+from sqlalchemy import text as sa_text  # noqa: E402
 
 from app.celery_app import celery_app  # noqa: E402
 from app.core import redis as redis_module  # noqa: E402
@@ -167,6 +168,14 @@ async def client(monkeypatch):
         yield c
     await redis_module.redis_client.flushall()
     redis_module.redis_client = None
+    # 清理所有表，防止用例间数据泄漏
+    from app.core.database import Base
+
+    async with engine.begin() as conn:
+        await conn.execute(sa_text("PRAGMA foreign_keys = OFF"))
+        for table in reversed(Base.metadata.sorted_tables):
+            await conn.execute(sa_text(f'DELETE FROM "{table.name}"'))
+        await conn.execute(sa_text("PRAGMA foreign_keys = ON"))
     # 每个用例一个事件循环，必须释放绑定在旧循环上的连接
     await engine.dispose()
     # 给 aiosqlite 后台线程留出释放 SQLite 文件锁的时间

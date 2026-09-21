@@ -84,17 +84,29 @@ echo ""
 # 停止旧容器
 echo "🛑 停止旧容器..."
 docker compose down 2>/dev/null || true
-docker rm -f textmirror-frontend textmirror-postgres textmirror-redis 2>/dev/null || true
 
 # 启动（不加 --build，直接使用已加载的镜像）
 echo ""
 echo "🚀 启动服务..."
 docker compose up -d
 
-# 等待
+# 等待服务就绪（轮询健康检查，最长 60 秒）
 echo ""
 echo "⏳ 等待服务就绪..."
-sleep 15
+MAX_WAIT=60
+INTERVAL=3
+ELAPSED=0
+while [ $ELAPSED -lt $MAX_WAIT ]; do
+    if curl -sf http://localhost:3020/api/v1/health > /dev/null 2>&1; then
+        echo -e "${GREEN}✅ 服务已就绪（${ELAPSED}s）${NC}"
+        break
+    fi
+    sleep $INTERVAL
+    ELAPSED=$((ELAPSED + INTERVAL))
+done
+if [ $ELAPSED -ge $MAX_WAIT ]; then
+    echo -e "${YELLOW}⚠️  服务未在 ${MAX_WAIT}s 内就绪，请检查日志${NC}"
+fi
 
 # 状态
 echo ""

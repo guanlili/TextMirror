@@ -96,7 +96,7 @@ async def open_proofread(
         logger.error(f"[OpenAPI] 校对服务异常: {e}\n{traceback.format_exc()}")
         record_audit_log(
             http_request, "api_proofread", user=user,
-            input_text=request.text, extra_params=audit_extra,
+            input_text=(request.text[:200] if request.text else None), extra_params=audit_extra,
             status="failed", error_message=str(e), duration_ms=timer.elapsed_ms(),
         )
         if isinstance(e, InvalidModelConfigError):
@@ -120,7 +120,7 @@ async def open_proofread(
         logger.error(f"[OpenAPI] 校对未知错误: {type(e).__name__}: {e}\n{traceback.format_exc()}")
         record_audit_log(
             http_request, "api_proofread", user=user,
-            input_text=request.text, extra_params=audit_extra,
+            input_text=(request.text[:200] if request.text else None), extra_params=audit_extra,
             status="failed", error_message=str(e), duration_ms=timer.elapsed_ms(),
         )
         # 服务端错误：退还密钥日配额与用户配额
@@ -149,7 +149,7 @@ async def open_proofread(
 
     record_audit_log(
         http_request, "api_proofread", user=user,
-        input_text=request.text,
+        input_text=(request.text[:200] if request.text else None),
         output_text=f"发现{result['total_issues']}个问题",
         extra_params={**audit_extra, "total_issues": result["total_issues"]},
         token_usage=result.get("usage"),
@@ -311,7 +311,7 @@ async def open_proofread_compare(
 
     record_audit_log(
         http_request, "api_proofread_compare", user=user,
-        input_text=request.text,
+        input_text=(request.text[:200] if request.text else None),
         extra_params={**audit_extra, "issues_per_model": {str(i.config_id): i.total_issues for i in items}},
         duration_ms=timer.elapsed_ms(),
     )

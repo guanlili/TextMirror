@@ -60,7 +60,8 @@ async def list_global_words(
     if type:
         query = query.where(GlobalWord.type == type)
     if keyword:
-        query = query.where(GlobalWord.word.contains(keyword))
+        escaped = keyword.replace("%", "\\%").replace("_", "\\_")
+        query = query.where(GlobalWord.word.contains(escaped))
     query = query.order_by(GlobalWord.type, GlobalWord.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
 

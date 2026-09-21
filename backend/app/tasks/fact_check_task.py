@@ -60,7 +60,16 @@ def _finish(run_id: int, *, status: str, message: str, error_code: str | None = 
         db.commit()
 
 
-@celery_app.task(name="fact_check.run", soft_time_limit=270, time_limit=300)
+@celery_app.task(
+    name="fact_check.run",
+    soft_time_limit=270,
+    time_limit=300,
+    autoretry_for=(ConnectionError, OSError, TimeoutError),
+    max_retries=2,
+    retry_backoff=True,
+    retry_backoff_max=30,
+    retry_jitter=True,
+)
 def async_fact_check(run_id: int):
     with Session(proofread_task._get_sync_engine()) as db:
         claimed = db.execute(update(FactCheckRun).where(

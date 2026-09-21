@@ -3,6 +3,7 @@ TextMirror 认证 API
 包含登录、获取当前用户信息、密码修改等接口
 """
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from loguru import logger
@@ -284,7 +285,7 @@ async def quick_login(
     try:
         from app.core.redis import get_redis
 
-        minute = datetime.now().strftime("%Y%m%d%H%M")
+        minute = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d%H%M")
         key = f"textmirror:quick_login_rpm:{client_ip}:{minute}"
         redis = get_redis()
         count = await redis.incr(key)

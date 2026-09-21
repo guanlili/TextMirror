@@ -218,35 +218,35 @@ async def stream_task_status(
         idle_seconds = 0.0
         heartbeat_seconds = 0.0
         interval = 1.0
-        while idle_seconds < 600:
-            if await http_request.is_disconnected():
-                return
-            async with async_session_factory() as db:
-                fresh_task = await db.scalar(select(ProofreadTask).where(ProofreadTask.task_id == task_id))
-            if fresh_task is None:
-                return
-            fresh_task = await _refresh_collaboration_task(fresh_task)
-            await _refund_terminal_document_task(fresh_task)
-            payload = _build_status_payload(task_id, fresh_task)
-            changed = payload != last_payload
-            if changed:
-                last_payload = payload
-                idle_seconds = 0.0
-                heartbeat_seconds = 0.0
-                interval = 1.0
-                yield f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
-                if payload["status"] in ("SUCCESS", "FAILURE", "REVOKED", "CANCELLED"):
+        async with async_session_factory() as db:
+            while idle_seconds < 600:
+                if await http_request.is_disconnected():
                     return
-            else:
-                idle_seconds += interval
-                heartbeat_seconds += interval
-                if heartbeat_seconds >= 15:
+                fresh_task = await db.scalar(select(ProofreadTask).where(ProofreadTask.task_id == task_id))
+                if fresh_task is None:
+                    return
+                fresh_task = await _refresh_collaboration_task(fresh_task)
+                await _refund_terminal_document_task(fresh_task)
+                payload = _build_status_payload(task_id, fresh_task)
+                changed = payload != last_payload
+                if changed:
+                    last_payload = payload
+                    idle_seconds = 0.0
                     heartbeat_seconds = 0.0
-                    yield ": heartbeat\n\n"
+                    interval = 1.0
+                    yield f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+                    if payload["status"] in ("SUCCESS", "FAILURE", "REVOKED", "CANCELLED"):
+                        return
+                else:
+                    idle_seconds += interval
+                    heartbeat_seconds += interval
+                    if heartbeat_seconds >= 15:
+                        heartbeat_seconds = 0.0
+                        yield ": heartbeat\n\n"
 
-            await asyncio.sleep(interval)
-            if not changed:
-                interval = min(interval + 1.0, 5.0)
+                await asyncio.sleep(interval)
+                if not changed:
+                    interval = min(interval + 1.0, 5.0)
 
     return StreamingResponse(
         event_stream(),
