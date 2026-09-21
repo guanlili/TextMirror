@@ -140,9 +140,9 @@ PROOFREAD_SYSTEM_PROMPT = """你是一位拥有20年经验的资深中文审校�
 
 【校对准则】
 1. 精确定位：o(原文片段)必须是原文中逐字匹配的原始文本，不可修改、截断或概括，确保前端能精确高亮。定位只圈出有问题的一段（词/短语/短句），不要圈整句——圈得越短替换越安全
-2. 有效建议：s(修改建议)必须是可以直接替换原文的完整修正文本，禁止输出说明性文字（如"规范11位手机号"不是可替换文本）。替换到原文后整句必须通顺——给出建议前先默读一遍替换结果，若替换后仍是病句（如生造词只改一字仍不通）则重写建议或改为整短语替换；仍给不出通顺替换时报 warning 级并在 e 中说明需人工核对
-3. 清晰说明：e(原因说明)用简练中文解释问题所在，不超过25个字
-4. 准确分类：t(问题类型)必须从以下枚举中选择：typo(错别字)、grammar(语法错误)、punctuation(标点符号)、style(表达优化)、sensitive(敏感词)、logic(逻辑问题)
+2. 有效建议：s(修改建议)必须是可以直接替换原文的完整修正文本，禁止输出说明性文字（如"规范11位手机号"不是可替换文本）。替换到原文后整句必须通顺——给出建议前先默读一遍替换结果，若替换后仍是病句（如生造词只改一字仍不通）则重写建议或改为整短语替换。原文正确或无需修改时不输出该项，不要返回 s 与 o 相同的建议；替换不能与原文相邻标点重复
+3. 清晰说明：e(原因说明)用简练中文解释问题所在，不超过25个字，不输出推演过程
+4. 准确分类：t(问题类型)必须从以下枚举中选择：typo(错别字)、grammar(语法错误)、punctuation(标点符号及数字格式)、style(表达优化)、sensitive(敏感词)、logic(逻辑问题)。格式问题也用 punctuation，不得创建 typography 等新类型
 5. 合理定级：sv(严重度)分三级——error(明确错误,必须修改)、warning(可能有误或不规范,建议修改)、info(可优化项,酌情修改)
 6. 前后一致性核对：通读全文后再下结论——文末的总结句、宣称句（如"均按计划完成""无一例超标""任务圆满完成"）要与前文的事实陈述核对，发现宣称与事实不符（计划延期却称按期完成、有例外却称无一例外）时报 logic 问题，定位到与事实矛盾的那个表述上。仅核对称宣称句——连续编号（第一条、第二条…）和金额加总（已有确定性引擎核验，如"合计3000万元"算术正确时）不要重复核对
 7. 避免误报（宁缺毋滥），以下情形一律不报：
@@ -828,7 +828,7 @@ async def proofread_text(
     all_issues = merge_issues(all_issues, scanned_issues)
 
     # 建议有效性自检：改写类建议若没修掉错误核心，降级 warning 提示人工核对
-    all_issues = _check_suggestion_effective(all_issues)
+    all_issues = _check_suggestion_effective(all_issues, text)
 
     logger.info(f"[校对] 完成 问题={len(all_issues)} 总耗时={time.perf_counter()-t0:.2f}s 用量={total_usage}")
 
@@ -880,16 +880,8 @@ def _normalize_for_match(s: str) -> str:
     return "".join(s.split())
 
 
-def _check_suggestion_effective(issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    建议有效性自检（确定性后处理）：改写类建议（grammar/style）若替换后
-    原错误的核心仍在——典型形态：original 的错误子串被原样保留进 suggestion
-    （如「拍擦着→拍擦过」，生造词「拍擦」根本没被修掉）——说明模型只改了
-    语气/时态没解决问题。这类建议直接替换会产出新的病句，降级为 warning
-    并在说明中标注需人工核对；不丢弃（模型可能只是表述保守，问题本身是真的）。
-    错字类（typo）不适用：其 original/suggestion 通常逐字对应，含同字属正常
-    （如「帐号→账号」共享「号」）。
-    """
+def _check_suggestion_effective(issues: List[Dict[str, Any]], text: str) -> List[Dict[str, Any]]:
+    """修正精确分隔符边界；无改动建议不可采纳，扩写仍保留人工核对提示。"""
     checked: List[Dict[str, Any]] = []
     for issue in issues:
         if issue.get("source") in ("dict_scan", "consistency", "format_rule"):
@@ -900,16 +892,21 @@ def _check_suggestion_effective(issues: List[Dict[str, Any]]) -> List[Dict[str, 
         if not original or not suggestion:
             checked.append(issue)
             continue
-        # 无效建议的可靠形态：suggestion 完整包含 original（膨胀式改写——
-        # 报告的问题片段被原封不动保留，只是在外围加了字，如「拍擦着→轻轻地拍擦着」），
-        # 或 suggestion 与 original 完全相同。删字修复（「使我们→我们」）、
-        # 正常替换（「严格执行→贯彻落实」）都不会命中。
-        if original and (original in suggestion and len(suggestion) > len(original) or suggestion == original):
-            issue = dict(issue)
-            issue["severity"] = "warning"
-            issue["explanation"] = f"（建议待改进：原文片段被原样保留，需人工核对）{(issue.get('explanation') or '')[:18]}"
-            checked.append(issue)
+        start, end = issue.get("start"), issue.get("end")
+        if (issue.get("type") in ("grammar", "style", "punctuation")
+                and type(start) is int and type(end) is int
+                and 0 <= start < end < len(text) and text[start:end] == original
+                and suggestion[-1] in "，、；,;" and text[end] == suggestion[-1]
+                and original[-1] != suggestion[-1]):
+            suggestion = suggestion[:-1]
+            issue = {**issue, "suggestion": suggestion}
+        explanation = issue.get("explanation") or ""
+        if suggestion == original and re.search(r"无需修改|无须修改|原文无误|原文无错|写法正确", explanation):
             continue
+        if original in suggestion:
+            replacement = "" if suggestion == original and issue.get("type") != "sensitive" else suggestion
+            issue = {**issue, "suggestion": replacement, "severity": "warning",
+                     "explanation": f"（建议待改进：原文片段被原样保留，需人工核对）{explanation[:18]}"}
         checked.append(issue)
     return checked
 
@@ -1066,13 +1063,13 @@ SELF_CHECK_PROMPT = """你是资深审校复核专家。第一轮审校在下面
 【第一轮发现的问题】
 {issues}
 
-你的任务（仅两件事）：
-1. 复核既有问题：每条判断「正确 / 存疑」。存疑的说明理由（如原文其实没错、建议反而引入新错）。
-2. 补充遗漏：仅报告第一轮明显遗漏的、与既有问题同等的明确错误（不要吹毛求疵）。
+仅补充第一轮明显遗漏的、与既有问题同等的明确错误，不要吹毛求疵。
+既有问题仅用于排除重复，不输出确认项、存疑项，不为同一错误另给一种改法。
+不报告无需修改的原文或纯排版偏好。o 必须逐字匹配；s 须代回原句检查通顺和相邻标点，不得与 o 相同。
 
-只输出JSON数组，每项：{{"o":"原文片段","t":"类型","s":"修改建议","e":"原因","sv":"严重度","review":"new|confirm|doubt"}}
-- review=new 表示新发现的遗漏问题（只输出这类会合入结果）
-- review=confirm/doubt 用于复核既有问题（只作记录不影响结果）
+只输出JSON数组，每项：{{"o":"原文片段","t":"typo|grammar|punctuation|style|sensitive|logic","s":"修改建议","e":"简短原因","sv":"error|warning|info","review":"new"}}
+- t 和 sv 必须分别从上述英文枚举中选择，不得使用中文类型、typography、minor 或 major
+- review 只能为 new，表示新发现的遗漏；不要在 sv 中填写复核状态
 无补充遗漏返回空数组[]。禁止输出JSON以外内容。"""
 
 
