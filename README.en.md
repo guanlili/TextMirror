@@ -25,7 +25,7 @@ TextMirror is an open-source, self-hostable proofreading platform for everyday d
 | Coverage reporting | Distinguish complete, partial, and unrecorded coverage; unfinished review is not an issue-free result |
 | Dictionaries and domain rules | Global dictionaries, personal corrections, allowlists, editable domain rules, and feedback-assisted dictionary maintenance |
 | Quality evaluation | Human-reviewed samples with separate detection and replacement-suggestion checks against accepted or rejected alternatives |
-| Optional fact checking | Web search or trusted sources, initial and counter-evidence searches, exact body quotations and context; disabled by default |
+| Optional fact checking | Independent workspace for text, documents, or review records; claim confirmation, single-claim deep checks, human review, and report export; web search or trusted sources, disabled by default |
 | AI polishing | 10 styles, three intensity versions, streaming, and multi-model comparison |
 | Administration and integration | RBAC, user/guest quotas, branding, optional Feishu login, API keys, webhooks, and a physical-request model usage ledger |
 
@@ -74,13 +74,15 @@ The backend initializes tables, migrations, and seed data automatically. Do not 
 
 In the admin console, add a real provider key under model configuration and activate the model. Model keys are not configured in `.env`. Quick review currently still loads model configuration, but sends no model requests.
 
-Only the backend API hot-reloads in development Compose. Rebuild `frontend` for UI changes; restart `celery-worker` after it is idle for worker code changes. Do not reset the database to resolve migration errors.
+Once fact checking is enabled and your account has run permission, sign in and open `/fact-check` to submit text or a document directly, without first proofreading it. Existing review records can also be imported.
+
+Only the backend API hot-reloads in development Compose. Rebuild `frontend` for UI changes; restart both `celery-worker` and `fact-check-worker` after they are idle for worker code changes. Do not reset the database to resolve migration errors.
 
 ## Production Deployment
 
 Use [docker-compose.yml](docker-compose.yml) on a Linux server. It serves **HTTP on port 3022** by default and uses host networking, unlike the bridged macOS / Windows development setup.
 
-Configure the root `.env` and `backend/.env.production`: strong database/Redis passwords, `DEBUG=false`, independent application/JWT secrets, persistent upload storage, and allowed origins. A new production administrator receives a random password, not the development default. **Disable the default-enabled one-click login before public access**: it allows passwordless administrator login, and neither a random password nor `DEBUG=false` disables it.
+Configure the root `.env` and `backend/.env.production`: strong database/Redis passwords, `DEBUG=false`, independent application/JWT secrets, persistent upload storage, and allowed origins. A new production administrator receives a random password, not the development default. **Disable the default-enabled one-click login before public access**: it allows passwordless administrator login, and neither a random password nor `DEBUG=false` disables it. Also disable the `demo` account or change its default password `demo123456` in user management; disabling one-click login does not disable password login.
 
 Follow the [operations manual](系统运维操作手册.md) for initialization, migrations, backups, and verification before public access. HTTPS requires a TLS-terminating proxy or explicit certificate mounts, SSL configuration, and health-check changes; copying certificates alone does not enable it.
 
@@ -93,8 +95,8 @@ Endpoints cover text review, model comparison, asynchronous documents and pollin
 ## Stack and Layout
 
 - Backend: Python **3.11+**, FastAPI, SQLAlchemy, Alembic, Celery.
-- Frontend: Vue 3, TypeScript, Element Plus, Pinia, Vite; development and CI use Node.js 22.
-- Storage: PostgreSQL 16 and Redis 7. Compose runs five services: frontend, API, worker, database, and cache.
+- Frontend: Vue 3, TypeScript, Element Plus, Pinia, Vite; development and CI use Node.js 22.x (22.13 or newer).
+- Storage: PostgreSQL 16 and Redis 7. Compose runs six services: frontend, API, general worker, fact-check worker, database, and cache.
 - `backend/app/`: API, services, models, and tasks; `backend/alembic/`: migrations; `backend/tests/`: backend tests.
 - `frontend/src/`: views, components, API clients, and tests; `backend/eval/`: proofreading evaluation tools.
 

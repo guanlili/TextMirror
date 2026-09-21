@@ -124,7 +124,7 @@ def _postprocess(text: str, issues: list[dict], global_words: dict, user_words: 
     issues = _safe_whitelist(issues, global_words, user_words)
     issues = proofread.verify_llm_issues(text, issues)
     issues = proofread.locate_issues(text, issues)
-    return proofread._check_suggestion_effective(issues)
+    return proofread._check_suggestion_effective(issues, text)
 
 
 def _detection_findings(content: str, text: str, role_id: str,

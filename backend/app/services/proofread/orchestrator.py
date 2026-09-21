@@ -281,7 +281,7 @@ async def proofread_text(
     all_issues = merge_issues(all_issues, scanned_issues)
 
     # 建议有效性自检：改写类建议若没修掉错误核心，降级 warning 提示人工核对
-    all_issues = _check_suggestion_effective(all_issues)
+    all_issues = _check_suggestion_effective(all_issues, text)
 
     logger.info(f"[校对] 完成 问题={len(all_issues)} 总耗时={time.perf_counter()-t0:.2f}s 用量={total_usage}")
 

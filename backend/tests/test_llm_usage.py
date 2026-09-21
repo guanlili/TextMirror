@@ -259,17 +259,24 @@ def test_usage_migration_matches_metadata(bootstrap):
     with engine.begin() as conn:
         Base.metadata.create_all(conn, tables=[table for table in Base.metadata.sorted_tables
                                              if bootstrap or table != LLMUsage.__table__])
-        path = Path(__file__).resolve().parents[1] / "alembic/versions/b3e6f8a0c415_add_llm_usage_ledger.py"
-        spec = importlib.util.spec_from_file_location("usage_migration", path)
-        migration = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(migration)
-        migration.op = Operations(MigrationContext.configure(conn))
-        migration.upgrade()
-        migration.upgrade()
+        migrations = []
+        for filename in ("b3e6f8a0c415_add_llm_usage_ledger.py", "d7f2e8a4b601_add_llm_usage_indexes.py"):
+            path = Path(__file__).resolve().parents[1] / "alembic/versions" / filename
+            spec = importlib.util.spec_from_file_location(path.stem, path)
+            migration = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(migration)
+            migration.op = Operations(MigrationContext.configure(conn))
+            migration.upgrade()
+            migration.upgrade()
+            migrations.append(migration)
         context = MigrationContext.configure(conn, opts={"compare_type": True, "compare_server_default": True})
         assert compare_metadata(context, Base.metadata) == []
-        migration.downgrade()
-        migration.downgrade()
-        migration.upgrade()
+        ledger_migration, indexes_migration = migrations
+        indexes_migration.downgrade()
+        assert {index["name"] for index in sa.inspect(conn).get_indexes("llm_usage")} == {"ix_llm_usage_created_at"}
+        ledger_migration.downgrade()
+        ledger_migration.downgrade()
+        for migration in migrations:
+            migration.upgrade()
         assert compare_metadata(context, Base.metadata) == []
     engine.dispose()

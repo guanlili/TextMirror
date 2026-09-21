@@ -38,16 +38,8 @@ def _normalize_for_match(s: str) -> str:
     return "".join(s.split())
 
 
-def _check_suggestion_effective(issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    建议有效性自检（确定性后处理）：改写类建议（grammar/style）若替换后
-    原错误的核心仍在——典型形态：original 的错误子串被原样保留进 suggestion
-    （如「拍擦着→拍擦过」，生造词「拍擦」根本没被修掉）——说明模型只改了
-    语气/时态没解决问题。这类建议直接替换会产出新的病句，降级为 warning
-    并在说明中标注需人工核对；不丢弃（模型可能只是表述保守，问题本身是真的）。
-    错字类（typo）不适用：其 original/suggestion 通常逐字对应，含同字属正常
-    （如「帐号→账号」共享「号」）。
-    """
+def _check_suggestion_effective(issues: List[Dict[str, Any]], text: str) -> List[Dict[str, Any]]:
+    """修正精确分隔符边界；无改动建议不可采纳，扩写仍保留人工核对提示。"""
     checked: List[Dict[str, Any]] = []
     for issue in issues:
         if issue.get("source") in ("dict_scan", "consistency", "format_rule"):
@@ -58,16 +50,21 @@ def _check_suggestion_effective(issues: List[Dict[str, Any]]) -> List[Dict[str, 
         if not original or not suggestion:
             checked.append(issue)
             continue
-        # 无效建议的可靠形态：suggestion 完整包含 original（膨胀式改写——
-        # 报告的问题片段被原封不动保留，只是在外围加了字，如「拍擦着→轻轻地拍擦着」），
-        # 或 suggestion 与 original 完全相同。删字修复（「使我们→我们」）、
-        # 正常替换（「严格执行→贯彻落实」）都不会命中。
-        if original and (original in suggestion and len(suggestion) > len(original) or suggestion == original):
-            issue = dict(issue)
-            issue["severity"] = "warning"
-            issue["explanation"] = f"（建议待改进：原文片段被原样保留，需人工核对）{(issue.get('explanation') or '')[:18]}"
-            checked.append(issue)
+        start, end = issue.get("start"), issue.get("end")
+        if (issue.get("type") in ("grammar", "style", "punctuation")
+                and type(start) is int and type(end) is int
+                and 0 <= start < end < len(text) and text[start:end] == original
+                and suggestion[-1] in "，、；,;" and text[end] == suggestion[-1]
+                and original[-1] != suggestion[-1]):
+            suggestion = suggestion[:-1]
+            issue = {**issue, "suggestion": suggestion}
+        explanation = issue.get("explanation") or ""
+        if suggestion == original and re.search(r"无需修改|无须修改|原文无误|原文无错|写法正确", explanation):
             continue
+        if original in suggestion:
+            replacement = "" if suggestion == original and issue.get("type") != "sensitive" else suggestion
+            issue = {**issue, "suggestion": replacement, "severity": "warning",
+                     "explanation": f"（建议待改进：原文片段被原样保留，需人工核对）{explanation[:18]}"}
         checked.append(issue)
     return checked
 

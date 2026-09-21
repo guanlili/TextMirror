@@ -25,7 +25,7 @@ TextMirror 是可私有化部署的开源审校平台，适合日常文稿、公
 | 覆盖状态 | 区分完整、部分完成和未记录覆盖；未审完不能视为没有问题 |
 | 词库与行业规则 | 全局词库、个人纠错、放行词；领域规则后台维护；用户反馈辅助词库运营 |
 | 质量反馈与评测 | 人工审核反馈样例，独立统计是否检出、替换建议是否符合认可或禁止的改法 |
-| 事实核查（可选） | 联网搜索 / 可信信源两种模式，初始与反证检索、逐字引文和证据上下文；默认关闭 |
+| 事实核查（可选） | 独立工作台支持文本、文档或审校记录，事实项确认、单条深查、人工复核和报告导出；联网搜索 / 可信信源两种模式，默认关闭 |
 | AI 润色 | 10 种风格，轻量 / 标准 / 深度三个版本，支持流式输出与多模型对比 |
 | 管理与集成 | RBAC、用户及游客配额、品牌设置、可选飞书登录、API 密钥、Webhook、实际模型调用账本 |
 
@@ -74,13 +74,15 @@ docker compose -f docker-compose.dev.yml ps
 
 登录管理后台「大模型配置」，填写真实供应商密钥并激活模型；模型密钥不在 `.env` 中设置。当前快查也会加载模型配置，但不发起模型请求。
 
-开发 Compose 仅后端 API 热加载：前端变更需重新构建 `frontend`，worker 代码变更需空闲后重启 `celery-worker`。不要用重建或清空数据库解决迁移问题。
+启用事实核查并具备运行权限后，登录进入「事实核查」(`/fact-check`) 可直接提交文本或文档，无需先完成审校；也可导入已有审校记录。
+
+开发 Compose 仅后端 API 热加载：前端变更需重新构建 `frontend`，worker 代码变更需空闲后重启 `celery-worker` 和 `fact-check-worker`。不要用重建或清空数据库解决迁移问题。
 
 ## 生产部署
 
 Linux 服务器使用 [docker-compose.yml](docker-compose.yml)，默认通过 **HTTP 3022** 提供服务；它与 macOS / Windows 开发用的桥接网络配置不同。
 
-生产需配置根目录 `.env` 和 `backend/.env.production`：强数据库及 Redis 密码、`DEBUG=false`、独立应用/JWT 密钥、上传持久化路径与访问域名。生产管理员首启使用随机密码，不是开发默认密码。**公网开放前必须关闭默认启用的一键登录**，该入口可免密登录管理员；随机密码及 `DEBUG=false` 不会关闭它。
+生产需配置根目录 `.env` 和 `backend/.env.production`：强数据库及 Redis 密码、`DEBUG=false`、独立应用/JWT 密钥、上传持久化路径与访问域名。生产管理员首启使用随机密码，不是开发默认密码。**公网开放前必须关闭默认启用的一键登录**，该入口可免密登录管理员；随机密码及 `DEBUG=false` 不会关闭它。另须在「用户管理」禁用演示账号 `demo` 或修改其默认密码 `demo123456`；关闭一键登录不会禁用密码登录。
 
 按 [系统运维操作手册](系统运维操作手册.md) 完成配置、迁移、备份与验收后再对外开放。HTTPS 需额外配置 TLS 终止代理，或证书挂载、SSL 配置和健康检查；不是放入证书后自动启用。
 
@@ -93,8 +95,8 @@ Linux 服务器使用 [docker-compose.yml](docker-compose.yml)，默认通过 **
 ## 技术栈与目录
 
 - 后端：Python **3.11+**、FastAPI、SQLAlchemy、Alembic、Celery。
-- 前端：Vue 3、TypeScript、Element Plus、Pinia、Vite；开发与 CI 使用 Node.js 22。
-- 存储：PostgreSQL 16、Redis 7；Compose 包含前端、API、worker、数据库和缓存五个服务。
+- 前端：Vue 3、TypeScript、Element Plus、Pinia、Vite；开发与 CI 使用 Node.js 22.x（至少 22.13）。
+- 存储：PostgreSQL 16、Redis 7；Compose 包含前端、API、普通 worker、事实核查 worker、数据库和缓存六个服务。
 - `backend/app/`：API、业务服务、模型与任务；`backend/alembic/`：数据库迁移；`backend/tests/`：后端测试。
 - `frontend/src/`：页面、组件、API 客户端及测试；`backend/eval/`：审校评测工具。
 
