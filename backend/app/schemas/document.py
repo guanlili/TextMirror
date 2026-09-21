@@ -3,7 +3,7 @@ TextMirror 文档校对相关 Schema
 """
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.proofread import ProofreadCoverage
 
@@ -30,7 +30,8 @@ class DocumentProofreadRequest(BaseModel):
     file_id: str = Field(..., description="文件唯一标识")
     check_types: Optional[List[str]] = Field(
         None,
-        description="校对类型"
+        deprecated=True,
+        description="（已废弃，传入无效果）历史参数：限定校对类型。总是全量审校，任何值都被静默忽略",
     )
     domain: Literal["auto", "general", "official", "legal"] = Field(default="general", description="领域")
     config_id: Optional[int] = Field(
@@ -38,6 +39,11 @@ class DocumentProofreadRequest(BaseModel):
         description="指定模型配置ID（不填用管理后台设的当前模型）"
     )
     depth: Literal["quick", "standard", "deep"] = "standard"
+
+    @field_validator("check_types", mode="before")
+    @classmethod
+    def _ignore_check_types(cls, v):
+        return None
 
 
 class DocumentProofreadResponse(BaseModel):

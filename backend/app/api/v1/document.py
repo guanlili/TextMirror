@@ -12,7 +12,7 @@ from collections import OrderedDict
 from threading import Lock
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from loguru import logger
 from sqlalchemy import select, update
@@ -22,6 +22,12 @@ from starlette.background import BackgroundTask
 
 from app.core.database import async_session_factory, get_db
 from app.core.dependencies import get_current_user_optional
+from app.core.exceptions import (
+    BadRequestError,
+    ForbiddenError,
+    NotFoundError,
+    ServiceUnavailableError,
+)
 from app.core.file_security import (
     safe_upload_path,
     sanitize_filename,
@@ -61,7 +67,7 @@ def _normalize_idempotency_key(value: Optional[str]) -> Optional[str]:
         return None
     value = value.strip()
     if not value or len(value) > 128:
-        raise HTTPException(status_code=400, detail="Idempotency-Key 必须为 1-128 个非空字符")
+        raise BadRequestError(code="INVALID_IDEMPOTENCY_KEY", message="Idempotency-Key 必须为 1-128 个非空字符")
     return value
 
 
@@ -116,7 +122,7 @@ async def _check_document_ownership(file_info: dict, current_user, db: AsyncSess
       - user：仅本人及超管可访问
     """
     owner_kind = file_info.get("owner_kind") or ("user" if file_info.get("user_id") is not None else "legacy")
-    not_found = HTTPException(status_code=404, detail="文件不存在或已过期，请重新上传")
+    not_found = NotFoundError(code="DOCUMENT_NOT_FOUND", message="文件不存在或已过期，请重新上传")
 
     if owner_kind == "guest":
         return
@@ -150,14 +156,14 @@ async def _load_document_info(file_id: str, db: AsyncSession) -> dict:
     )
     doc_record = result.scalar_one_or_none()
     if doc_record is None or doc_record.status == "deleted":
-        raise HTTPException(status_code=404, detail="文件不存在或已过期，请重新上传")
+        raise NotFoundError(code="DOCUMENT_NOT_FOUND", message="文件不存在或已过期，请重新上传")
 
     cached = _cache_get(file_id)
     extracted_text = (cached or {}).get("text") or doc_record.extracted_text
     if not extracted_text:
         # 正文缺失：尝试从磁盘重新提取
         if not os.path.exists(doc_record.file_path):
-            raise HTTPException(status_code=404, detail="文件已从服务器删除，请重新上传")
+            raise NotFoundError(code="DOCUMENT_DELETED", message="文件已从服务器删除，请重新上传")
         try:
             extracted_text = await asyncio.to_thread(
                 extract_text_from_file, doc_record.file_path, doc_record.file_ext
@@ -191,7 +197,7 @@ async def export_document_review(
         from app.services.guest_policy import get_guest_policy
         await reject_guest_if_disabled(http_request)
         if not (await get_guest_policy())["allow_upload"]:
-            raise HTTPException(403, "当前未开放游客文档功能，请登录后使用")
+            raise ForbiddenError(code="GUEST_DOCUMENT_DISABLED", message="当前未开放游客文档功能，请登录后使用")
     file_info = await _load_document_info(file_id, db)
     # 复用现有策略；apikey/legacy 文档绝不因 user_id 为空而当作游客文档。
     await _check_document_ownership(file_info, current_user, db)
@@ -299,7 +305,7 @@ async def export_revised_text(
         from app.services.guest_policy import get_guest_policy
         await reject_guest_if_disabled(http_request)
         if not (await get_guest_policy())["allow_upload"]:
-            raise HTTPException(403, "当前未开放游客文档功能，请登录后使用")
+            raise ForbiddenError(code="GUEST_DOCUMENT_DISABLED", message="当前未开放游客文档功能，请登录后使用")
     file_info = await _load_document_info(file_id, db)
     await _check_document_ownership(file_info, current_user, db)
 
@@ -333,7 +339,7 @@ async def export_report(
         from app.services.guest_policy import get_guest_policy
         await reject_guest_if_disabled(http_request)
         if not (await get_guest_policy())["allow_upload"]:
-            raise HTTPException(403, "当前未开放游客文档功能，请登录后使用")
+            raise ForbiddenError(code="GUEST_DOCUMENT_DISABLED", message="当前未开放游客文档功能，请登录后使用")
     file_info = await _load_document_info(file_id, db)
     await _check_document_ownership(file_info, current_user, db)
 
@@ -370,30 +376,27 @@ async def upload_document(
         from app.services.guest_policy import get_guest_policy
         await reject_guest_if_disabled(http_request)
         if not (await get_guest_policy())["allow_upload"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="当前未开放游客上传文档，请登录后使用",
-            )
+            raise ForbiddenError(code="GUEST_UPLOAD_DISABLED", message="当前未开放游客上传文档，请登录后使用")
 
     # 上传频率限制（避免反复上传只做解析落盘，绕过按校对次数计的配额）
     await check_upload_rate_limit(http_request, current_user)
 
     # 校验文件名（净化后使用，防路径穿越）
     if not file.filename:
-        raise HTTPException(status_code=400, detail="文件名不能为空")
+        raise BadRequestError(code="FILENAME_EMPTY", message="文件名不能为空")
 
     filename = sanitize_filename(file.filename)
     if not filename:
-        raise HTTPException(status_code=400, detail="文件名不合法")
+        raise BadRequestError(code="FILENAME_INVALID", message="文件名不合法")
 
     # 获取扩展名
     _, file_ext = os.path.splitext(filename)
     file_ext = file_ext.lower()
 
     if file_ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"不支持的文件格式: {file_ext}，仅支持 .doc / .docx / .pdf / .txt",
+        raise BadRequestError(
+            code="UNSUPPORTED_FILE_FORMAT",
+            message=f"不支持的文件格式: {file_ext}，仅支持 .doc / .docx / .pdf / .txt",
         )
 
     # 生成文件 ID，分块落盘并校验内容（不把整个文件读进内存）
@@ -401,7 +404,7 @@ async def upload_document(
     try:
         stored = await store_upload(file, file_id, filename, file_ext)
     except UploadRejected as e:
-        raise HTTPException(status_code=400, detail=e.message)
+        raise BadRequestError(code="UPLOAD_REJECTED", message=e.message)
 
     file_path = stored.file_path
     file_size = stored.file_size
@@ -412,7 +415,7 @@ async def upload_document(
         try:
             extracted_text = await asyncio.to_thread(extract_text_from_file, file_path, file_ext)
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise BadRequestError(code="TEXT_EXTRACTION_FAILED", message=str(e))
         except HTTPException:
             raise
         except Exception as e:
@@ -420,7 +423,7 @@ async def upload_document(
             raise HTTPException(status_code=500, detail="文件文本提取失败，请检查文件是否损坏")
 
         if not extracted_text.strip():
-            raise HTTPException(status_code=400, detail="文件中未提取到有效文本内容")
+            raise BadRequestError(code="NO_TEXT_EXTRACTED", message="文件中未提取到有效文本内容")
 
         text_preview = extracted_text[:200] + ("..." if len(extracted_text) > 200 else "")
 
@@ -553,16 +556,16 @@ async def document_proofread(
         logger.warning(f"文档同步校对超时(120s): {filename}, text_length={len(text)}")
         await refund_document_quota(refund_id, quota_key)
         raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            status_code=504,
             detail="校对耗时过长，请改用异步校对或缩小文档范围",
         )
     except RuntimeError as e:
         import traceback
         logger.error(f"文档校对服务异常: {e}\n{traceback.format_exc()}")
         await refund_document_quota(refund_id, quota_key)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="校对服务暂时不可用，请稍后重试",
+        raise ServiceUnavailableError(
+            code="PROOFREAD_SERVICE_UNAVAILABLE",
+            message="校对服务暂时不可用，请稍后重试",
         )
     except Exception as e:
         import traceback
@@ -755,9 +758,9 @@ async def document_proofread_async(
         # 保留现有幂等重投不再扣费策略，重投后取消/失败也只能退同一笔预扣。
         if failed.rowcount:
             await refund_document_quota(task_uuid, quota_key)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="任务队列暂时不可用，请稍后重试",
+        raise ServiceUnavailableError(
+            code="TASK_QUEUE_UNAVAILABLE",
+            message="任务队列暂时不可用，请稍后重试",
         )
 
     logger.info(f"异步校对任务已提交: task_id={task_uuid}, file={file_info['filename']}")
@@ -778,12 +781,12 @@ async def download_file(
     """
     filename = sanitize_filename(filename)
     if not verify_download_signature(file_id, filename, expires, signature):
-        raise HTTPException(status_code=403, detail="下载链接无效或已过期，请重新校对生成")
+        raise ForbiddenError(code="INVALID_DOWNLOAD_LINK", message="下载链接无效或已过期，请重新校对生成")
 
     try:
         file_path = safe_upload_path(file_id, filename)
     except ValueError:
-        raise HTTPException(status_code=403, detail="下载链接无效或已过期，请重新校对生成")
+        raise ForbiddenError(code="INVALID_DOWNLOAD_LINK", message="下载链接无效或已过期，请重新校对生成")
 
     # 已删除的文档不得凭旧签名继续下载（签名有效期 24h，删除后不应仍可取回）
     from sqlalchemy import select
@@ -792,9 +795,9 @@ async def download_file(
     )
     doc_status = result.scalar_one_or_none()
     if doc_status == "deleted":
-        raise HTTPException(status_code=404, detail="文件不存在或已被清理")
+        raise NotFoundError(code="DOCUMENT_CLEANED_UP", message="文件不存在或已被清理")
 
     if not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="文件不存在或已被清理")
+        raise NotFoundError(code="DOCUMENT_NOT_FOUND", message="文件不存在或已被清理")
 
     return FileResponse(path=file_path, filename=filename)

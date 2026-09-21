@@ -5,98 +5,237 @@
         <div class="card-header">
           <span class="card-title">放行词管理</span>
           <div style="display: flex; gap: 8px;">
-            <el-button type="primary" size="small" @click="showAddDialog = true">
+            <el-button
+              type="primary"
+              size="small"
+              @click="showAddDialog = true"
+            >
               <el-icon><Plus /></el-icon>添加放行词
             </el-button>
-            <el-button size="small" @click="showBatchDialog = true">批量导入</el-button>
+            <el-button
+              size="small"
+              @click="showBatchDialog = true"
+            >
+              批量导入
+            </el-button>
           </div>
         </div>
       </template>
 
-      <el-alert type="info" :closable="false" style="margin-bottom: 12px;">
+      <el-alert
+        type="info"
+        :closable="false"
+        style="margin-bottom: 12px;"
+      >
         <template #title>
           校对时<b>永远不报</b>这些词。专有名词、品牌名、人名、行业术语被校对反复误报时，加进来一劳永逸——立即生效，下次校对就不会再被打扰。
         </template>
       </el-alert>
 
-      <el-input v-model="keyword" placeholder="搜索放行词..." clearable style="width: 260px; margin-bottom: 12px;" @input="debouncedFetchList" />
+      <el-input
+        v-model="keyword"
+        placeholder="搜索放行词..."
+        clearable
+        style="width: 260px; margin-bottom: 12px;"
+        @input="debouncedFetchList"
+      />
 
-      <el-table :data="list" v-loading="loading" stripe>
-        <el-table-column prop="word" label="放行词" min-width="150">
+      <el-table
+        v-loading="loading"
+        :data="list"
+        stripe
+      >
+        <el-table-column
+          prop="word"
+          label="放行词"
+          min-width="150"
+        >
           <template #default="{ row }">
             <span style="font-weight: 500; color: #67c23a;">{{ row.word }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="类型" width="120" align="center">
+        <el-table-column
+          label="类型"
+          width="120"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-tag :type="row.type === 'permanent' ? 'success' : 'warning'" size="small">
+            <el-tag
+              :type="row.type === 'permanent' ? 'success' : 'warning'"
+              size="small"
+            >
               {{ row.type === 'permanent' ? '永久' : '临时' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="remark" label="备注" min-width="200" show-overflow-tooltip />
-        <el-table-column label="过期时间" width="170">
+        <el-table-column
+          prop="remark"
+          label="备注"
+          min-width="200"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          label="过期时间"
+          width="170"
+        >
           <template #default="{ row }">
-            <span v-if="row.expire_at" style="font-size: 12px; color: #999;">{{ row.expire_at }}</span>
+            <span
+              v-if="row.expire_at"
+              style="font-size: 12px; color: #999;"
+            >{{ row.expire_at }}</span>
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="140" align="center">
+        <el-table-column
+          label="操作"
+          width="140"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="editWord(row as WhitelistItem)">编辑</el-button>
-            <el-popconfirm title="确定删除？" @confirm="handleDelete(row.id)">
+            <el-button
+              type="primary"
+              link
+              size="small"
+              @click="editWord(row as WhitelistItem)"
+            >
+              编辑
+            </el-button>
+            <el-popconfirm
+              title="确定删除？"
+              @confirm="handleDelete(row.id)"
+            >
               <template #reference>
-                <el-button type="danger" link size="small">删除</el-button>
+                <el-button
+                  type="danger"
+                  link
+                  size="small"
+                >
+                  删除
+                </el-button>
               </template>
             </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="!loading && list.length === 0" description="暂无放行词">
+      <el-empty
+        v-if="!loading && list.length === 0"
+        description="暂无放行词"
+      >
         <div class="empty-guide">
           <p>校对总把你的产品名 / 术语报成"错误"？把它加进来就不会再被打扰。</p>
-          <el-button type="primary" size="small" @click="fillExample">
+          <el-button
+            type="primary"
+            size="small"
+            @click="fillExample"
+          >
             <el-icon><Plus /></el-icon>添加一个试试
           </el-button>
         </div>
       </el-empty>
-      <div v-if="hasMore" class="load-more">
-        <el-button size="small" :loading="loading" @click="loadMore">加载更多（已加载 {{ list.length }} 条）</el-button>
+      <div
+        v-if="hasMore"
+        class="load-more"
+      >
+        <el-button
+          size="small"
+          :loading="loading"
+          @click="loadMore"
+        >
+          加载更多（已加载 {{ list.length }} 条）
+        </el-button>
       </div>
     </el-card>
 
     <!-- 添加/编辑弹窗 -->
-    <el-dialog v-model="showAddDialog" :title="editingItem ? '编辑放行词' : '添加放行词'" width="420px" @close="resetForm">
-      <el-form :model="form" label-width="80px">
-        <el-form-item label="放行词" required>
-          <el-input v-model="form.word" placeholder="输入放行词" maxlength="200" />
+    <el-dialog
+      v-model="showAddDialog"
+      :title="editingItem ? '编辑放行词' : '添加放行词'"
+      width="420px"
+      @close="resetForm"
+    >
+      <el-form
+        :model="form"
+        label-width="80px"
+      >
+        <el-form-item
+          label="放行词"
+          required
+        >
+          <el-input
+            v-model="form.word"
+            placeholder="输入放行词"
+            maxlength="200"
+          />
         </el-form-item>
         <el-form-item label="类型">
           <el-radio-group v-model="form.type">
-            <el-radio value="permanent">永久</el-radio>
-            <el-radio value="temporary">临时</el-radio>
+            <el-radio value="permanent">
+              永久
+            </el-radio>
+            <el-radio value="temporary">
+              临时
+            </el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="过期时间" v-if="form.type === 'temporary'">
-          <el-date-picker v-model="form.expire_at" type="datetime" placeholder="选择过期时间" style="width: 100%;" />
+        <el-form-item
+          v-if="form.type === 'temporary'"
+          label="过期时间"
+        >
+          <el-date-picker
+            v-model="form.expire_at"
+            type="datetime"
+            placeholder="选择过期时间"
+            style="width: 100%;"
+          />
         </el-form-item>
         <el-form-item label="备注">
-          <el-input v-model="form.remark" placeholder="备注（可选）" maxlength="500" />
+          <el-input
+            v-model="form.remark"
+            placeholder="备注（可选）"
+            maxlength="500"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showAddDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
+        <el-button @click="showAddDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="saving"
+          @click="handleSave"
+        >
+          保存
+        </el-button>
       </template>
     </el-dialog>
 
     <!-- 批量导入弹窗 -->
-    <el-dialog v-model="showBatchDialog" title="批量导入放行词" width="480px">
-      <p style="margin-bottom: 8px; color: #666; font-size: 13px;">每行一个放行词，可选格式：放行词,备注</p>
-      <el-input v-model="batchText" type="textarea" :rows="10" placeholder="放行词1&#10;放行词2,备注" />
+    <el-dialog
+      v-model="showBatchDialog"
+      title="批量导入放行词"
+      width="480px"
+    >
+      <p style="margin-bottom: 8px; color: #666; font-size: 13px;">
+        每行一个放行词，可选格式：放行词,备注
+      </p>
+      <el-input
+        v-model="batchText"
+        type="textarea"
+        :rows="10"
+        placeholder="放行词1&#10;放行词2,备注"
+      />
       <template #footer>
-        <el-button @click="showBatchDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="handleBatchImport">导入</el-button>
+        <el-button @click="showBatchDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="saving"
+          @click="handleBatchImport"
+        >
+          导入
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -131,11 +270,12 @@ async function fetchList(reset = true) {
   loading.value = true
   try {
     if (reset) page.value = 1
-    const items = await listWhitelistApi({
+    const res = await listWhitelistApi({
       keyword: keyword.value || undefined,
       page: page.value,
       page_size: PAGE_SIZE,
     })
+    const items = res.items
     list.value = reset ? items : [...list.value, ...items]
     hasMore.value = items.length === PAGE_SIZE
   } catch {

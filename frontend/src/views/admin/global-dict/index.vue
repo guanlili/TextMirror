@@ -2,25 +2,75 @@
   <div class="admin-global-dict">
     <!-- 统计卡片 -->
     <div class="stats-row">
-      <el-card class="stat-card" shadow="hover">
-        <div class="stat-value" style="color: #333;">{{ stats.total }}</div>
-        <div class="stat-label">词条总数</div>
+      <el-card
+        class="stat-card"
+        shadow="hover"
+      >
+        <div
+          class="stat-value"
+          style="color: #333;"
+        >
+          {{ stats.total }}
+        </div>
+        <div class="stat-label">
+          词条总数
+        </div>
       </el-card>
-      <el-card class="stat-card" shadow="hover">
-        <div class="stat-value" style="color: #f56c6c;">{{ stats.sensitive_count }}</div>
-        <div class="stat-label">敏感词</div>
+      <el-card
+        class="stat-card"
+        shadow="hover"
+      >
+        <div
+          class="stat-value"
+          style="color: #f56c6c;"
+        >
+          {{ stats.sensitive_count }}
+        </div>
+        <div class="stat-label">
+          敏感词
+        </div>
       </el-card>
-      <el-card class="stat-card" shadow="hover">
-        <div class="stat-value" style="color: #e6a23c;">{{ stats.banned_count }}</div>
-        <div class="stat-label">禁词</div>
+      <el-card
+        class="stat-card"
+        shadow="hover"
+      >
+        <div
+          class="stat-value"
+          style="color: #e6a23c;"
+        >
+          {{ stats.banned_count }}
+        </div>
+        <div class="stat-label">
+          禁词
+        </div>
       </el-card>
-      <el-card class="stat-card" shadow="hover">
-        <div class="stat-value" style="color: #0056b3;">{{ stats.correction_count }}</div>
-        <div class="stat-label">纠错词条</div>
+      <el-card
+        class="stat-card"
+        shadow="hover"
+      >
+        <div
+          class="stat-value"
+          style="color: #0056b3;"
+        >
+          {{ stats.correction_count }}
+        </div>
+        <div class="stat-label">
+          纠错词条
+        </div>
       </el-card>
-      <el-card class="stat-card" shadow="hover">
-        <div class="stat-value" style="color: #67c23a;">{{ stats.whitelist_count }}</div>
-        <div class="stat-label">放行词</div>
+      <el-card
+        class="stat-card"
+        shadow="hover"
+      >
+        <div
+          class="stat-value"
+          style="color: #67c23a;"
+        >
+          {{ stats.whitelist_count }}
+        </div>
+        <div class="stat-label">
+          放行词
+        </div>
       </el-card>
     </div>
 
@@ -30,69 +80,190 @@
         <div class="card-header">
           <span class="card-title">全局词库管理</span>
           <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-            <el-badge :value="suggestionCount" :hidden="suggestionCount === 0" type="warning">
-              <el-button size="small" @click="openSuggestions"><el-icon><MagicStick /></el-icon>优化建议</el-button>
+            <el-badge
+              :value="suggestionCount"
+              :hidden="suggestionCount === 0"
+              type="warning"
+            >
+              <el-button
+                size="small"
+                @click="openSuggestions"
+              >
+                <el-icon><MagicStick /></el-icon>优化建议
+              </el-button>
             </el-badge>
-            <el-button v-if="canManageQualityFeedback" size="small" aria-label="打开质量反馈审阅台" @click="showQualityFeedback = true">质量反馈</el-button>
-            <el-button type="primary" size="small" @click="openAddDialog"><el-icon><Plus /></el-icon>添加词条</el-button>
-            <el-button size="small" @click="showBatchDialog = true">批量导入</el-button>
+            <el-button
+              v-if="canManageQualityFeedback"
+              size="small"
+              aria-label="打开质量反馈审阅台"
+              @click="showQualityFeedback = true"
+            >
+              质量反馈
+            </el-button>
+            <el-button
+              type="primary"
+              size="small"
+              @click="openAddDialog"
+            >
+              <el-icon><Plus /></el-icon>添加词条
+            </el-button>
+            <el-button
+              size="small"
+              @click="showBatchDialog = true"
+            >
+              批量导入
+            </el-button>
           </div>
         </div>
       </template>
 
       <!-- 过滤工具栏 -->
       <div style="display: flex; gap: 12px; margin-bottom: 12px; align-items: center;">
-        <el-radio-group v-model="filterType" size="small" @change="fetchList">
-          <el-radio-button value="">全部</el-radio-button>
-          <el-radio-button value="sensitive">敏感词</el-radio-button>
-          <el-radio-button value="banned">禁词</el-radio-button>
-          <el-radio-button value="correction">纠错词条</el-radio-button>
-          <el-radio-button value="whitelist">放行词</el-radio-button>
+        <el-radio-group
+          v-model="filterType"
+          size="small"
+          @change="fetchList"
+        >
+          <el-radio-button value="">
+            全部
+          </el-radio-button>
+          <el-radio-button value="sensitive">
+            敏感词
+          </el-radio-button>
+          <el-radio-button value="banned">
+            禁词
+          </el-radio-button>
+          <el-radio-button value="correction">
+            纠错词条
+          </el-radio-button>
+          <el-radio-button value="whitelist">
+            放行词
+          </el-radio-button>
         </el-radio-group>
-        <el-input v-model="keyword" placeholder="搜索词条..." clearable style="width: 200px;" @input="onSearch" />
+        <el-input
+          v-model="keyword"
+          placeholder="搜索词条..."
+          clearable
+          style="width: 200px;"
+          @input="onSearch"
+        />
       </div>
 
-      <el-table :data="wordList" stripe v-loading="loading" max-height="500">
-        <el-table-column prop="word" label="词条" min-width="140">
+      <el-table
+        v-loading="loading"
+        :data="wordList"
+        stripe
+        max-height="500"
+      >
+        <el-table-column
+          prop="word"
+          label="词条"
+          min-width="140"
+        >
           <template #default="{ row }">
             <span :style="{ fontWeight: 500, color: typeColorMap[row.type] || '#333' }">{{ row.word }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="type" label="类型" width="110" align="center">
+        <el-table-column
+          prop="type"
+          label="类型"
+          width="110"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-tag :type="typeTagMap[row.type] || 'info'" size="small">{{ typeLabelMap[row.type] || row.type }}</el-tag>
+            <el-tag
+              :type="typeTagMap[row.type] || 'info'"
+              size="small"
+            >
+              {{ typeLabelMap[row.type] || row.type }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="replacement" label="替换词" width="130">
+        <el-table-column
+          prop="replacement"
+          label="替换词"
+          width="130"
+        >
           <template #default="{ row }">
-            <span v-if="row.replacement" style="color: #67c23a;">→ {{ row.replacement }}</span>
-            <span v-else style="color: #ccc;">-</span>
+            <span
+              v-if="row.replacement"
+              style="color: #67c23a;"
+            >→ {{ row.replacement }}</span>
+            <span
+              v-else
+              style="color: #ccc;"
+            >-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="category" label="分类" width="100" show-overflow-tooltip />
-        <el-table-column prop="severity" label="严重程度" width="100" align="center">
+        <el-table-column
+          prop="category"
+          label="分类"
+          width="100"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          prop="severity"
+          label="严重程度"
+          width="100"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-tag :type="row.severity === 'error' ? 'danger' : row.severity === 'warning' ? 'warning' : 'info'" size="small">
+            <el-tag
+              :type="row.severity === 'error' ? 'danger' : row.severity === 'warning' ? 'warning' : 'info'"
+              size="small"
+            >
               {{ ({ error: '严重', warning: '警告', info: '提示' } as Record<string, string>)[row.severity] || row.severity }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
-        <el-table-column label="操作" width="100" align="center" fixed="right">
+        <el-table-column
+          prop="remark"
+          label="备注"
+          min-width="180"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          label="操作"
+          width="100"
+          align="center"
+          fixed="right"
+        >
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="openEditDialog(row as GlobalWordItem)">编辑</el-button>
-            <el-popconfirm title="确定删除该词条？" @confirm="handleDelete(row.id)">
+            <el-button
+              type="primary"
+              link
+              size="small"
+              @click="openEditDialog(row as GlobalWordItem)"
+            >
+              编辑
+            </el-button>
+            <el-popconfirm
+              title="确定删除该词条？"
+              @confirm="handleDelete(row.id)"
+            >
               <template #reference>
-                <el-button type="danger" link size="small">删除</el-button>
+                <el-button
+                  type="danger"
+                  link
+                  size="small"
+                >
+                  删除
+                </el-button>
               </template>
             </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="!loading && wordList.length === 0" description="暂无词条数据" />
+      <el-empty
+        v-if="!loading && wordList.length === 0"
+        description="暂无词条数据"
+      />
 
       <!-- 分页 -->
-      <div style="display: flex; justify-content: flex-end; margin-top: 12px;" v-if="wordList.length > 0">
+      <div
+        v-if="wordList.length > 0"
+        style="display: flex; justify-content: flex-end; margin-top: 12px;"
+      >
         <el-pagination
           v-model:current-page="page"
           :page-size="pageSize"
@@ -104,64 +275,146 @@
     </el-card>
 
     <!-- 添加/编辑弹窗 -->
-    <el-dialog v-model="showFormDialog" :title="editingId ? '编辑词条' : '添加词条'" width="500px" destroy-on-close>
-      <el-form :model="formData" label-width="80px">
-        <el-form-item label="词条" required>
-          <el-input v-model="formData.word" placeholder="请输入词条" />
+    <el-dialog
+      v-model="showFormDialog"
+      :title="editingId ? '编辑词条' : '添加词条'"
+      width="500px"
+      destroy-on-close
+    >
+      <el-form
+        :model="formData"
+        label-width="80px"
+      >
+        <el-form-item
+          label="词条"
+          required
+        >
+          <el-input
+            v-model="formData.word"
+            placeholder="请输入词条"
+          />
         </el-form-item>
-        <el-form-item label="类型" required>
+        <el-form-item
+          label="类型"
+          required
+        >
           <el-radio-group v-model="formData.type">
-            <el-radio value="sensitive">敏感词</el-radio>
-            <el-radio value="banned">禁词</el-radio>
-            <el-radio value="correction">纠错词条</el-radio>
-            <el-radio value="whitelist">放行词</el-radio>
+            <el-radio value="sensitive">
+              敏感词
+            </el-radio>
+            <el-radio value="banned">
+              禁词
+            </el-radio>
+            <el-radio value="correction">
+              纠错词条
+            </el-radio>
+            <el-radio value="whitelist">
+              放行词
+            </el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="替换词" v-if="formData.type === 'correction'">
-          <el-input v-model="formData.replacement" placeholder="正确的写法" />
+        <el-form-item
+          v-if="formData.type === 'correction'"
+          label="替换词"
+        >
+          <el-input
+            v-model="formData.replacement"
+            placeholder="正确的写法"
+          />
         </el-form-item>
         <el-form-item label="分类">
-          <el-input v-model="formData.category" placeholder="如：政治、粗俗用语、公文用语 等" />
+          <el-input
+            v-model="formData.category"
+            placeholder="如：政治、粗俗用语、公文用语 等"
+          />
         </el-form-item>
         <el-form-item label="严重程度">
           <el-radio-group v-model="formData.severity">
-            <el-radio value="error">严重</el-radio>
-            <el-radio value="warning">警告</el-radio>
-            <el-radio value="info">提示</el-radio>
+            <el-radio value="error">
+              严重
+            </el-radio>
+            <el-radio value="warning">
+              警告
+            </el-radio>
+            <el-radio value="info">
+              提示
+            </el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="备注">
-          <el-input v-model="formData.remark" type="textarea" :rows="2" placeholder="备注说明" />
+          <el-input
+            v-model="formData.remark"
+            type="textarea"
+            :rows="2"
+            placeholder="备注说明"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showFormDialog = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="handleSubmit">{{ editingId ? '保存' : '添加' }}</el-button>
+        <el-button @click="showFormDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="submitting"
+          @click="handleSubmit"
+        >
+          {{ editingId ? '保存' : '添加' }}
+        </el-button>
       </template>
     </el-dialog>
 
     <!-- 批量导入弹窗 -->
-    <el-dialog v-model="showBatchDialog" title="批量导入词条" width="560px" destroy-on-close>
-      <el-alert type="info" :closable="false" style="margin-bottom: 12px;">
+    <el-dialog
+      v-model="showBatchDialog"
+      title="批量导入词条"
+      width="560px"
+      destroy-on-close
+    >
+      <el-alert
+        type="info"
+        :closable="false"
+        style="margin-bottom: 12px;"
+      >
         <template #title>
           <div style="font-size: 13px;">
-            每行一条，格式：<b>词条,类型,替换词,分类,备注</b><br/>
-            类型可选：sensitive / banned / correction / whitelist<br/>
+            每行一条，格式：<b>词条,类型,替换词,分类,备注</b><br>
+            类型可选：sensitive / banned / correction / whitelist<br>
             示例：<code>帐号,correction,账号,常见错别字,帐→账</code>
           </div>
         </template>
       </el-alert>
-      <el-input v-model="batchText" type="textarea" :rows="10" placeholder="帐号,correction,账号,常见错别字,帐→账&#10;卧槽,banned,,粗俗用语,正式文档禁用&#10;API,whitelist,,技术术语,无需校对" />
+      <el-input
+        v-model="batchText"
+        type="textarea"
+        :rows="10"
+        placeholder="帐号,correction,账号,常见错别字,帐→账&#10;卧槽,banned,,粗俗用语,正式文档禁用&#10;API,whitelist,,技术术语,无需校对"
+      />
       <template #footer>
-        <el-button @click="showBatchDialog = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="handleBatchImport">导入</el-button>
+        <el-button @click="showBatchDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="submitting"
+          @click="handleBatchImport"
+        >
+          导入
+        </el-button>
       </template>
     </el-dialog>
     <!-- 优化建议抽屉（反馈数据飞轮：聚合用户接受/忽略行为） -->
-    <el-drawer v-model="showSuggestions" title="词库优化建议" size="520px">
+    <el-drawer
+      v-model="showSuggestions"
+      title="词库优化建议"
+      size="520px"
+    >
       <div v-loading="suggestionsLoading">
-        <el-empty v-if="!suggestionsLoading && suggestionCount === 0"
-          description="暂无建议" :image-size="80">
+        <el-empty
+          v-if="!suggestionsLoading && suggestionCount === 0"
+          description="暂无建议"
+          :image-size="80"
+        >
           <p class="sug-empty-tip">
             系统会聚合用户在校对中的「接受/忽略」行为：被反复忽略的词建议加入放行词，
             被反复接受的错字纠正建议沉淀为纠错词条。积累一定使用量后这里会出现建议。
@@ -169,31 +422,61 @@
         </el-empty>
 
         <template v-if="suggestions.whitelist.length">
-          <h4 class="sug-section-title">建议加入放行词（被反复忽略）</h4>
-          <div v-for="s in suggestions.whitelist" :key="'w' + s.word" class="sug-item">
+          <h4 class="sug-section-title">
+            建议加入放行词（被反复忽略）
+          </h4>
+          <div
+            v-for="s in suggestions.whitelist"
+            :key="'w' + s.word"
+            class="sug-item"
+          >
             <div class="sug-main">
               <span class="sug-word">{{ s.word }}</span>
               <span class="sug-meta">被忽略 {{ s.ignore_count }} 次 · {{ s.user_count }} 位用户</span>
             </div>
-            <el-button type="success" size="small" :loading="adopting === 'w:' + s.word"
-              @click="adoptWhitelist(s.word)">加入放行词</el-button>
+            <el-button
+              type="success"
+              size="small"
+              :loading="adopting === 'w:' + s.word"
+              @click="adoptWhitelist(s.word)"
+            >
+              加入放行词
+            </el-button>
           </div>
         </template>
 
         <template v-if="suggestions.correction.length">
-          <h4 class="sug-section-title">建议沉淀纠错词条（被反复接受）</h4>
-          <div v-for="s in suggestions.correction" :key="'c' + s.word" class="sug-item">
+          <h4 class="sug-section-title">
+            建议沉淀纠错词条（被反复接受）
+          </h4>
+          <div
+            v-for="s in suggestions.correction"
+            :key="'c' + s.word"
+            class="sug-item"
+          >
             <div class="sug-main">
               <span class="sug-word">{{ s.word }} → {{ s.suggestion }}</span>
               <span class="sug-meta">被接受 {{ s.accept_count }} 次 · {{ s.user_count }} 位用户</span>
             </div>
-            <el-button type="primary" size="small" :loading="adopting === 'c:' + s.word"
-              @click="adoptCorrection(s.word, s.suggestion)">加入纠错词</el-button>
+            <el-button
+              type="primary"
+              size="small"
+              :loading="adopting === 'c:' + s.word"
+              @click="adoptCorrection(s.word, s.suggestion)"
+            >
+              加入纠错词
+            </el-button>
           </div>
         </template>
       </div>
     </el-drawer>
-    <el-drawer v-if="canManageQualityFeedback" v-model="showQualityFeedback" title="质量反馈" size="min(980px, 100vw)" destroy-on-close>
+    <el-drawer
+      v-if="canManageQualityFeedback"
+      v-model="showQualityFeedback"
+      title="质量反馈"
+      size="min(980px, 100vw)"
+      destroy-on-close
+    >
       <QualityFeedbackAdmin v-if="showQualityFeedback" />
     </el-drawer>
   </div>

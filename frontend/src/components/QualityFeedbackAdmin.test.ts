@@ -297,9 +297,9 @@ describe('质量反馈目标纯函数', () => {
 
 describe('QualityFeedbackAdmin 真实 SFC', () => {
   it('入口复用现有编辑权限，打开挂载、关闭卸载，不引入新权限', () => {
-    expect(globalDictSource).toContain("userStore.hasPermission('admin:global_dict:edit')")
-    expect(globalDictSource).toContain('<el-drawer v-if="canManageQualityFeedback" v-model="showQualityFeedback"')
-    expect(globalDictSource).toContain('<QualityFeedbackAdmin v-if="showQualityFeedback" />')
+    expect(globalDictSource).toMatch(/userStore\.hasPermission\([^)]*admin:global_dict:edit[^)]*\)/)
+    expect(globalDictSource).toMatch(/<el-drawer(?=[^>]*v-if="canManageQualityFeedback")(?=[^>]*v-model="showQualityFeedback")[^>]*>/)
+    expect(globalDictSource).toMatch(/<QualityFeedbackAdmin(?=[^>]*v-if="showQualityFeedback")[^>]*\/>/)
   })
   it('首次 pending 加载/空态，没有自动提交、模型调用或用户身份披露', async () => {
     const { state, root } = mount()

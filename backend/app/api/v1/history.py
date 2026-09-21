@@ -4,12 +4,13 @@ TextMirror 校对历史记录 API
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.proofread import ProofreadRecord
 from app.schemas.history import HistoryDetailResponse, HistoryListItem, HistoryListResponse
 from app.schemas.review import ReviewExportRequest, ReviewResponse, ReviewVersionRequest, ReviewWriteRequest
@@ -58,16 +59,16 @@ async def export_history_review(
 ):
     record = await load_review_record(db, record_id, current_user.id)
     if request.revision != record.review_revision:
-        raise HTTPException(409, "审阅版本已更新，请重新加载后重试")
+        raise ConflictError(code="REVIEW_STALE", message="审阅版本已更新，请重新加载后重试")
     review = review_response(record)
     if request.version_id is not None:
         version = next((version for version in review.versions if version.id == request.version_id), None)
         if version is None:
-            raise HTTPException(404, "审阅版本不存在")
+            raise NotFoundError(code="VERSION_NOT_FOUND", message="审阅版本不存在")
         issues = version.issues
     else:
         if record.review_state is None:
-            raise HTTPException(422, "请先保存审阅草稿再导出")
+            raise ValidationError(code="NO_REVIEW_DRAFT", message="请先保存审阅草稿再导出")
         issues = review.issues
     source = await load_review_source(db, record, current_user.id) if request.format == "docx" else None
     return await export_review_file(
@@ -176,7 +177,7 @@ async def get_history_detail(
     )
     record = result.scalar_one_or_none()
     if not record:
-        raise HTTPException(status_code=404, detail="记录不存在")
+        raise NotFoundError(code="RECORD_NOT_FOUND", message="记录不存在")
 
     # 记录审计日志（查看历史详情）
     record_audit_log(
@@ -218,6 +219,6 @@ async def delete_history(
     )
     record = result.scalar_one_or_none()
     if not record:
-        raise HTTPException(status_code=404, detail="记录不存在")
+        raise NotFoundError(code="RECORD_NOT_FOUND", message="记录不存在")
 
     await db.delete(record)

@@ -6,12 +6,13 @@ TextMirror 限流与配额
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, Request
 from loguru import logger
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.exceptions import ForbiddenError, QuotaExceededError
 from app.core.redis import get_redis
 from app.models.proofread import ProofreadRecord
 from app.utils.ip import get_client_ip
@@ -48,10 +49,7 @@ async def check_guest_rate_limit(request: Request, daily_limit: int | None = Non
             # 管理员当日上调限额后可立即生效
             await redis.decr(redis_key)
             logger.warning(f"游客限流触发: IP={client_ip}, count={count}")
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"游客每日最多使用 {daily_limit} 次，请登录后继续使用",
-            )
+            raise QuotaExceededError(code="GUEST_LIMIT", message=f"游客每日最多使用 {daily_limit} 次，请登录后继续使用")
 
     except HTTPException:
         raise
@@ -129,10 +127,7 @@ async def charge_user_daily_quota(user, weight: int = 1) -> str | None:
                 if weight == 1
                 else f"今日剩余额度 {max(user.daily_quota - used, 0)} 次，本次需 {weight} 次（每个模型计一次），请减少模型数量或明天再试"
             )
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=detail,
-            )
+            raise QuotaExceededError(code="QUOTA_EXCEEDED", message=detail)
         return key
     except HTTPException:
         raise
@@ -181,10 +176,7 @@ async def check_upload_rate_limit(request: Request, user=None) -> None:
             await redis.expire(key, 120)
         if count > limit:
             logger.warning(f"上传频率超限: {subject}, count={count}")
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"上传过于频繁：每分钟最多 {limit} 次，请稍后重试",
-            )
+            raise QuotaExceededError(code="UPLOAD_RATE_LIMITED", message=f"上传过于频繁：每分钟最多 {limit} 次，请稍后重试")
     except HTTPException:
         raise
     except Exception as e:
@@ -204,13 +196,7 @@ async def check_api_key_rpm(api_key) -> None:
         if rpm_count == 1:
             await redis.expire(rpm_key, 120)
         if rpm_count > settings.API_KEY_RPM_LIMIT:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail={
-                    "code": "RATE_LIMITED",
-                    "message": f"请求频率超限：每分钟最多 {settings.API_KEY_RPM_LIMIT} 次，请稍后重试",
-                },
-            )
+            raise QuotaExceededError(code="RATE_LIMITED", message=f"请求频率超限：每分钟最多 {settings.API_KEY_RPM_LIMIT} 次，请稍后重试")
     except HTTPException:
         raise
     except Exception as e:
@@ -238,13 +224,7 @@ async def charge_api_key_daily(api_key, weight: int = 1) -> None:
                 f"密钥日配额触发: key_id={api_key.id}, used={daily_count - weight}, "
                 f"need={weight}, quota={api_key.daily_quota}"
             )
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail={
-                    "code": "KEY_QUOTA_EXCEEDED",
-                    "message": f"该密钥已达每日调用上限（{api_key.daily_quota} 次/天），明天恢复或联系管理员调整",
-                },
-            )
+            raise QuotaExceededError(code="KEY_QUOTA_EXCEEDED", message=f"该密钥已达每日调用上限（{api_key.daily_quota} 次/天），明天恢复或联系管理员调整")
     except HTTPException:
         raise
     except Exception as e:
@@ -301,7 +281,4 @@ async def reject_guest_if_disabled(http_request: Request) -> None:
     """
     from app.services.site_config import is_guest_mode_enabled
     if not await is_guest_mode_enabled():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="游客模式已关闭，请登录后使用",
-        )
+        raise ForbiddenError(code="GUEST_MODE_DISABLED", message="游客模式已关闭，请登录后使用")

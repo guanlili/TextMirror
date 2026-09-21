@@ -17,8 +17,13 @@
 
         <!-- 敏感词警告（仅在检测到敏感词时显示） -->
         <transition name="fade-slide">
-          <div v-if="showSensitiveWarning" class="sensitive-warning">
-            <el-icon class="warning-icon"><WarningFilled /></el-icon>
+          <div
+            v-if="showSensitiveWarning"
+            class="sensitive-warning"
+          >
+            <el-icon class="warning-icon">
+              <WarningFilled />
+            </el-icon>
             <span>内容将被发送至AI服务处理，请勿输入密码、身份证号等敏感信息</span>
           </div>
         </transition>
@@ -37,12 +42,21 @@
               :class="{ 'is-active': selectedStyle === item.key }"
               @click="selectedStyle = item.key"
             >
-              <div class="card-icon">{{ styleIcons[item.key] || '✨' }}</div>
-              <div class="card-content">
-                <div class="card-name">{{ item.name }}</div>
-                <div class="card-desc">{{ item.description }}</div>
+              <div class="card-icon">
+                {{ styleIcons[item.key] || '✨' }}
               </div>
-              <div v-if="selectedStyle === item.key" class="card-check">
+              <div class="card-content">
+                <div class="card-name">
+                  {{ item.name }}
+                </div>
+                <div class="card-desc">
+                  {{ item.description }}
+                </div>
+              </div>
+              <div
+                v-if="selectedStyle === item.key"
+                class="card-check"
+              >
                 <el-icon><Check /></el-icon>
               </div>
             </div>
@@ -58,7 +72,10 @@
         <div class="input-section">
           <div class="section-title">
             <span class="section-heading"><b>02</b> 输入原文</span>
-            <span class="char-count" :class="{ 'is-error': textTooShort || textTooLong }">
+            <span
+              class="char-count"
+              :class="{ 'is-error': textTooShort || textTooLong }"
+            >
               {{ inputText.length }}/5000
             </span>
           </div>
@@ -75,8 +92,16 @@
         </div>
 
         <!-- 多模型对比模式 -->
-        <div v-if="availableModels.length >= 2" class="compare-section">
-          <el-checkbox v-model="compareMode" size="small">多模型对比</el-checkbox>
+        <div
+          v-if="availableModels.length >= 2"
+          class="compare-section"
+        >
+          <el-checkbox
+            v-model="compareMode"
+            size="small"
+          >
+            多模型对比
+          </el-checkbox>
           <template v-if="compareMode">
             <el-select
               v-model="selectedModelIds"
@@ -114,10 +139,16 @@
             :disabled="!canSubmit || compareMode"
             @click="handlePolish"
           >
-            <el-icon v-if="!loading"><MagicStick /></el-icon>
+            <el-icon v-if="!loading">
+              <MagicStick />
+            </el-icon>
             {{ loading ? '正在润色...' : '一键润色' }}
           </el-button>
-          <el-button class="btn-clear" @click="handleClear" :disabled="!inputText">
+          <el-button
+            class="btn-clear"
+            :disabled="!inputText"
+            @click="handleClear"
+          >
             <el-icon><Delete /></el-icon>清空
           </el-button>
         </div>
@@ -135,18 +166,29 @@
 
         <!-- ===== 多模型对比视图 ===== -->
         <template v-if="compareMode">
-          <div v-if="!hasCompareResult && !comparing" class="empty-state">
+          <div
+            v-if="!hasCompareResult && !comparing"
+            class="empty-state"
+          >
             <div class="empty-illustration">
               <span class="empty-icon">⚖️</span>
             </div>
             <h3>模型对比结果将在这里展示</h3>
             <p>选择 2-4 个模型，点击「开始对比」，同一段文本将由多个模型并发润色</p>
           </div>
-          <div v-if="comparing" class="loading-state">
-            <div class="loading-animation"><div class="dot-pulse"></div></div>
+          <div
+            v-if="comparing"
+            class="loading-state"
+          >
+            <div class="loading-animation">
+              <div class="dot-pulse" />
+            </div>
             <p>多个模型正在并发润色，请稍候...</p>
           </div>
-          <div v-if="hasCompareResult" class="compare-list">
+          <div
+            v-if="hasCompareResult"
+            class="compare-list"
+          >
             <div
               v-for="item in compareResults"
               :key="item.config_id"
@@ -154,17 +196,41 @@
               :class="{ 'is-failed': !item.success }"
             >
               <div class="compare-head">
-                <el-tag effect="dark" size="small" type="info">{{ item.config_name }}</el-tag>
+                <el-tag
+                  effect="dark"
+                  size="small"
+                  type="info"
+                >
+                  {{ item.config_name }}
+                </el-tag>
                 <span class="compare-model">{{ item.model }}</span>
-                <span v-if="item.success" class="compare-elapsed">{{ (item.elapsed_ms / 1000).toFixed(1) }}s</span>
+                <span
+                  v-if="item.success"
+                  class="compare-elapsed"
+                >{{ (item.elapsed_ms / 1000).toFixed(1) }}s</span>
               </div>
-              <div v-if="item.success" class="card-body markdown-body" v-html="renderMarkdown(item.content)"></div>
-              <div v-else class="card-body compare-error">
+              <div
+                v-if="item.success"
+                class="card-body markdown-body"
+                v-html="renderMarkdown(item.content)"
+              />
+              <div
+                v-else
+                class="card-body compare-error"
+              >
                 <p>调用失败</p>
                 <span>{{ item.error }}</span>
               </div>
-              <div v-if="item.success" class="compare-foot">
-                <el-button type="primary" size="small" text @click="handleCopy(item.content)">
+              <div
+                v-if="item.success"
+                class="compare-foot"
+              >
+                <el-button
+                  type="primary"
+                  size="small"
+                  text
+                  @click="handleCopy(item.content)"
+                >
                   <el-icon><CopyDocument /></el-icon>复制
                 </el-button>
               </div>
@@ -174,85 +240,129 @@
 
         <!-- ===== 普通润色视图 ===== -->
         <template v-else>
-        <!-- 空状态 -->
-        <div v-if="!hasResult && !loading" class="empty-state">
-          <div class="empty-illustration">
-            <span class="empty-icon">📝</span>
-          </div>
-          <h3>润色结果将在这里展示</h3>
-          <p>输入文本并选择风格，点击「一键润色」即可生成三种不同程度的润色版本</p>
-        </div>
-
-        <!-- 加载状态（流式期间已开始渲染结果，不显示整屏 loading） -->
-        <div v-if="loading && !hasResult" class="loading-state">
-          <div class="loading-animation">
-            <div class="dot-pulse"></div>
-          </div>
-          <p>AI 正在为您润色，请稍候...</p>
-          <span class="loading-tip">通常需要 10-30 秒</span>
-        </div>
-
-        <!-- 结果头部工具栏 -->
-        <div v-if="hasResult" class="result-header">
-          <div class="result-meta">
-            <el-tag effect="dark" size="small" class="meta-tag">{{ currentStyleName }}</el-tag>
-            <span class="meta-text">原文 {{ originalText.length || inputText.length }} 字</span>
-          </div>
-          <div class="result-actions">
-            <el-button v-if="streaming" size="small" type="danger" plain @click="stopStreaming">
-              停止生成
-            </el-button>
-            <el-button v-else size="small" @click="handleRegenerate" :loading="regenerating">
-              <el-icon><Refresh /></el-icon>重新生成
-            </el-button>
-          </div>
-        </div>
-
-        <!-- 三行润色结果 -->
-        <div v-if="hasResult" class="result-list">
+          <!-- 空状态 -->
           <div
-            v-for="(ver, idx) in versions"
-            :key="idx"
-            class="result-card"
-            :class="'level-' + ver.level"
+            v-if="!hasResult && !loading"
+            class="empty-state"
           >
-            <!-- 卡片头部 -->
-            <div class="card-head">
-              <div class="card-badge" :class="'badge-' + ver.level">
-                <span class="badge-num">{{ idx + 1 }}</span>
-              </div>
-              <span class="card-label">{{ ver.label }}</span>
+            <div class="empty-illustration">
+              <span class="empty-icon">📝</span>
+            </div>
+            <h3>润色结果将在这里展示</h3>
+            <p>输入文本并选择风格，点击「一键润色」即可生成三种不同程度的润色版本</p>
+          </div>
+
+          <!-- 加载状态（流式期间已开始渲染结果，不显示整屏 loading） -->
+          <div
+            v-if="loading && !hasResult"
+            class="loading-state"
+          >
+            <div class="loading-animation">
+              <div class="dot-pulse" />
+            </div>
+            <p>AI 正在为您润色，请稍候...</p>
+            <span class="loading-tip">通常需要 10-30 秒</span>
+          </div>
+
+          <!-- 结果头部工具栏 -->
+          <div
+            v-if="hasResult"
+            class="result-header"
+          >
+            <div class="result-meta">
               <el-tag
-                :type="levelTagType(ver.level)"
+                effect="dark"
                 size="small"
-                effect="plain"
-                round
+                class="meta-tag"
               >
-                {{ levelDesc(ver.level) }}
+                {{ currentStyleName }}
               </el-tag>
+              <span class="meta-text">原文 {{ originalText.length || inputText.length }} 字</span>
+            </div>
+            <div class="result-actions">
               <el-button
-                class="btn-copy"
-                type="primary"
+                v-if="streaming"
                 size="small"
-                text
-                @click="handleCopy(ver.content)"
+                type="danger"
+                plain
+                @click="stopStreaming"
               >
-                <el-icon><CopyDocument /></el-icon>复制
+                停止生成
+              </el-button>
+              <el-button
+                v-else
+                size="small"
+                :loading="regenerating"
+                @click="handleRegenerate"
+              >
+                <el-icon><Refresh /></el-icon>重新生成
               </el-button>
             </div>
-            <!-- 敏感词警示（润色产出命中词库） -->
-            <el-alert v-if="ver.sensitive_words?.length" type="warning" :closable="false" class="sensitive-alert">
-              <template #title>
-                润色结果含敏感词：{{ ver.sensitive_words.join('、') }}，请确认适用场景后再使用
-              </template>
-            </el-alert>
-            <!-- 卡片内容（支持 Markdown；流式未开始时显示等待态） -->
-            <div v-if="streaming && !ver.content" class="card-body card-body-pending">
-              <span class="pending-tip"><span class="dot-pulse"></span>等待生成...</span>
-            </div>
-            <div v-else class="card-body markdown-body" v-html="renderMarkdown(ver.content)"></div>
           </div>
-        </div>
+
+          <!-- 三行润色结果 -->
+          <div
+            v-if="hasResult"
+            class="result-list"
+          >
+            <div
+              v-for="(ver, idx) in versions"
+              :key="idx"
+              class="result-card"
+              :class="'level-' + ver.level"
+            >
+              <!-- 卡片头部 -->
+              <div class="card-head">
+                <div
+                  class="card-badge"
+                  :class="'badge-' + ver.level"
+                >
+                  <span class="badge-num">{{ idx + 1 }}</span>
+                </div>
+                <span class="card-label">{{ ver.label }}</span>
+                <el-tag
+                  :type="levelTagType(ver.level)"
+                  size="small"
+                  effect="plain"
+                  round
+                >
+                  {{ levelDesc(ver.level) }}
+                </el-tag>
+                <el-button
+                  class="btn-copy"
+                  type="primary"
+                  size="small"
+                  text
+                  @click="handleCopy(ver.content)"
+                >
+                  <el-icon><CopyDocument /></el-icon>复制
+                </el-button>
+              </div>
+              <!-- 敏感词警示（润色产出命中词库） -->
+              <el-alert
+                v-if="ver.sensitive_words?.length"
+                type="warning"
+                :closable="false"
+                class="sensitive-alert"
+              >
+                <template #title>
+                  润色结果含敏感词：{{ ver.sensitive_words.join('、') }}，请确认适用场景后再使用
+                </template>
+              </el-alert>
+              <!-- 卡片内容（支持 Markdown；流式未开始时显示等待态） -->
+              <div
+                v-if="streaming && !ver.content"
+                class="card-body card-body-pending"
+              >
+                <span class="pending-tip"><span class="dot-pulse" />等待生成...</span>
+              </div>
+              <div
+                v-else
+                class="card-body markdown-body"
+                v-html="renderMarkdown(ver.content)"
+              />
+            </div>
+          </div>
         </template>
       </div>
     </div>

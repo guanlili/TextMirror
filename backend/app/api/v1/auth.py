@@ -5,7 +5,7 @@ TextMirror 认证 API
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.exceptions import (
+    BadRequestError,
+    ForbiddenError,
+    NotFoundError,
+    QuotaExceededError,
+    UnauthorizedError,
+)
 from app.core.redis import get_redis
 from app.core.security import (
     create_access_token,
@@ -55,9 +62,9 @@ async def _check_login_lock(employee_id: str, client_ip: str) -> None:
         redis = get_redis()
         locked = await redis.get(f"textmirror:login_lock:{employee_id}:{client_ip}")
         if locked:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="登录失败次数过多，账号已临时锁定，请15分钟后重试",
+            raise QuotaExceededError(
+                code="LOGIN_LOCKED",
+                message="登录失败次数过多，账号已临时锁定，请15分钟后重试",
             )
     except HTTPException:
         raise
@@ -122,10 +129,7 @@ async def login(request: LoginRequest, http_request: Request, db: AsyncSession =
             employee_id_attempt=request.employee_id,
             status="failed", error_message="工号不存在",
         )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="工号或密码错误",
-        )
+        raise UnauthorizedError(code="INVALID_CREDENTIALS", message="工号或密码错误")
 
     # 校验密码
     if not verify_password(request.password, user.password_hash):
@@ -134,10 +138,7 @@ async def login(request: LoginRequest, http_request: Request, db: AsyncSession =
             "login_failed", client_ip=client_ip, user_agent=user_agent,
             user=user, status="failed", error_message="密码错误",
         )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="工号或密码错误",
-        )
+        raise UnauthorizedError(code="INVALID_CREDENTIALS", message="工号或密码错误")
 
     # 检查用户状态
     if not user.is_active:
@@ -145,10 +146,7 @@ async def login(request: LoginRequest, http_request: Request, db: AsyncSession =
             "login_failed", client_ip=client_ip, user_agent=user_agent,
             user=user, status="failed", error_message="账号已被禁用",
         )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="账号已被禁用，请联系管理员",
-        )
+        raise ForbiddenError(code="ACCOUNT_DISABLED", message="账号已被禁用，请联系管理员")
 
     # 生成 Token
     role_code = None
@@ -237,10 +235,7 @@ async def change_password(
     """修改密码"""
     # 校验旧密码
     if not verify_password(request.old_password, current_user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="旧密码错误",
-        )
+        raise BadRequestError(code="WRONG_PASSWORD", message="旧密码错误")
 
     # 更新密码（变更时间戳使所有旧 Token 失效）
     current_user.password_hash = hash_password(request.new_password)
@@ -276,11 +271,11 @@ async def quick_login(
 
     config = await get_site_config()
     if config.get("quick_login_enabled", "on") != "on":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="一键登录已关闭，请使用账号密码登录")
+        raise ForbiddenError(code="QUICK_LOGIN_DISABLED", message="一键登录已关闭，请使用账号密码登录")
 
     client_ip = get_client_ip(http_request)
     if account not in ("admin", "demo"):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="演示账号不存在")
+        raise NotFoundError(code="DEMO_ACCOUNT_NOT_FOUND", message="演示账号不存在")
     # RPM 限流（借固定分钟窗口计数；超限 429）
     try:
         from app.core.redis import get_redis
@@ -292,7 +287,7 @@ async def quick_login(
         if count == 1:
             await redis.expire(key, 120)
         if count > 10:
-            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="操作过于频繁，请稍后再试")
+            raise QuotaExceededError(code="QUICK_LOGIN_RATE_LIMITED", message="操作过于频繁，请稍后再试")
     except HTTPException:
         raise
     except Exception as e:
@@ -301,7 +296,7 @@ async def quick_login(
     result = await db.execute(select(User).where(User.employee_id == account))
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="演示账号未初始化，请先运行种子数据")
+        raise NotFoundError(code="DEMO_ACCOUNT_NOT_INITIALIZED", message="演示账号未初始化，请先运行种子数据")
 
     role_code = None
     if user.role_id is not None:
@@ -335,27 +330,18 @@ async def refresh_token(
     """使用 Refresh Token 获取新的 Access Token"""
     payload = decode_token(request.refresh_token)
     if payload is None or payload.get("type") != "refresh":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh Token 无效或已过期",
-        )
+        raise UnauthorizedError(code="INVALID_REFRESH_TOKEN", message="Refresh Token 无效或已过期")
 
     user_id = payload.get("sub")
     result = await db.execute(select(User).where(User.id == int(user_id)))
     user = result.scalar_one_or_none()
 
     if user is None or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="用户不存在或已被禁用",
-        )
+        raise UnauthorizedError(code="USER_UNAVAILABLE", message="用户不存在或已被禁用")
 
     # 密码变更后，变更前签发的 Refresh Token 同样失效（防止旧会话自续命）
     if is_token_revoked_by_password_change(payload, user.password_changed_at):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="密码已变更，请重新登录",
-        )
+        raise UnauthorizedError(code="PASSWORD_CHANGED", message="密码已变更，请重新登录")
 
     role_code = None
     if user.role_id is not None:

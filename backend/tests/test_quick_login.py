@@ -75,7 +75,7 @@ async def test_quick_login_disabled_by_site_config(client):
     try:
         resp = await _quick_login(client, "demo")
         assert resp.status_code == 403
-        assert "已关闭" in resp.json()["detail"]
+        assert "已关闭" in resp.json()["detail"]["message"]
     finally:
         await redis_module.redis_client.delete("site:config:quick_login_enabled")
 
@@ -104,4 +104,4 @@ async def test_quick_login_uninitialized_account_404(client):
             await session.commit()
     resp = await _quick_login(client, "demo")
     assert resp.status_code == 404
-    assert "未初始化" in resp.json()["detail"]
+    assert "未初始化" in resp.json()["detail"]["message"]

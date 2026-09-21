@@ -1,66 +1,557 @@
 <template>
-  <div class="fact-workbench" data-testid="fact-workbench">
+  <div
+    class="fact-workbench"
+    data-testid="fact-workbench"
+  >
     <header class="workbench-heading">
       <div><span class="eyebrow">EVIDENCE · CONTEXT · REVIEW</span><h2>事实核查工作台</h2><p>从一段陈述，到可追溯的证据。独立核查，也可衔接文字审校。</p></div>
-      <el-button v-if="run" @click="router.push('/fact-check')">新建核查</el-button>
+      <el-button
+        v-if="run"
+        @click="router.push('/fact-check')"
+      >
+        新建核查
+      </el-button>
     </header>
-    <div v-if="error" class="notice error" role="alert">{{ error }} <el-button text @click="load">重新读取</el-button></div>
-    <p v-if="loading" role="status" class="muted">正在读取核查工作台…</p>
+    <div
+      v-if="error"
+      class="notice error"
+      role="alert"
+    >
+      {{ error }} <el-button
+        text
+        @click="load"
+      >
+        重新读取
+      </el-button>
+    </div>
+    <p
+      v-if="loading"
+      role="status"
+      class="muted"
+    >
+      正在读取核查工作台…
+    </p>
     <template v-if="!route.params.id">
       <section class="paper intake">
-        <div class="section-heading"><h3><span class="step">01</span> 提交待核查材料</h3><span class="muted">不需要先做文字审校</span></div>
-        <div v-if="recordId" class="notice">从审校记录 #{{ recordId }} 导入原始版本，核查不会修改审校内容。<el-button text @click="router.replace('/fact-check')">改用独立输入</el-button></div>
+        <div class="section-heading">
+          <h3><span class="step">01</span> 提交待核查材料</h3><span class="muted">不需要先做文字审校</span>
+        </div>
+        <div
+          v-if="recordId"
+          class="notice"
+        >
+          从审校记录 #{{ recordId }} 导入原始版本，核查不会修改审校内容。<el-button
+            text
+            @click="router.replace('/fact-check')"
+          >
+            改用独立输入
+          </el-button>
+        </div>
         <template v-else>
-          <div class="input-toolbar"><el-radio-group v-model="inputKind" :disabled="!!busy || !!pendingCreate"><el-radio-button value="text">粘贴文本</el-radio-button><el-radio-button value="document">上传文档</el-radio-button></el-radio-group><span class="muted">{{ textLength }} / {{ options?.max_text_chars || 20000 }} 字符</span></div>
-          <el-input v-if="inputKind === 'text'" v-model="text" type="textarea" :rows="9" :disabled="!!busy || !!pendingCreate" aria-label="待核查文本" placeholder="粘贴新闻稿、报告或需要核实的陈述。系统提取客观事实，不判断观点与主观评价。" />
-          <div v-else class="upload-area"><label for="fact-file">选择文档，仅提取文本，不执行审校</label><input id="fact-file" type="file" accept=".doc,.docx,.pdf,.txt" :disabled="!!busy || !!pendingCreate" @change="upload" /><p v-if="fileId">{{ filename }} · 已提取 {{ textLength }} 字符</p><p class="muted">支持现有文档格式；无法提取文字或超长材料会明确提示，不自动截断。</p></div>
+          <div class="input-toolbar">
+            <el-radio-group
+              v-model="inputKind"
+              :disabled="!!busy || !!pendingCreate"
+            >
+              <el-radio-button value="text">
+                粘贴文本
+              </el-radio-button><el-radio-button value="document">
+                上传文档
+              </el-radio-button>
+            </el-radio-group><span class="muted">{{ textLength }} / {{ options?.max_text_chars || 20000 }} 字符</span>
+          </div>
+          <el-input
+            v-if="inputKind === 'text'"
+            v-model="text"
+            type="textarea"
+            :rows="9"
+            :disabled="!!busy || !!pendingCreate"
+            aria-label="待核查文本"
+            placeholder="粘贴新闻稿、报告或需要核实的陈述。系统提取客观事实，不判断观点与主观评价。"
+          />
+          <div
+            v-else
+            class="upload-area"
+          >
+            <label for="fact-file">选择文档，仅提取文本，不执行审校</label><input
+              id="fact-file"
+              type="file"
+              accept=".doc,.docx,.pdf,.txt"
+              :disabled="!!busy || !!pendingCreate"
+              @change="upload"
+            ><p v-if="fileId">
+              {{ filename }} · 已提取 {{ textLength }} 字符
+            </p><p class="muted">
+              支持现有文档格式；无法提取文字或超长材料会明确提示，不自动截断。
+            </p>
+          </div>
         </template>
-        <div class="configuration"><el-select v-model="mode" aria-label="检索范围" :disabled="!!busy || !!pendingCreate"><el-option value="web" label="开放网络检索" /><el-option value="trusted" label="指定可信信源" /></el-select><el-select v-if="mode === 'trusted'" v-model="sourceIds" multiple aria-label="选择可信信源" :disabled="!!busy || !!pendingCreate"><el-option v-for="source in options?.sources || []" :key="source.id" :value="source.id" :label="source.name" /></el-select><span class="muted">{{ options?.model_name || '读取模型配置中' }}</span></div>
-        <p v-if="options && !options.available" class="notice warning">{{ options.unavailable_reason }}</p>
-        <p v-if="tooLong" class="notice warning">材料超过长度限制，请缩短材料后提交；系统不会截断原文。</p>
-        <el-checkbox v-model="consented" :disabled="!!busy || !!pendingCreate" aria-label="同意材料外发">确认材料可发送至外部模型与检索服务，不含涉密内容</el-checkbox>
-        <p class="muted">两种模式均会联网。可信信源约束可采纳证据，不等于离线检索，也不保证来源内容正确。</p>
-        <p class="muted">原文、证据与复核从任务创建起保留 {{ options?.retention_days || 90 }} 天；到期清理，也可在任务结束后主动清理。上传文件沿用文档管理的独立保留规则。</p>
-        <div class="actions"><el-button type="primary" :disabled="!canCreate" :loading="busy === 'create'" @click="create(false)">{{ pendingCreate ? '重试提交（同一请求）' : '开始事实核查' }}</el-button><el-button :disabled="!canCreate || !!pendingCreate" @click="create(true)">先确认事实项</el-button><span class="muted">最多核查 {{ options?.max_claims || 10 }} 条 · 每日最多 {{ options?.daily_limit || 20 }} 次</span></div>
-        <p v-if="pendingCreate" class="notice warning">提交结果尚未确认；重试使用同一请求编号，不会重复创建。可先查看下方历史。</p>
+        <div class="configuration">
+          <el-select
+            v-model="mode"
+            aria-label="检索范围"
+            :disabled="!!busy || !!pendingCreate"
+          >
+            <el-option
+              value="web"
+              label="开放网络检索"
+            /><el-option
+              value="trusted"
+              label="指定可信信源"
+            />
+          </el-select><el-select
+            v-if="mode === 'trusted'"
+            v-model="sourceIds"
+            multiple
+            aria-label="选择可信信源"
+            :disabled="!!busy || !!pendingCreate"
+          >
+            <el-option
+              v-for="source in options?.sources || []"
+              :key="source.id"
+              :value="source.id"
+              :label="source.name"
+            />
+          </el-select><span class="muted">{{ options?.model_name || '读取模型配置中' }}</span>
+        </div>
+        <p
+          v-if="options && !options.available"
+          class="notice warning"
+        >
+          {{ options.unavailable_reason }}
+        </p>
+        <p
+          v-if="tooLong"
+          class="notice warning"
+        >
+          材料超过长度限制，请缩短材料后提交；系统不会截断原文。
+        </p>
+        <el-checkbox
+          v-model="consented"
+          :disabled="!!busy || !!pendingCreate"
+          aria-label="同意材料外发"
+        >
+          确认材料可发送至外部模型与检索服务，不含涉密内容
+        </el-checkbox>
+        <p class="muted">
+          两种模式均会联网。可信信源约束可采纳证据，不等于离线检索，也不保证来源内容正确。
+        </p>
+        <p class="muted">
+          原文、证据与复核从任务创建起保留 {{ options?.retention_days || 90 }} 天；到期清理，也可在任务结束后主动清理。上传文件沿用文档管理的独立保留规则。
+        </p>
+        <div class="actions">
+          <el-button
+            type="primary"
+            :disabled="!canCreate"
+            :loading="busy === 'create'"
+            @click="create(false)"
+          >
+            {{ pendingCreate ? '重试提交（同一请求）' : '开始事实核查' }}
+          </el-button><el-button
+            :disabled="!canCreate || !!pendingCreate"
+            @click="create(true)"
+          >
+            先确认事实项
+          </el-button><span class="muted">最多核查 {{ options?.max_claims || 10 }} 条 · 每日最多 {{ options?.daily_limit || 20 }} 次</span>
+        </div>
+        <p
+          v-if="pendingCreate"
+          class="notice warning"
+        >
+          提交结果尚未确认；重试使用同一请求编号，不会重复创建。可先查看下方历史。
+        </p>
       </section>
       <section class="paper history">
-        <div class="section-heading"><h3><span class="step">02</span> 核查记录</h3><el-button text @click="loadHistory">刷新</el-button></div>
-        <div class="history-tools"><el-input v-model="query" clearable placeholder="搜索材料标题" aria-label="搜索核查记录" @keyup.enter="searchHistory" /><el-select v-model="statusFilter" clearable placeholder="全部状态" aria-label="筛选任务状态" @change="searchHistory"><el-option v-for="(label, value) in statusLabels" :key="value" :value="value" :label="label" /></el-select><el-button @click="searchHistory">查询</el-button></div>
-        <p v-if="!history.length" class="empty">还没有核查记录。提交一段材料，开始建立证据链。</p>
-        <button v-for="item in history" :key="item.id" class="history-item" @click="router.push(`/fact-check/${item.id}`)"><span class="history-number">#{{ item.id }}</span><span class="history-title"><strong>{{ item.title || '未命名材料' }}</strong><small>{{ formatDate(item.created_at) }} · {{ item.source_kind === 'record' ? '审校导入' : item.source_kind === 'document' ? '文档导入' : '独立文本' }} · {{ item.depth === 'deep' ? '单条深查' : '标准核查' }}</small></span><el-tag :type="item.status === 'FAILURE' ? 'danger' : 'info'">{{ runStatusLabel(item, true) }}</el-tag><span aria-hidden="true">→</span></button>
-        <el-pagination v-if="total > 20" v-model:current-page="page" :total="total" :page-size="20" layout="prev, pager, next" @current-change="loadHistory" />
+        <div class="section-heading">
+          <h3><span class="step">02</span> 核查记录</h3><el-button
+            text
+            @click="loadHistory"
+          >
+            刷新
+          </el-button>
+        </div>
+        <div class="history-tools">
+          <el-input
+            v-model="query"
+            clearable
+            placeholder="搜索材料标题"
+            aria-label="搜索核查记录"
+            @keyup.enter="searchHistory"
+          /><el-select
+            v-model="statusFilter"
+            clearable
+            placeholder="全部状态"
+            aria-label="筛选任务状态"
+            @change="searchHistory"
+          >
+            <el-option
+              v-for="(label, value) in statusLabels"
+              :key="value"
+              :value="value"
+              :label="label"
+            />
+          </el-select><el-button @click="searchHistory">
+            查询
+          </el-button>
+        </div>
+        <p
+          v-if="!history.length"
+          class="empty"
+        >
+          还没有核查记录。提交一段材料，开始建立证据链。
+        </p>
+        <button
+          v-for="item in history"
+          :key="item.id"
+          class="history-item"
+          @click="router.push(`/fact-check/${item.id}`)"
+        >
+          <span class="history-number">#{{ item.id }}</span><span class="history-title"><strong>{{ item.title || '未命名材料' }}</strong><small>{{ formatDate(item.created_at) }} · {{ item.source_kind === 'record' ? '审校导入' : item.source_kind === 'document' ? '文档导入' : '独立文本' }} · {{ item.depth === 'deep' ? '单条深查' : '标准核查' }}</small></span><el-tag :type="item.status === 'FAILURE' ? 'danger' : 'info'">
+            {{ runStatusLabel(item, true) }}
+          </el-tag><span aria-hidden="true">→</span>
+        </button>
+        <el-pagination
+          v-if="total > 20"
+          v-model:current-page="page"
+          :total="total"
+          :page-size="20"
+          layout="prev, pager, next"
+          @current-change="loadHistory"
+        />
       </section>
     </template>
     <template v-else-if="run">
       <section class="paper run-overview">
-        <div class="section-heading"><div><span class="eyebrow">核查记录 #{{ run.id }} · {{ run.depth === 'deep' ? '单条深入核查' : '标准核查' }}</span><h3>{{ run.title }}</h3></div><el-tag :type="run.status === 'FAILURE' ? 'danger' : run.result?.coverage.status === 'partial' ? 'warning' : 'info'">{{ runLabel }}</el-tag></div>
-        <p v-if="run.parent_run_id" class="notice">仅重新核查选中的一条事实，其他历史结论未刷新。<router-link :to="`/fact-check/${run.parent_run_id}`">查看来源报告 #{{ run.parent_run_id }}</router-link></p>
-        <p :class="{ 'notice warning': run.status === 'SUCCESS' && run.result?.coverage.status === 'partial' }">{{ runMessage }} <span v-if="run.error_code" class="muted">{{ run.error_code }}</span></p>
-        <el-progress v-if="running" :percentage="run.progress" :stroke-width="5" />
-        <div class="metrics" v-if="run.result"><div><strong>{{ run.result.coverage.extracted }}</strong><span>识别事实</span></div><div><strong>{{ selectedCount }}</strong><span>本次选择</span></div><div><strong>{{ run.result.coverage.checked }}</strong><span>已尝试核查</span></div><div><strong>{{ citedClaims }}</strong><span>有正文引用</span></div><div><strong>{{ insufficientClaims }}</strong><span>仍证据不足</span></div><div><strong>{{ run.result.coverage.unverified }}</strong><span>尚未尝试</span></div></div>
-        <p v-if="run.result?.claims.length" class="muted">尝试完成不等于已证实。有正文引用也可能只是背景或反驳材料，请逐条查看“检索资料与佐证”。</p>
-        <p v-if="run.result?.coverage.reason" class="muted">{{ run.result.coverage.reason }}</p>
-        <div class="actions"><el-button v-if="running || waiting" :disabled="!!busy" @click="cancel">取消核查</el-button><el-button :disabled="!!busy" @click="load">刷新状态</el-button><template v-if="terminal && user.hasPermission('fact-check:export')"><el-button :disabled="!!busy" @click="download('html')">下载打印版</el-button><el-button :disabled="!!busy" @click="download('json')">导出 JSON</el-button></template><el-button v-if="!running" text type="danger" :disabled="!!busy" @click="clearRun">清理材料与证据</el-button></div>
+        <div class="section-heading">
+          <div><span class="eyebrow">核查记录 #{{ run.id }} · {{ run.depth === 'deep' ? '单条深入核查' : '标准核查' }}</span><h3>{{ run.title }}</h3></div><el-tag :type="run.status === 'FAILURE' ? 'danger' : run.result?.coverage.status === 'partial' ? 'warning' : 'info'">
+            {{ runLabel }}
+          </el-tag>
+        </div>
+        <p
+          v-if="run.parent_run_id"
+          class="notice"
+        >
+          仅重新核查选中的一条事实，其他历史结论未刷新。<router-link :to="`/fact-check/${run.parent_run_id}`">
+            查看来源报告 #{{ run.parent_run_id }}
+          </router-link>
+        </p>
+        <p :class="{ 'notice warning': run.status === 'SUCCESS' && run.result?.coverage.status === 'partial' }">
+          {{ runMessage }} <span
+            v-if="run.error_code"
+            class="muted"
+          >{{ run.error_code }}</span>
+        </p>
+        <el-progress
+          v-if="running"
+          :percentage="run.progress"
+          :stroke-width="5"
+        />
+        <div
+          v-if="run.result"
+          class="metrics"
+        >
+          <div><strong>{{ run.result.coverage.extracted }}</strong><span>识别事实</span></div><div><strong>{{ selectedCount }}</strong><span>本次选择</span></div><div><strong>{{ run.result.coverage.checked }}</strong><span>已尝试核查</span></div><div><strong>{{ citedClaims }}</strong><span>有正文引用</span></div><div><strong>{{ insufficientClaims }}</strong><span>仍证据不足</span></div><div><strong>{{ run.result.coverage.unverified }}</strong><span>尚未尝试</span></div>
+        </div>
+        <p
+          v-if="run.result?.claims.length"
+          class="muted"
+        >
+          尝试完成不等于已证实。有正文引用也可能只是背景或反驳材料，请逐条查看“检索资料与佐证”。
+        </p>
+        <p
+          v-if="run.result?.coverage.reason"
+          class="muted"
+        >
+          {{ run.result.coverage.reason }}
+        </p>
+        <div class="actions">
+          <el-button
+            v-if="running || waiting"
+            :disabled="!!busy"
+            @click="cancel"
+          >
+            取消核查
+          </el-button><el-button
+            :disabled="!!busy"
+            @click="load"
+          >
+            刷新状态
+          </el-button><template v-if="terminal && user.hasPermission('fact-check:export')">
+            <el-button
+              :disabled="!!busy"
+              @click="download('html')"
+            >
+              下载打印版
+            </el-button><el-button
+              :disabled="!!busy"
+              @click="download('json')"
+            >
+              导出 JSON
+            </el-button>
+          </template><el-button
+            v-if="!running"
+            text
+            type="danger"
+            :disabled="!!busy"
+            @click="clearRun"
+          >
+            清理材料与证据
+          </el-button>
+        </div>
       </section>
-      <section v-if="waiting" class="paper confirmation">
-        <h3>确认本次核查范围</h3><p class="muted">保留原文不变，可调整待核查陈述；每条应是独立事实。最多选择 {{ run.max_claims }} 条。</p>
-        <div v-for="claim in run.result?.claims || []" :key="claim.id" class="selection-row"><el-checkbox v-model="selection[claim.id]" :disabled="!!busy" :aria-label="`核查 ${claim.id}`">{{ claim.id }}</el-checkbox><el-input v-model="statements[claim.id]" :disabled="!!busy || !selection[claim.id]" :maxlength="2000" :aria-label="`待核查陈述 ${claim.id}`" /><span class="muted">原文：{{ claim.original }}</span></div>
-        <el-button type="primary" :disabled="!!busy || !selectionValid" :loading="busy === 'execute'" @click="execute">确认并核查 {{ chosenIds.length }} 条事实</el-button>
+      <section
+        v-if="waiting"
+        class="paper confirmation"
+      >
+        <h3>确认本次核查范围</h3><p class="muted">
+          保留原文不变，可调整待核查陈述；每条应是独立事实。最多选择 {{ run.max_claims }} 条。
+        </p>
+        <div
+          v-for="claim in run.result?.claims || []"
+          :key="claim.id"
+          class="selection-row"
+        >
+          <el-checkbox
+            v-model="selection[claim.id]"
+            :disabled="!!busy"
+            :aria-label="`核查 ${claim.id}`"
+          >
+            {{ claim.id }}
+          </el-checkbox><el-input
+            v-model="statements[claim.id]"
+            :disabled="!!busy || !selection[claim.id]"
+            :maxlength="2000"
+            :aria-label="`待核查陈述 ${claim.id}`"
+          /><span class="muted">原文：{{ claim.original }}</span>
+        </div>
+        <el-button
+          type="primary"
+          :disabled="!!busy || !selectionValid"
+          :loading="busy === 'execute'"
+          @click="execute"
+        >
+          确认并核查 {{ chosenIds.length }} 条事实
+        </el-button>
       </section>
-      <div class="mobile-tabs"><button v-for="(label, key) in { source: '原文', claims: '事实项', evidence: '证据与复核' }" :key="key" :class="{ active: mobileTab === key }" @click="mobileTab = key">{{ label }}</button></div>
+      <div class="mobile-tabs">
+        <button
+          v-for="(label, key) in { source: '原文', claims: '事实项', evidence: '证据与复核' }"
+          :key="key"
+          :class="{ active: mobileTab === key }"
+          @click="mobileTab = key"
+        >
+          {{ label }}
+        </button>
+      </div>
       <div class="review-grid">
-        <section class="paper source-pane" :class="{ 'mobile-active': mobileTab === 'source' }"><div class="section-heading"><h3>原文快照</h3><span class="eyebrow">SOURCE</span></div><div class="source-body" v-if="highlight"><span>{{ highlight.before }}</span><mark>{{ highlight.target }}</mark><span>{{ highlight.after }}</span></div><div v-else class="source-body">{{ sourceText || '原文已清理或暂不可用' }}</div><details class="muted"><summary>原文指纹</summary><p class="hash">{{ run.source_hash }}</p></details></section>
-        <section class="paper claims-pane" :class="{ 'mobile-active': mobileTab === 'claims' }"><div class="section-heading"><h3>事实清单</h3><span class="eyebrow">CLAIMS</span></div><el-select v-model="verdictFilter" clearable placeholder="全部事实" aria-label="筛选事实结论"><el-option v-for="(label, key) in verdictLabels" :key="key" :value="key" :label="label" /></el-select><p v-if="!visibleClaims.length" class="empty">{{ run.result?.claims.length ? '没有符合筛选的事实项' : emptyMessage }}</p><button v-for="claim in visibleClaims" :key="claim.id" class="claim-item" :class="{ active: activeClaim?.id === claim.id }" @click="selectClaim(claim.id)"><span class="claim-label">{{ claim.id }} <el-tag size="small" :type="claim.verdict === 'refuted' ? 'danger' : claim.verdict === 'conflicting' ? 'warning' : 'info'">{{ claim.checked ? verdictLabels[claim.verdict] : '未检查' }}</el-tag></span><strong>{{ claim.statement }}</strong><small>{{ claim.reason }}</small></button></section>
-        <section class="paper evidence-pane" :class="{ 'mobile-active': mobileTab === 'evidence' }"><div class="section-heading"><h3>证据与复核</h3><span class="eyebrow">EVIDENCE</span></div><template v-if="activeClaim"><h4>{{ activeClaim.statement }}</h4><p>{{ activeClaim.reason }}</p><p v-if="activeClaim.original_statement && activeClaim.original_statement !== activeClaim.statement" class="notice">提取原始陈述：{{ activeClaim.original_statement }}</p><p v-if="activeClaim.suggestion" class="notice">人工参考建议：{{ activeClaim.suggestion }}</p>
-          <FactCheckSearchTrace :claim="activeClaim" @show-evidence="showEvidence" />
-          <h4 v-if="activeClaim.evidence.length">已引用证据 · 正文快照</h4>
-          <p v-if="!activeClaim.evidence.length" class="empty">没有可引用的正文证据；搜索摘要和模型知识不作为事实保证。</p>
-          <article v-for="evidence in activeClaim.evidence" :id="evidenceAnchor(evidence.id)" :key="evidence.id" tabindex="-1" class="evidence-card"><span class="eyebrow">{{ stanceLabels[evidence.stance] }}</span><h4><a v-if="safeUrl(evidence.url)" :href="safeUrl(evidence.url)" target="_blank" rel="noopener noreferrer">{{ evidence.title }}</a><span v-else>{{ evidence.title }}</span></h4><blockquote>{{ evidence.quote }}</blockquote><p class="muted">{{ evidence.publisher }} · 发布：{{ formatDate(evidence.published_at) }}<br />抓取：{{ formatDate(evidence.retrieved_at) }}</p><ul v-if="evidence.checks" class="check-list"><li v-for="(label, key) in checkLabels" :key="key"><strong>{{ label }} · {{ consistencyLabels[evidence.checks[key].status] }}</strong><span>{{ evidence.checks[key].reason }}</span></li></ul><p v-else class="muted">历史报告未记录结构化口径检查。</p><details v-if="evidence.body_text"><summary>查看当次模型可见正文</summary><pre>{{ evidence.body_text }}</pre><p class="hash muted">SHA-256：{{ evidence.body_sha256 }}</p></details><p v-else class="notice warning">历史报告未保存正文快照，不能复现当时全文依据。</p></article>
-          <p class="muted">口径检查是模型的语义评估；程序验证逐字引文与结构约束，不独立保证语义正确。</p>
-          <div v-if="terminal && sourceText" class="deep-section"><h4>针对这条事实深入核查</h4><el-input v-model="supplemental" type="textarea" :rows="2" placeholder="可选：补充原始证据链接，每行一个，最多3个" aria-label="补充证据链接" :disabled="!!busy" /><el-checkbox v-model="deepConsent" :disabled="!!busy">确认可再次对外检索</el-checkbox><el-button :disabled="!!busy || !deepConsent" :loading="busy === 'deepen'" @click="deepen">发起单条深查</el-button><p class="muted">创建新报告，最多三轮检索。保留本次结论，不自动修改原文。</p></div>
-          <div class="human-review"><h4>人工复核记录</h4><p v-if="!claimReviews.length" class="muted">尚未复核</p><article v-for="review in claimReviews" :key="review.id" class="review-entry"><strong>{{ reviewLabels[review.decision] }}</strong> · #{{ review.user_id }} · {{ formatDate(review.created_at) }}<p>{{ review.note }}</p></article><template v-if="terminal && activeClaim.checked && user.hasPermission('fact-check:review')"><el-select v-model="decision" aria-label="人工复核意见" :disabled="!!busy"><el-option v-for="(label, key) in reviewLabels" :key="key" :label="label" :value="key" /></el-select><el-input v-model="note" type="textarea" :rows="3" :maxlength="2000" :disabled="!!busy" aria-label="复核说明" placeholder="填写复核依据；提出异议时必填。不会覆盖机器结论。" /><el-button :disabled="!!busy || (decision === 'disagree' && !note.trim())" :loading="busy === 'review'" @click="saveReview">保存复核意见</el-button></template></div>
-        </template><p v-else class="empty">{{ run.result?.claims.length ? '选择一个事实项，查看其证据、检索过程及复核记录。' : emptyMessage }}</p></section>
+        <section
+          class="paper source-pane"
+          :class="{ 'mobile-active': mobileTab === 'source' }"
+        >
+          <div class="section-heading">
+            <h3>原文快照</h3><span class="eyebrow">SOURCE</span>
+          </div><div
+            v-if="highlight"
+            class="source-body"
+          >
+            <span>{{ highlight.before }}</span><mark>{{ highlight.target }}</mark><span>{{ highlight.after }}</span>
+          </div><div
+            v-else
+            class="source-body"
+          >
+            {{ sourceText || '原文已清理或暂不可用' }}
+          </div><details class="muted">
+            <summary>原文指纹</summary><p class="hash">
+              {{ run.source_hash }}
+            </p>
+          </details>
+        </section>
+        <section
+          class="paper claims-pane"
+          :class="{ 'mobile-active': mobileTab === 'claims' }"
+        >
+          <div class="section-heading">
+            <h3>事实清单</h3><span class="eyebrow">CLAIMS</span>
+          </div><el-select
+            v-model="verdictFilter"
+            clearable
+            placeholder="全部事实"
+            aria-label="筛选事实结论"
+          >
+            <el-option
+              v-for="(label, key) in verdictLabels"
+              :key="key"
+              :value="key"
+              :label="label"
+            />
+          </el-select><p
+            v-if="!visibleClaims.length"
+            class="empty"
+          >
+            {{ run.result?.claims.length ? '没有符合筛选的事实项' : emptyMessage }}
+          </p><button
+            v-for="claim in visibleClaims"
+            :key="claim.id"
+            class="claim-item"
+            :class="{ active: activeClaim?.id === claim.id }"
+            @click="selectClaim(claim.id)"
+          >
+            <span class="claim-label">{{ claim.id }} <el-tag
+              size="small"
+              :type="claim.verdict === 'refuted' ? 'danger' : claim.verdict === 'conflicting' ? 'warning' : 'info'"
+            >{{ claim.checked ? verdictLabels[claim.verdict] : '未检查' }}</el-tag></span><strong>{{ claim.statement }}</strong><small>{{ claim.reason }}</small>
+          </button>
+        </section>
+        <section
+          class="paper evidence-pane"
+          :class="{ 'mobile-active': mobileTab === 'evidence' }"
+        >
+          <div class="section-heading">
+            <h3>证据与复核</h3><span class="eyebrow">EVIDENCE</span>
+          </div><template v-if="activeClaim">
+            <h4>{{ activeClaim.statement }}</h4><p>{{ activeClaim.reason }}</p><p
+              v-if="activeClaim.original_statement && activeClaim.original_statement !== activeClaim.statement"
+              class="notice"
+            >
+              提取原始陈述：{{ activeClaim.original_statement }}
+            </p><p
+              v-if="activeClaim.suggestion"
+              class="notice"
+            >
+              人工参考建议：{{ activeClaim.suggestion }}
+            </p>
+            <FactCheckSearchTrace
+              :claim="activeClaim"
+              @show-evidence="showEvidence"
+            />
+            <h4 v-if="activeClaim.evidence.length">
+              已引用证据 · 正文快照
+            </h4>
+            <p
+              v-if="!activeClaim.evidence.length"
+              class="empty"
+            >
+              没有可引用的正文证据；搜索摘要和模型知识不作为事实保证。
+            </p>
+            <article
+              v-for="evidence in activeClaim.evidence"
+              :id="evidenceAnchor(evidence.id)"
+              :key="evidence.id"
+              tabindex="-1"
+              class="evidence-card"
+            >
+              <span class="eyebrow">{{ stanceLabels[evidence.stance] }}</span><h4>
+                <a
+                  v-if="safeUrl(evidence.url)"
+                  :href="safeUrl(evidence.url)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >{{ evidence.title }}</a><span v-else>{{ evidence.title }}</span>
+              </h4><blockquote>{{ evidence.quote }}</blockquote><p class="muted">
+                {{ evidence.publisher }} · 发布：{{ formatDate(evidence.published_at) }}<br>抓取：{{ formatDate(evidence.retrieved_at) }}
+              </p><ul
+                v-if="evidence.checks"
+                class="check-list"
+              >
+                <li
+                  v-for="(label, key) in checkLabels"
+                  :key="key"
+                >
+                  <strong>{{ label }} · {{ consistencyLabels[evidence.checks[key].status] }}</strong><span>{{ evidence.checks[key].reason }}</span>
+                </li>
+              </ul><p
+                v-else
+                class="muted"
+              >
+                历史报告未记录结构化口径检查。
+              </p><details v-if="evidence.body_text">
+                <summary>查看当次模型可见正文</summary><pre>{{ evidence.body_text }}</pre><p class="hash muted">
+                  SHA-256：{{ evidence.body_sha256 }}
+                </p>
+              </details><p
+                v-else
+                class="notice warning"
+              >
+                历史报告未保存正文快照，不能复现当时全文依据。
+              </p>
+            </article>
+            <p class="muted">
+              口径检查是模型的语义评估；程序验证逐字引文与结构约束，不独立保证语义正确。
+            </p>
+            <div
+              v-if="terminal && sourceText"
+              class="deep-section"
+            >
+              <h4>针对这条事实深入核查</h4><el-input
+                v-model="supplemental"
+                type="textarea"
+                :rows="2"
+                placeholder="可选：补充原始证据链接，每行一个，最多3个"
+                aria-label="补充证据链接"
+                :disabled="!!busy"
+              /><el-checkbox
+                v-model="deepConsent"
+                :disabled="!!busy"
+              >
+                确认可再次对外检索
+              </el-checkbox><el-button
+                :disabled="!!busy || !deepConsent"
+                :loading="busy === 'deepen'"
+                @click="deepen"
+              >
+                发起单条深查
+              </el-button><p class="muted">
+                创建新报告，最多三轮检索。保留本次结论，不自动修改原文。
+              </p>
+            </div>
+            <div class="human-review">
+              <h4>人工复核记录</h4><p
+                v-if="!claimReviews.length"
+                class="muted"
+              >
+                尚未复核
+              </p><article
+                v-for="review in claimReviews"
+                :key="review.id"
+                class="review-entry"
+              >
+                <strong>{{ reviewLabels[review.decision] }}</strong> · #{{ review.user_id }} · {{ formatDate(review.created_at) }}<p>{{ review.note }}</p>
+              </article><template v-if="terminal && activeClaim.checked && user.hasPermission('fact-check:review')">
+                <el-select
+                  v-model="decision"
+                  aria-label="人工复核意见"
+                  :disabled="!!busy"
+                >
+                  <el-option
+                    v-for="(label, key) in reviewLabels"
+                    :key="key"
+                    :label="label"
+                    :value="key"
+                  />
+                </el-select><el-input
+                  v-model="note"
+                  type="textarea"
+                  :rows="3"
+                  :maxlength="2000"
+                  :disabled="!!busy"
+                  aria-label="复核说明"
+                  placeholder="填写复核依据；提出异议时必填。不会覆盖机器结论。"
+                /><el-button
+                  :disabled="!!busy || (decision === 'disagree' && !note.trim())"
+                  :loading="busy === 'review'"
+                  @click="saveReview"
+                >
+                  保存复核意见
+                </el-button>
+              </template>
+            </div>
+          </template><p
+            v-else
+            class="empty"
+          >
+            {{ run.result?.claims.length ? '选择一个事实项，查看其证据、检索过程及复核记录。' : emptyMessage }}
+          </p>
+        </section>
       </div>
     </template>
   </div>
@@ -193,7 +684,7 @@ async function refresh() {
 }
 async function loadHistory() {
   const token = epoch
-  try { const result = await factCheckHistoryApi({ offset: (page.value - 1) * 20, limit: 20, status: statusFilter.value || undefined, q: query.value || undefined }, { signal: controller?.signal }); if (alive && token === epoch) { history.value = result.items; total.value = result.total } }
+  try { const result = await factCheckHistoryApi({ page: page.value, page_size: 20, status: statusFilter.value || undefined, q: query.value || undefined }, { signal: controller?.signal }); if (alive && token === epoch) { history.value = result.items; total.value = result.total } }
   catch (cause) { if (alive && token === epoch) showError(cause) }
 }
 function searchHistory() { page.value = 1; void loadHistory() }

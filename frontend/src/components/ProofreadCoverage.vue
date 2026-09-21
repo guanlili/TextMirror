@@ -1,17 +1,42 @@
 <template>
-  <section v-if="coverage?.status === 'partial'" class="coverage-panel" aria-label="未完成的审校范围">
-    <el-alert type="warning" :closable="false" show-icon title="审校尚未完成，请勿把当前结果视为全文无误">
+  <section
+    v-if="coverage?.status === 'partial'"
+    class="coverage-panel"
+    aria-label="未完成的审校范围"
+  >
+    <el-alert
+      type="warning"
+      :closable="false"
+      show-icon
+      title="审校尚未完成，请勿把当前结果视为全文无误"
+    >
       <p>已完成 {{ coverage.completed_chunks }}/{{ coverage.total_chunks }} 段；下列范围的 AI 检查未完成，已发现的问题和已采纳的修改会保留。</p>
       <p>补查仅发送失败段（包含少量前文），每段按一次普通审校计入额度。</p>
     </el-alert>
     <div class="coverage-actions">
-      <el-button type="warning" plain :loading="retrying" @click="retryChunks()">补查全部失败段</el-button>
+      <el-button
+        type="warning"
+        plain
+        :loading="retrying"
+        @click="retryChunks()"
+      >
+        补查全部失败段
+      </el-button>
       <span v-if="retrying">正在补查，请勿离开页面</span>
     </div>
-    <details v-for="chunk in coverage.failed_chunks" :key="`${chunk.start}:${chunk.end}`">
+    <details
+      v-for="chunk in coverage.failed_chunks"
+      :key="`${chunk.start}:${chunk.end}`"
+    >
       <summary>第 {{ chunk.start + 1 }}–{{ chunk.end }} 字（含上下文）</summary>
       <pre>{{ chunk.text }}</pre>
-      <el-button size="small" :disabled="retrying" @click="retryChunks(chunk)">仅补查这一段</el-button>
+      <el-button
+        size="small"
+        :disabled="retrying"
+        @click="retryChunks(chunk)"
+      >
+        仅补查这一段
+      </el-button>
     </details>
   </section>
 </template>

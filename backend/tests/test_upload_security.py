@@ -106,7 +106,7 @@ async def test_pdf_upload_api_rejects_invalid_content(client, pages, message):
         "/api/v1/document/upload", files={"file": ("invalid.pdf", _make_pdf(pages), "application/pdf")},
     )
     assert response.status_code == 400, response.text
-    assert response.json()["detail"] == message
+    assert response.json()["detail"]["message"] == message
 
 
 def test_pdf_accepts_exactly_100_pages(tmp_path):

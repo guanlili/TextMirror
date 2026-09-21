@@ -121,8 +121,8 @@ def mock_evidence(monkeypatch, result_page=None):
     async def fetch(url, sources):
         return copy.deepcopy(result_page or page())
 
-    monkeypatch.setattr(fc, "_search", search)
-    monkeypatch.setattr(fc, "_fetch_page", fetch)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_fetch_page", fetch)
     return searches
 
 
@@ -269,7 +269,7 @@ async def test_format_attempts_share_one_timeout(monkeypatch):
                 await asyncio.Event().wait()
             return await super().chat(**kwargs)
 
-    monkeypatch.setattr(fc, "MODEL_TIMEOUT", 0.02)
+    monkeypatch.setattr(fc.llm, "MODEL_TIMEOUT", 0.02)
     monkeypatch.setattr(fc.asyncio, "timeout", timeout)
     provider = Stalled("malformed")
     with pytest.raises(fc.FactCheckError) as exc:
@@ -437,7 +437,7 @@ async def test_budget_queries_partial_callbacks_and_no_evidence(monkeypatch):
     async def progress(percent, message, report=None):
         events.append((percent, message, report))
 
-    monkeypatch.setattr(fc, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
     provider = Provider({"claims": [{"segment_id": "s1", "original": item, "statement": item} for item in ["甲", "乙", "丙"]]})
     report = await run(provider, text="甲乙丙", max_claims=2, on_progress=progress)
     assert len(queries) == 4 and len(set(queries)) == 4
@@ -731,8 +731,8 @@ async def test_identical_reprints_are_not_multiple_evidence_sources(monkeypatch)
     async def fetch(url, sources):
         return page(url=url)
 
-    monkeypatch.setattr(fc, "_search", search)
-    monkeypatch.setattr(fc, "_fetch_page", fetch)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_fetch_page", fetch)
     provider = Provider(extract(), decision())
     report = await run(provider)
     data = json.loads(provider.calls[1]["messages"][1]["content"])
@@ -752,8 +752,8 @@ async def test_fetch_errors_mark_partial_and_insufficient(monkeypatch):
     async def fetch(*args):
         raise fc._FetchError("PAGE_FETCH_FAILED", "failed")
 
-    monkeypatch.setattr(fc, "_search", search)
-    monkeypatch.setattr(fc, "_fetch_page", fetch)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_fetch_page", fetch)
     report = await run(Provider(extract()))
     assert report["claims"][0]["verdict"] == "insufficient"
     assert report["claims"][0]["checked"]
@@ -768,7 +768,7 @@ async def test_search_outage_raises_global_error(monkeypatch):
         calls.append(args)
         raise fc._SearchFailure("SEARCH_UNAVAILABLE", "failed")
 
-    monkeypatch.setattr(fc, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
     with pytest.raises(fc.FactCheckError) as exc:
         await run(Provider(extract()))
     assert exc.value.code == "SEARCH_PROVIDER_ERROR" and len(calls) == 2
@@ -901,7 +901,7 @@ async def test_fetch_total_timeout_bounds_slow_stream(monkeypatch, mock_http, pu
             await asyncio.Event().wait()
             yield b"never"
 
-    monkeypatch.setattr(fc, "FETCH_TIMEOUT", 0.01)
+    monkeypatch.setattr(fc.fetching, "FETCH_TIMEOUT", 0.01)
     mock_http(lambda request: httpx.Response(200, headers={"content-type": "text/plain"}, stream=HangingStream()))
     with pytest.raises(fc._FetchError) as exc:
         await fc._fetch_page("https://example.com/news/a", SOURCES)
@@ -917,7 +917,7 @@ async def test_transient_search_failure_can_return_partial_report(monkeypatch):
             raise fc._SearchFailure("SEARCH_UNAVAILABLE", "transient")
         return SearchResult([], {}, 1)
 
-    monkeypatch.setattr(fc, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
     report = await run(Provider(extract()))
     assert len(queries) == 2
     assert report["coverage"]["status"] == "partial"
@@ -940,8 +940,8 @@ async def test_second_query_can_find_valid_evidence(monkeypatch):
     async def fetch(url, sources):
         return page()
 
-    monkeypatch.setattr(fc, "_search", search)
-    monkeypatch.setattr(fc, "_fetch_page", fetch)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_fetch_page", fetch)
     report = await run(Provider(extract(), decision()))
     assert len(queries) == 2 and queries[0] != queries[1]
     assert report["claims"][0]["verdict"] == "supported"
@@ -993,8 +993,8 @@ async def test_first_round_support_and_counter_round_refutation_are_judged_toget
             FactCheckReport.model_validate(current)
         events.append((percent, message, current))
 
-    monkeypatch.setattr(fc, "_search", search)
-    monkeypatch.setattr(fc, "_fetch_page", fetch)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_fetch_page", fetch)
     refs = [{"id": "c1-e1", "quote": QUOTE, "stance": "supports", "checks": checks()},
             {"id": "c1-e2", "quote": contrary, "stance": "refutes", "checks": checks()}]
     provider = CombinedProvider(extract(), decision("conflicting", refs))
@@ -1030,8 +1030,8 @@ async def test_two_rounds_never_fetch_more_than_three_candidates_each(monkeypatc
         fetched.append(url)
         return page(url=url, text=QUOTE + str(len(fetched)))
 
-    monkeypatch.setattr(fc, "_search", search)
-    monkeypatch.setattr(fc, "_fetch_page", fetch)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_fetch_page", fetch)
     provider = Provider(extract(), decision())
     report = await run(provider)
     assert len(queries) == 2 and len(fetched) == 6 and len(provider.calls) == 2
@@ -1171,8 +1171,8 @@ async def test_counter_round_failure_never_reports_supported_or_complete(monkeyp
     async def progress(percent, message, current=None):
         events.append((percent, message, current))
 
-    monkeypatch.setattr(fc, "_search", search)
-    monkeypatch.setattr(fc, "_fetch_page", fetch)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_fetch_page", fetch)
     provider = Provider(extract(), decision())
     report = await run(provider, on_progress=progress)
     assert len(queries) == len(provider.calls) == 2
@@ -1203,7 +1203,7 @@ async def test_native_counter_failure_emits_failed_snapshot_and_never_judges(mon
     async def progress(percent, message, current=None):
         events.append((percent, message, current))
 
-    monkeypatch.setattr(fc, "search_model", search)
+    monkeypatch.setattr(fc.orchestrator, "search_model", search)
     monkeypatch.setattr(fc, "_fetch_page", fetch)
     provider = Provider(extract())
     with pytest.raises(fc.FactCheckError) as exc:
@@ -1556,8 +1556,8 @@ async def test_fake_ip_failures_and_all_candidates_survive_progress(monkeypatch,
             FactCheckReport.model_validate(current)
             events.append(current)
 
-    monkeypatch.setattr(fc, "_search", search)
-    monkeypatch.setattr(fc, "search_model", search)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "search_model", search)
     monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", dns)
     provider = Provider(extract())
     report = await run(provider, search_provider=search_provider, on_progress=progress)
@@ -1582,7 +1582,7 @@ async def test_rejected_raw_url_is_retained_without_becoming_evidence(monkeypatc
     async def search(*args):
         return SearchResult([url], {}, 1)
 
-    monkeypatch.setattr(fc, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
     report = await run(Provider(extract()))
     source = report["claims"][0]["search_rounds"][0]["sources"][0]
     assert source["url"] == url[:4096] and source["status"] == "failed"
@@ -1623,8 +1623,8 @@ async def test_interrupted_trace_never_implies_judgment_completed(monkeypatch, i
         if message.startswith(interrupt_at):
             raise asyncio.CancelledError
 
-    monkeypatch.setattr(fc, "_search", search)
-    monkeypatch.setattr(fc, "_fetch_page", fetch)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_fetch_page", fetch)
     with pytest.raises(asyncio.CancelledError):
         await run(Provider(extract()), on_progress=progress)
     claim = events[-1]["claims"][0]
@@ -1665,8 +1665,8 @@ async def test_deep_trace_keeps_six_candidates_and_resets_parent(monkeypatch):
             FactCheckReport.model_validate(current)
             events.append(current)
 
-    monkeypatch.setattr(fc, "_search", search)
-    monkeypatch.setattr(fc, "_fetch_page", fetch)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_fetch_page", fetch)
     provider = Provider(decision())
     report = await run(provider, prepared_report=parent, selected_claim_ids=["c1"], depth="deep",
                        supplemental_urls=supplemental, on_progress=progress)

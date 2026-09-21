@@ -4,7 +4,7 @@ TextMirror 自定义词库 API
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.exceptions import AppException, ConflictError, NotFoundError
+from app.core.pagination import PageParams, paginate_query
 from app.models.dictionary import Dictionary, DictionaryEntry
 from app.schemas.dictionary import (
     DictionaryCreate,
@@ -56,7 +58,7 @@ async def create_dictionary(
         )
     )
     if exists.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="已存在同名词库")
+        raise ConflictError(code="DICTIONARY_NAME_EXISTS", message="已存在同名词库")
 
     dictionary = Dictionary(
         user_id=current_user.id,
@@ -70,11 +72,11 @@ async def create_dictionary(
     except IntegrityError:
         await db.rollback()
         logger.warning(f"创建词库冲突: user_id={current_user.id}, name={data.name}")
-        raise HTTPException(status_code=409, detail="已存在同名词库")
+        raise ConflictError(code="DICTIONARY_NAME_EXISTS", message="已存在同名词库")
     except SQLAlchemyError:
         await db.rollback()
         logger.error(f"创建词库数据库错误: user_id={current_user.id}", exc_info=True)
-        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
+        raise AppException(500, "DB_ERROR", "服务器内部错误，请稍后重试")
     return dictionary
 
 
@@ -94,7 +96,7 @@ async def update_dictionary(
     )
     dictionary = result.scalar_one_or_none()
     if not dictionary:
-        raise HTTPException(status_code=404, detail="词库不存在")
+        raise NotFoundError(code="DICTIONARY_NOT_FOUND", message="词库不存在")
 
     if data.name is not None:
         dictionary.name = data.name
@@ -109,11 +111,11 @@ async def update_dictionary(
     except IntegrityError:
         await db.rollback()
         logger.warning(f"更新词库冲突: dict_id={dict_id}, user_id={current_user.id}")
-        raise HTTPException(status_code=409, detail="已存在同名词库")
+        raise ConflictError(code="DICTIONARY_NAME_EXISTS", message="已存在同名词库")
     except SQLAlchemyError:
         await db.rollback()
         logger.error(f"更新词库数据库错误: dict_id={dict_id}", exc_info=True)
-        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
+        raise AppException(500, "DB_ERROR", "服务器内部错误，请稍后重试")
     return dictionary
 
 
@@ -132,24 +134,23 @@ async def delete_dictionary(
     )
     dictionary = result.scalar_one_or_none()
     if not dictionary:
-        raise HTTPException(status_code=404, detail="词库不存在")
+        raise NotFoundError(code="DICTIONARY_NOT_FOUND", message="词库不存在")
 
     try:
         await db.delete(dictionary)
     except SQLAlchemyError:
         await db.rollback()
         logger.error(f"删除词库数据库错误: dict_id={dict_id}", exc_info=True)
-        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
+        raise AppException(500, "DB_ERROR", "服务器内部错误，请稍后重试")
 
 
 # ========== 词条 CRUD ==========
 
-@router.get("/{dict_id}/entries", response_model=list[EntryResponse], summary='获取词库的词条列表')
+@router.get("/{dict_id}/entries", summary='获取词库的词条列表')
 async def list_entries(
     dict_id: int,
     keyword: Optional[str] = Query(None, description="搜索关键词"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page: PageParams = Depends(),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -162,7 +163,7 @@ async def list_entries(
         )
     )
     if not dict_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="词库不存在")
+        raise NotFoundError(code="DICTIONARY_NOT_FOUND", message="词库不存在")
 
     query = select(DictionaryEntry).where(DictionaryEntry.dictionary_id == dict_id)
     if keyword:
@@ -172,10 +173,8 @@ async def list_entries(
             DictionaryEntry.correct_word.contains(escaped)
         )
     query = query.order_by(DictionaryEntry.created_at.desc())
-    query = query.offset((page - 1) * page_size).limit(page_size)
-
-    result = await db.execute(query)
-    return result.scalars().all()
+    total, items = await paginate_query(db, query, page)
+    return {"items": [EntryResponse.model_validate(e) for e in items], "total": total, "page": page.page, "page_size": page.page_size}
 
 
 @router.post("/{dict_id}/entries", response_model=EntryResponse, status_code=201, summary='添加单条词条')
@@ -194,7 +193,7 @@ async def create_entry(
     )
     dictionary = dict_result.scalar_one_or_none()
     if not dictionary:
-        raise HTTPException(status_code=404, detail="词库不存在")
+        raise NotFoundError(code="DICTIONARY_NOT_FOUND", message="词库不存在")
 
     entry = DictionaryEntry(
         dictionary_id=dict_id,
@@ -210,7 +209,7 @@ async def create_entry(
     except SQLAlchemyError:
         await db.rollback()
         logger.error(f"添加词条数据库错误: dict_id={dict_id}", exc_info=True)
-        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
+        raise AppException(500, "DB_ERROR", "服务器内部错误，请稍后重试")
     return entry
 
 
@@ -230,7 +229,7 @@ async def batch_create_entries(
     )
     dictionary = dict_result.scalar_one_or_none()
     if not dictionary:
-        raise HTTPException(status_code=404, detail="词库不存在")
+        raise NotFoundError(code="DICTIONARY_NOT_FOUND", message="词库不存在")
 
     entries = [
         DictionaryEntry(
@@ -248,7 +247,7 @@ async def batch_create_entries(
     except SQLAlchemyError:
         await db.rollback()
         logger.error(f"批量添加词条数据库错误: dict_id={dict_id}", exc_info=True)
-        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
+        raise AppException(500, "DB_ERROR", "服务器内部错误，请稍后重试")
 
     return {"message": f"成功添加 {len(entries)} 条词条", "count": len(entries)}
 
@@ -269,7 +268,7 @@ async def delete_entry(
     )
     dictionary = dict_result.scalar_one_or_none()
     if not dictionary:
-        raise HTTPException(status_code=404, detail="词库不存在")
+        raise NotFoundError(code="DICTIONARY_NOT_FOUND", message="词库不存在")
 
     entry_result = await db.execute(
         select(DictionaryEntry).where(
@@ -279,7 +278,7 @@ async def delete_entry(
     )
     entry = entry_result.scalar_one_or_none()
     if not entry:
-        raise HTTPException(status_code=404, detail="词条不存在")
+        raise NotFoundError(code="ENTRY_NOT_FOUND", message="词条不存在")
 
     try:
         await db.delete(entry)
@@ -287,4 +286,4 @@ async def delete_entry(
     except SQLAlchemyError:
         await db.rollback()
         logger.error(f"删除词条数据库错误: dict_id={dict_id}, entry_id={entry_id}", exc_info=True)
-        raise HTTPException(status_code=500, detail="服务器内部错误，请稍后重试")
+        raise AppException(500, "DB_ERROR", "服务器内部错误，请稍后重试")

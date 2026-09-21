@@ -3,6 +3,7 @@ TextMirror 开放 API 公共设施
 错误契约（422/500 处理器）、错误响应示例、配额检查、幂等键工具。
 被 open / open_polish / open_usage / open_documents 各模块共用。
 """
+import json
 from typing import Optional
 
 from fastapi import HTTPException, Request, status
@@ -20,6 +21,49 @@ from app.core.rate_limit import (
 )
 from app.models.uploaded_document import UploadedDocument
 from app.schemas.open import OpenDocumentSubmitResponse
+
+_IDEMPOTENCY_TTL = 86400
+
+
+def _sync_idempotency_cache_key(scope: str, hashed_key: str) -> str:
+    return f"open:idemp:{scope}:{hashed_key}"
+
+
+async def check_sync_idempotency(scope: str, raw_key: str | None) -> dict | None:
+    """查询同步端点的幂等缓存（24h TTL）。raw_key 为 None 时直接返回 None。"""
+    if not raw_key:
+        return None
+    from app.core.redis import get_redis
+    from app.core.security import hash_scoped_idempotency_key
+
+    hashed = hash_scoped_idempotency_key(scope, raw_key)
+    cache_key = _sync_idempotency_cache_key(scope, hashed)
+    try:
+        cached = await get_redis().get(cache_key)
+    except Exception as e:
+        logger.warning(f"[OpenAPI] 幂等缓存读取失败: {e}")
+        return None
+    if cached:
+        try:
+            return json.loads(cached)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
+async def store_sync_idempotency(scope: str, raw_key: str | None, response_body: dict) -> None:
+    """将同步端点响应写入幂等缓存（24h TTL）。raw_key 为 None 时跳过。"""
+    if not raw_key:
+        return
+    from app.core.redis import get_redis
+    from app.core.security import hash_scoped_idempotency_key
+
+    hashed = hash_scoped_idempotency_key(scope, raw_key)
+    cache_key = _sync_idempotency_cache_key(scope, hashed)
+    try:
+        await get_redis().set(cache_key, json.dumps(response_body, ensure_ascii=False), ex=_IDEMPOTENCY_TTL)
+    except Exception as e:
+        logger.warning(f"[OpenAPI] 幂等缓存写入失败: {e}")
 
 
 def _normalize_idempotency_key(value: Optional[str]) -> Optional[str]:

@@ -4,13 +4,22 @@ TextMirror 文本校对 API
 import json
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, get_current_user_optional, require_permission
+from app.core.exceptions import (
+    AppException,
+    BadRequestError,
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+    ServiceUnavailableError,
+    ValidationError,
+)
 from app.core.rate_limit import (
     charge_user_daily_quota,
     check_guest_rate_limit,
@@ -57,7 +66,7 @@ async def collaborate(
     existing = await db.scalar(select(ProofreadTask).where(ProofreadTask.idempotency_key == key))
     if existing:
         if (existing.params_json or {}).get("request_hash") != request_hash:
-            raise HTTPException(409, "此请求 ID 已用于不同审校参数，请生成新的请求 ID")
+            raise ConflictError(code="REQUEST_ID_REUSE", message="此请求 ID 已用于不同审校参数，请生成新的请求 ID")
         return CollaborationSubmit(task_id=existing.task_id, message="已提交，请恢复任务进度")
     active_query = select(ProofreadTask).where(
         ProofreadTask.owner_user_id == user.id, ProofreadTask.owner_kind == "user",
@@ -66,14 +75,14 @@ async def collaborate(
     for active in (await db.scalars(active_query)).all():
         await run_in_threadpool(expire_collaboration_task, active.id)
     if await db.scalar(active_query.execution_options(populate_existing=True)):
-        raise HTTPException(409, "已有协作审校正在执行，请先恢复进度或取消")
+        raise ConflictError(code="COLLABORATION_IN_PROGRESS", message="已有协作审校正在执行，请先恢复进度或取消")
     query = select(LLMConfig).where(LLMConfig.is_enabled.is_(True))
     query = query.where(LLMConfig.id == data.config_id) if data.config_id else query.where(LLMConfig.is_active.is_(True))
     config = await db.scalar(query)
     from app.core.secret_crypto import decrypt_secret
 
     if not config or not decrypt_secret(config.api_key).strip():
-        raise HTTPException(422, "所选模型不存在、已停用或缺少可用密钥，请检查模型配置")
+        raise ValidationError(code="INVALID_MODEL_CONFIG", message="所选模型不存在、已停用或缺少可用密钥，请检查模型配置")
     task_id = str(uuid4())
     quota_key = await charge_user_daily_quota(user)
     task = ProofreadTask(
@@ -90,7 +99,7 @@ async def collaborate(
         await db.rollback()
         await run_in_threadpool(refund_collaboration_quota, task_id, quota_key)
         if isinstance(exc, IntegrityError):
-            raise HTTPException(409, "请求已提交，请使用同一请求 ID 恢复任务") from None
+            raise ConflictError(code="DUPLICATE_REQUEST", message="请求已提交，请使用同一请求 ID 恢复任务") from None
         raise
     await db.refresh(task)
     try:
@@ -126,7 +135,7 @@ async def collaboration_input(
         ProofreadTask.owner_user_id == user.id, ProofreadTask.params_json["kind"].as_string() == "collaboration",
     ))
     if task is None:
-        raise HTTPException(404, "协作任务不存在")
+        raise NotFoundError(code="TASK_NOT_FOUND", message="协作任务不存在")
     return {"task_id": task_id, **{key: task.params_json[key] for key in ("text", "domain", "config_id")}}
 
 
@@ -149,10 +158,7 @@ async def text_proofread(
         # 先校验长度：非法请求不消耗游客当日次数
         max_text_length = guest_policy["max_text_length"]
         if len(request.text) > max_text_length:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"游客模式文本长度不能超过{max_text_length}字，请登录后使用",
-            )
+            raise BadRequestError(code="GUEST_TEXT_TOO_LONG", message=f"游客模式文本长度不能超过{max_text_length}字，请登录后使用")
         await check_guest_rate_limit(http_request, daily_limit=guest_policy["daily_limit"])
     else:
         await charge_user_daily_quota(current_user)
@@ -183,10 +189,9 @@ async def text_proofread(
         # 指定的模型配置无效：明确告知（通常是配置被删除/停用）
         invalid_config = isinstance(e, InvalidModelConfigError)
         detail = str(e) if invalid_config else "校对服务暂时不可用，请稍后重试"
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST if invalid_config else status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=detail,
-        )
+        if invalid_config:
+            raise BadRequestError(code="INVALID_MODEL_CONFIG", message=detail)
+        raise ServiceUnavailableError(code="PROOFREAD_SERVICE_ERROR", message=detail)
     except Exception as e:
         import traceback
         logger.error(f"校对过程发生未知错误: {type(e).__name__}: {e}\n{traceback.format_exc()}")
@@ -196,10 +201,7 @@ async def text_proofread(
             status="failed", error_message=str(e), duration_ms=timer.elapsed_ms(),
         )
         await refund_user_daily_quota(current_user)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="校对过程发生错误，请稍后重试",
-        )
+        raise AppException(500, "PROOFREAD_UNEXPECTED_ERROR", "校对过程发生错误，请稍后重试")
 
     # 保存校对记录（已登录用户）
     record_id = None
@@ -239,9 +241,18 @@ async def text_proofread(
 class ProofreadCompareRequest(BaseModel):
     """多模型校对对比请求"""
     text: str = Field(..., min_length=1, max_length=100000, description="待校对文本")
-    check_types: Optional[List[str]] = Field(None, description="校对类型")
+    check_types: Optional[List[str]] = Field(
+        None,
+        deprecated=True,
+        description="（已废弃，传入无效果）历史参数：限定校对类型。总是全量审校，任何值都被静默忽略",
+    )
     domain: str = Field(default="general", description="领域")
     config_ids: List[int] = Field(..., min_length=2, max_length=4, description="参与对比的模型配置ID")
+
+    @field_validator("check_types", mode="before")
+    @classmethod
+    def _ignore_check_types(cls, v):
+        return None
 
 
 class ModelProofreadResult(TextProofreadResponse):
@@ -291,7 +302,7 @@ async def text_proofread_compare(
     )
     configs = {c.id: c for c in cfg_result.scalars().all()}
     if len(configs) < 2:
-        raise HTTPException(status_code=400, detail="所选模型配置不足 2 个有效项（已停用的配置不可用）")
+        raise BadRequestError(code="INSUFFICIENT_MODELS", message="所选模型配置不足 2 个有效项（已停用的配置不可用）")
 
     # 对比一次消耗 N 倍额度（N=有效模型数，重复/无效 config_id 不重复计量）：原子预扣
     if current_user is not None:
@@ -418,9 +429,9 @@ async def submit_issue_feedback(
         )
         owner_id = owner.scalar_one_or_none()
         if owner_id is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="校对记录不存在")
+            raise NotFoundError(code="RECORD_NOT_FOUND", message="校对记录不存在")
         if owner_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权对该记录提交反馈")
+            raise ForbiddenError(code="FEEDBACK_NOT_ALLOWED", message="无权对该记录提交反馈")
 
     saved = 0
     for item in request.items:

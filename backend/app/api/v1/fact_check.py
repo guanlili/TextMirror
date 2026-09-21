@@ -19,6 +19,14 @@ from starlette.concurrency import run_in_threadpool
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_permission
+from app.core.exceptions import (
+    ConflictError,
+    NotFoundError,
+    QuotaExceededError,
+    ServiceUnavailableError,
+    ValidationError,
+)
+from app.core.pagination import PageParams, paginate_query
 from app.core.secret_crypto import encrypt_secret
 from app.models.fact_check import FactCheckConfig, FactCheckReview, FactCheckRun
 from app.models.llm_config import LLMConfig
@@ -154,7 +162,7 @@ async def _owned_run(db, run_id, user, permission="fact-check:run"):
     await _expire_stale(db, user.id)
     run = await db.scalar(select(FactCheckRun).where(FactCheckRun.id == run_id, FactCheckRun.user_id == user.id))
     if run is None:
-        raise HTTPException(404, "核查任务不存在")
+        raise NotFoundError(code="RUN_NOT_FOUND", message="核查任务不存在")
     await require_permission(permission)(current_user=user, db=db)
     return run
 
@@ -166,20 +174,20 @@ async def _lock_user(db, user_id):
 
 async def _budget(db, user_id, *, new_run=True):
     if await db.scalar(select(FactCheckRun.id).where(FactCheckRun.user_id == user_id, FactCheckRun.status.in_(ACTIVE)).limit(1)):
-        raise HTTPException(409, "已有事实核查任务正在执行，请等待完成或取消")
+        raise ConflictError(code="FACT_CHECK_IN_PROGRESS", message="已有事实核查任务正在执行，请等待完成或取消")
     if new_run:
         midnight = datetime.now(ZoneInfo("Asia/Shanghai")).replace(hour=0, minute=0, second=0, microsecond=0)
         used = await db.scalar(select(func.count()).select_from(FactCheckRun).where(
             FactCheckRun.user_id == user_id, FactCheckRun.created_at >= midnight.astimezone(timezone.utc),
         ))
         if used >= DAILY_LIMIT:
-            raise HTTPException(429, f"每日最多提交 {DAILY_LIMIT} 个核查任务（含提取、取消和失败任务），请明日再试")
+            raise QuotaExceededError(code="FACT_CHECK_DAILY_LIMIT", message=f"每日最多提交 {DAILY_LIMIT} 个核查任务（含提取、取消和失败任务），请明日再试")
 
 
 async def _duplicate(db, user_id, request_id, request_hash):
     existing = await db.scalar(select(FactCheckRun).where(FactCheckRun.user_id == user_id, FactCheckRun.request_id == str(request_id)))
     if existing and existing.request_hash != request_hash:
-        raise HTTPException(409, "此请求 ID 已用于不同的核查参数，请生成新的请求 ID")
+        raise ConflictError(code="REQUEST_ID_REUSE", message="此请求 ID 已用于不同的核查参数，请生成新的请求 ID")
     return existing
 
 
@@ -190,7 +198,7 @@ async def _dispatch(db, run):
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(409, "核查请求已提交，请刷新任务列表") from None
+        raise ConflictError(code="DUPLICATE_SUBMIT", message="核查请求已提交，请刷新任务列表") from None
     await db.refresh(run)
     try:
         await run_in_threadpool(async_fact_check.apply_async, args=[run.id], task_id=run.task_id, retry=False)
@@ -229,11 +237,11 @@ async def create_run(data: FactCheckCreate, db: AsyncSession = Depends(get_db), 
             UploadedDocument.owner_kind == "user", UploadedDocument.deleted_at.is_(None), UploadedDocument.status != "deleted",
         ))
         if doc is None:
-            raise HTTPException(404, "上传文档不存在")
+            raise NotFoundError(code="DOCUMENT_NOT_FOUND", message="上传文档不存在")
         source_text, source_kind, title = doc.extracted_text, "document", title or doc.filename[:200]
     await require_permission("fact-check:run")(current_user=user, db=db)
     if not source_text or not source_text.strip() or len(source_text) > MAX_TEXT_CHARS:
-        raise HTTPException(422, f"事实核查支持 1–{MAX_TEXT_CHARS} 个 Unicode 字符，不会截断后提交")
+        raise ValidationError(code="TEXT_OUT_OF_RANGE", message=f"事实核查支持 1–{MAX_TEXT_CHARS} 个 Unicode 字符，不会截断后提交")
     request_hash = _hash(data.model_dump(mode="json", exclude={"request_id"}) | {"source_ids": sorted(data.source_ids)})
     await _lock_user(db, user.id)
     existing = await _duplicate(db, user.id, data.request_id, request_hash)
@@ -241,13 +249,13 @@ async def create_run(data: FactCheckCreate, db: AsyncSession = Depends(get_db), 
         return _response(existing)
     config, model = await _configuration(db)
     if reason := _unavailable_reason(config, model):
-        raise HTTPException(503, reason)
+        raise ServiceUnavailableError(code="FACT_CHECK_UNAVAILABLE", message=reason)
     sources = []
     if data.mode == "trusted":
         enabled = {source["id"]: source for source in config.sources if source.get("is_enabled", True)}
         selected_ids = data.source_ids or list(enabled)
         if not selected_ids or any(source_id not in enabled for source_id in selected_ids):
-            raise HTTPException(422, "请选择至少一个当前可用的可信信源")
+            raise ValidationError(code="NO_TRUSTED_SOURCES", message="请选择至少一个当前可用的可信信源")
         sources = [enabled[source_id] for source_id in selected_ids]
     await _budget(db, user.id)
     run = FactCheckRun(
@@ -274,7 +282,7 @@ async def list_runs(record_id: int = Query(gt=0), db: AsyncSession = Depends(get
 
 
 @router.get("/history", response_model=FactCheckHistory, summary="分页查看独立核查任务")
-async def history(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=50),
+async def history(page: PageParams = Depends(),
                   status: FactCheckStatus | None = None, q: str = Query("", max_length=200),
                   db: AsyncSession = Depends(get_db), user=Depends(require_permission("fact-check:run"))):
     await _expire_stale(db, user.id)
@@ -283,9 +291,8 @@ async def history(offset: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=
         conditions.append(FactCheckRun.status == status)
     if q.strip():
         conditions.append(FactCheckRun.title.contains(q.strip(), autoescape=True))
-    total = await db.scalar(select(func.count()).select_from(FactCheckRun).where(*conditions))
-    rows = (await db.scalars(select(FactCheckRun).options(defer(FactCheckRun.result_json), defer(FactCheckRun.source_text)).where(
-        *conditions).order_by(FactCheckRun.id.desc()).offset(offset).limit(limit))).all()
+    base_query = select(FactCheckRun).options(defer(FactCheckRun.result_json), defer(FactCheckRun.source_text)).where(*conditions).order_by(FactCheckRun.id.desc())
+    total, rows = await paginate_query(db, base_query, page)
     return FactCheckHistory(items=[_response(row, summary=True) for row in rows], total=total)
 
 
@@ -307,14 +314,14 @@ async def execute_run(run_id: int, data: FactCheckExecute, db: AsyncSession = De
     request_hash = _hash(data.model_dump(mode="json", exclude={"request_id"}))
     if run.execute_request_id == str(data.request_id):
         if run.execute_request_hash != request_hash:
-            raise HTTPException(409, "此确认请求 ID 的内容已改变")
+            raise ConflictError(code="CONFIRM_CONTENT_CHANGED", message="此确认请求 ID 的内容已改变")
         return _response(run)
     if run.status != "WAITING_CONFIRMATION" or not run.result_json:
-        raise HTTPException(409, "任务不处于等待确认状态")
+        raise ConflictError(code="NOT_AWAITING_CONFIRMATION", message="任务不处于等待确认状态")
     selected = {item.id: item.statement for item in data.claims}
     known = {item["id"] for item in run.result_json["claims"]}
     if len(selected) != len(data.claims) or not set(selected) <= known or len(selected) > run.max_claims:
-        raise HTTPException(422, "事实选择重复、超出范围或超过核查预算")
+        raise ValidationError(code="INVALID_CLAIM_SELECTION", message="事实选择重复、超出范围或超过核查预算")
     await _budget(db, user.id, new_run=False)
     report = copy.deepcopy(run.result_json)
     for claim in report["claims"]:
@@ -334,7 +341,7 @@ async def execute_run(run_id: int, data: FactCheckExecute, db: AsyncSession = De
         execute_request_id=str(data.request_id), execute_request_hash=request_hash, task_id=str(uuid4()),
     ))
     if not updated.rowcount:
-        raise HTTPException(409, "任务状态已改变，请刷新")
+        raise ConflictError(code="RUN_STATE_CHANGED", message="任务状态已改变，请刷新")
     await db.refresh(run)
     return await _dispatch(db, run)
 
@@ -348,19 +355,19 @@ async def deepen_run(run_id: int, data: FactCheckDeepen, db: AsyncSession = Depe
     if existing:
         return _response(existing)
     if parent.status not in TERMINAL:
-        raise HTTPException(409, "请等待本次核查结束后再深入核查")
+        raise ConflictError(code="PARENT_NOT_TERMINAL", message="请等待本次核查结束后再深入核查")
     claim = next((item for item in (parent.result_json or {}).get("claims", []) if item["id"] == data.claim_id), None)
     if claim is None:
-        raise HTTPException(422, "事实项不存在")
+        raise ValidationError(code="CLAIM_NOT_FOUND", message="事实项不存在")
     from app.services.fact_check import FactCheckError, _validate_url
     try:
         for url in data.supplemental_urls:
             _validate_url(url, parent.sources if parent.mode == "trusted" else None)
     except FactCheckError as exc:
-        raise HTTPException(422, exc.message) from None
+        raise ValidationError(code="INVALID_URL", message=exc.message) from None
     config, model = await _configuration(db)
     if reason := _unavailable_reason(config, model):
-        raise HTTPException(503, reason)
+        raise ServiceUnavailableError(code="FACT_CHECK_UNAVAILABLE", message=reason)
     await _budget(db, user.id)
     selected = copy.deepcopy(claim)
     selected.update(checked=False, selected=True, verdict="insufficient", evidence=[], search_rounds=[], suggestion=None, reason="等待单条深入核查")
@@ -404,11 +411,11 @@ async def add_review(run_id: int, data: FactReviewCreate, db: AsyncSession = Dep
     existing = await db.scalar(select(FactCheckReview).where(FactCheckReview.run_id == run_id, FactCheckReview.request_id == str(data.request_id)))
     if existing:
         if any(getattr(existing, key) != getattr(data, key) for key in ("claim_id", "decision", "note")):
-            raise HTTPException(409, "复核请求 ID 已用于不同内容")
+            raise ConflictError(code="REVIEW_ID_REUSE", message="复核请求 ID 已用于不同内容")
         return existing
     claim = next((item for item in (run.result_json or {}).get("claims", []) if item["id"] == data.claim_id), None)
     if run.status not in TERMINAL or not claim or not claim["checked"]:
-        raise HTTPException(409, "仅可复核已结束任务中已检查的事实项")
+        raise ConflictError(code="REVIEW_NOT_ELIGIBLE", message="仅可复核已结束任务中已检查的事实项")
     review = FactCheckReview(run_id=run_id, user_id=user.id, **data.model_dump(exclude={"request_id"}), request_id=str(data.request_id))
     db.add(review)
     await db.flush()
@@ -421,7 +428,7 @@ async def export_run(run_id: int, format: str = Query("json", pattern="^(json|ht
                      db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     run = await _owned_run(db, run_id, user, "fact-check:export")
     if run.status not in TERMINAL:
-        raise HTTPException(409, "请等待任务结束后导出报告")
+        raise ConflictError(code="RUN_NOT_TERMINAL", message="请等待任务结束后导出报告")
     reviews = (await db.scalars(select(FactCheckReview).where(FactCheckReview.run_id == run_id).order_by(FactCheckReview.id))).all()
     data = _response(run).model_dump(mode="json") | {"source_text": run.source_text,
         "reviews": [FactReviewResponse.model_validate(item).model_dump(mode="json") for item in reviews],
@@ -439,7 +446,7 @@ async def delete_run(run_id: int, db: AsyncSession = Depends(get_db), user=Depen
     await _lock_user(db, user.id)
     run = await _owned_run(db, run_id, user)
     if run.status in ACTIVE:
-        raise HTTPException(409, "请先取消正在执行的核查")
+        raise ConflictError(code="RUN_STILL_ACTIVE", message="请先取消正在执行的核查")
     # Preserve the request ledger so deletion cannot reset daily limits or replay paid calls.
     await db.execute(delete(FactCheckReview).where(FactCheckReview.run_id == run_id))
     await db.execute(update(FactCheckRun).where(FactCheckRun.id == run_id, FactCheckRun.status.not_in(ACTIVE)).values(
@@ -459,17 +466,17 @@ async def update_settings(data: FactCheckSettingsUpdate, db: AsyncSession = Depe
     config = await db.get(FactCheckConfig, 1)
     model = await _active_model(db, data.model_config_id)
     if data.model_config_id and model is None:
-        raise HTTPException(422, "所选模型不存在或已停用")
+        raise ValidationError(code="MODEL_UNAVAILABLE", message="所选模型不存在或已停用")
     key = data.api_key.get_secret_value().strip() if data.api_key else ""
     if data.provider == "model":
         if key:
-            raise HTTPException(422, "模型原生联网复用已有大模型配置，不能在此填写搜索密钥；如需 Tavily，请先选择 Tavily")
+            raise ValidationError(code="INVALID_PROVIDER_CONFIG", message="模型原生联网复用已有大模型配置，不能在此填写搜索密钥；如需 Tavily，请先选择 Tavily")
         if data.enabled and (reason := _native_unavailable_reason(model)):
-            raise HTTPException(422, reason)
+            raise ValidationError(code="MODEL_UNAVAILABLE", message=reason)
     elif data.enabled and not (key or (config and config.api_key.strip())):
-        raise HTTPException(422, "启用 Tavily 事实核查前请先填写 Tavily 搜索密钥；不会自动切换至模型原生联网")
+        raise ValidationError(code="TAVILY_KEY_REQUIRED", message="启用 Tavily 事实核查前请先填写 Tavily 搜索密钥；不会自动切换至模型原生联网")
     if data.enabled and (model is None or not model.api_key.strip()):
-        raise HTTPException(422, "尚未配置可用的大模型或 API 密钥")
+        raise ValidationError(code="NO_MODEL_OR_KEY", message="尚未配置可用的大模型或 API 密钥")
     if config is None:
         config = FactCheckConfig(id=1, sources=[])
         db.add(config)
@@ -482,5 +489,5 @@ async def update_settings(data: FactCheckSettingsUpdate, db: AsyncSession = Depe
         await db.flush()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(409, "配置已被其他管理员创建，请刷新后重试") from None
+        raise ConflictError(code="CONFIG_CONCURRENT_EDIT", message="配置已被其他管理员创建，请刷新后重试") from None
     return _settings_response(config, model)

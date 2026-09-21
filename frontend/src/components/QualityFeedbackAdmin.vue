@@ -1,5 +1,8 @@
 <template>
-  <section class="quality-admin" aria-label="质量反馈审阅台">
+  <section
+    class="quality-admin"
+    aria-label="质量反馈审阅台"
+  >
     <header class="intro">
       <span class="eyebrow">人工审阅 / 目标评测</span>
       <h2>先确认样例，再评测模型</h2>
@@ -7,157 +10,521 @@
     </header>
 
     <div class="toolbar">
-      <el-select :model-value="status" aria-label="反馈状态" :disabled="saving || runBusy" @update:model-value="changeStatus">
-        <el-option v-for="(label, value) in statusLabels" :key="value" :label="label" :value="value" />
+      <el-select
+        :model-value="status"
+        aria-label="反馈状态"
+        :disabled="saving || runBusy"
+        @update:model-value="changeStatus"
+      >
+        <el-option
+          v-for="(label, value) in statusLabels"
+          :key="value"
+          :label="label"
+          :value="value"
+        />
       </el-select>
       <span class="muted">共 {{ total }} 条 · 每页 20 条</span>
-      <el-button :disabled="loading || saving || runBusy" aria-label="重新读取反馈列表" @click="refreshList">重新读取反馈</el-button>
+      <el-button
+        :disabled="loading || saving || runBusy"
+        aria-label="重新读取反馈列表"
+        @click="refreshList"
+      >
+        重新读取反馈
+      </el-button>
     </div>
-    <p v-if="loading" role="status" class="muted">正在加载反馈…</p>
-    <div v-else-if="listError" class="error-box" role="alert">
+    <p
+      v-if="loading"
+      role="status"
+      class="muted"
+    >
+      正在加载反馈…
+    </p>
+    <div
+      v-else-if="listError"
+      class="error-box"
+      role="alert"
+    >
       <p>{{ listError }}</p>
-      <el-button @click="loadList">重试加载</el-button>
+      <el-button @click="loadList">
+        重试加载
+      </el-button>
     </div>
-    <el-empty v-else-if="items.length === 0" :description="`暂无${statusLabels[status]}的质量反馈`" :image-size="72" />
+    <el-empty
+      v-else-if="items.length === 0"
+      :description="`暂无${statusLabels[status]}的质量反馈`"
+      :image-size="72"
+    />
 
-    <ul v-if="!loading && !listError" class="feedback-list" aria-label="反馈列表">
-      <li v-for="row in items" :key="row.id" class="feedback-card" :class="{ 'is-current': active?.id === row.id }">
+    <ul
+      v-if="!loading && !listError"
+      class="feedback-list"
+      aria-label="反馈列表"
+    >
+      <li
+        v-for="row in items"
+        :key="row.id"
+        class="feedback-card"
+        :class="{ 'is-current': active?.id === row.id }"
+      >
         <div class="card-heading">
           <div class="inline-group">
-            <el-checkbox v-if="status === 'confirmed'" :model-value="selectedIds.includes(row.id)"
+            <el-checkbox
+              v-if="status === 'confirmed'"
+              :model-value="selectedIds.includes(row.id)"
               :disabled="runBusy || saving || row.status !== 'confirmed' || !row.sample || (!selectedIds.includes(row.id) && selectedIds.length >= 10)"
-              :aria-label="`选择反馈 ${row.id} 参与评测`" @change="toggleSelection(row, Boolean($event))" />
+              :aria-label="`选择反馈 ${row.id} 参与评测`"
+              @change="toggleSelection(row, Boolean($event))"
+            />
             <strong>{{ feedbackKindLabels[row.kind] }}</strong>
-            <el-tag :type="statusTag(row.status)" size="small">{{ statusLabels[row.status] }}</el-tag>
+            <el-tag
+              :type="statusTag(row.status)"
+              size="small"
+            >
+              {{ statusLabels[row.status] }}
+            </el-tag>
             <span class="muted">{{ typeLabel(row.issue_type) || '未指定问题类型' }} · #{{ row.id }} · revision {{ row.revision }}</span>
           </div>
-          <el-button :disabled="saving || runBusy" :aria-label="`审核反馈 ${row.id}`" @click="openReview(row)">
+          <el-button
+            :disabled="saving || runBusy"
+            :aria-label="`审核反馈 ${row.id}`"
+            @click="openReview(row)"
+          >
             {{ active?.id === row.id ? '正在审核' : '审核' }}
           </el-button>
         </div>
-        <p class="fragment"><span class="field-caption">反馈片段</span>{{ row.original }}</p>
-        <p v-if="row.suggestion" class="muted">原建议：{{ row.suggestion }}</p>
-        <p class="user-note"><span class="field-caption">用户备注</span>{{ row.note || '未填写' }}</p>
-        <ul v-if="row.model_snapshot.length" class="snapshots" aria-label="逐模型反馈快照">
-          <li v-for="(snapshot, index) in row.model_snapshot" :key="index">
+        <p class="fragment">
+          <span class="field-caption">反馈片段</span>{{ row.original }}
+        </p>
+        <p
+          v-if="row.suggestion"
+          class="muted"
+        >
+          原建议：{{ row.suggestion }}
+        </p>
+        <p class="user-note">
+          <span class="field-caption">用户备注</span>{{ row.note || '未填写' }}
+        </p>
+        <ul
+          v-if="row.model_snapshot.length"
+          class="snapshots"
+          aria-label="逐模型反馈快照"
+        >
+          <li
+            v-for="(snapshot, index) in row.model_snapshot"
+            :key="index"
+          >
             <span>{{ snapshot.config_name || '未命名配置' }} <span class="muted">{{ snapshot.model }}</span></span>
             <span class="muted">{{ feedbackSnapshotLabel(snapshot) }}</span>
           </li>
         </ul>
-        <p v-else class="muted">无逐模型快照，无法判定模型是否完成或报告目标。</p>
+        <p
+          v-else
+          class="muted"
+        >
+          无逐模型快照，无法判定模型是否完成或报告目标。
+        </p>
       </li>
     </ul>
-    <el-pagination v-if="total > 0" :current-page="page" :page-size="20" :total="total" :disabled="saving || runBusy"
-      layout="prev, pager, next" :pager-count="5" aria-label="反馈分页" @current-change="changePage" />
+    <el-pagination
+      v-if="total > 0"
+      :current-page="page"
+      :page-size="20"
+      :total="total"
+      :disabled="saving || runBusy"
+      layout="prev, pager, next"
+      :pager-count="5"
+      aria-label="反馈分页"
+      @current-change="changePage"
+    />
 
-    <section v-if="active" ref="reviewPanel" class="review-panel" tabindex="-1" aria-label="反馈审核编辑器">
+    <section
+      v-if="active"
+      ref="reviewPanel"
+      class="review-panel"
+      tabindex="-1"
+      aria-label="反馈审核编辑器"
+    >
       <div class="card-heading">
         <div><span class="eyebrow">审核 #{{ active.id }} / revision {{ active.revision }} · {{ statusLabels[active.status] }}</span><h3>制作独立评测样例</h3></div>
-        <el-button :disabled="saving || runBusy" aria-label="收起反馈审核" @click="closeReview">收起审核</el-button>
+        <el-button
+          :disabled="saving || runBusy"
+          aria-label="收起反馈审核"
+          @click="closeReview"
+        >
+          收起审核
+        </el-button>
       </div>
-      <p class="user-note"><span class="field-caption">{{ feedbackKindLabels[active.kind] }} · 用户备注</span>{{ active.note || '未填写' }}</p>
-      <p class="field-caption">反馈上下文（只读）</p>
-      <p class="proof-text" aria-label="原文上下文与反馈目标">{{ contextParts.before }}<mark v-if="contextParts.target">{{ contextParts.target }}</mark>{{ contextParts.after }}</p>
-      <p v-if="!contextParts.target" class="warning-text">原反馈位置与上下文不匹配，请在下方重新定位有效目标。</p>
-      <p class="muted">下方编辑不会改写用户原文。仅显式确认后保存，不会自动调用模型；切换反馈或收起将放弃未保存编辑。</p>
-      <el-form label-position="top" :disabled="saving || runBusy">
-        <el-form-item label="脱敏样例" required>
-          <el-input v-model="draft.text" type="textarea" :rows="5" aria-label="脱敏样例文本" placeholder="保留必要语境，移除姓名、证件号等敏感信息" />
+      <p class="user-note">
+        <span class="field-caption">{{ feedbackKindLabels[active.kind] }} · 用户备注</span>{{ active.note || '未填写' }}
+      </p>
+      <p class="field-caption">
+        反馈上下文（只读）
+      </p>
+      <p
+        class="proof-text"
+        aria-label="原文上下文与反馈目标"
+      >
+        {{ contextParts.before }}<mark v-if="contextParts.target">{{ contextParts.target }}</mark>{{ contextParts.after }}
+      </p>
+      <p
+        v-if="!contextParts.target"
+        class="warning-text"
+      >
+        原反馈位置与上下文不匹配，请在下方重新定位有效目标。
+      </p>
+      <p class="muted">
+        下方编辑不会改写用户原文。仅显式确认后保存，不会自动调用模型；切换反馈或收起将放弃未保存编辑。
+      </p>
+      <el-form
+        label-position="top"
+        :disabled="saving || runBusy"
+      >
+        <el-form-item
+          label="脱敏样例"
+          required
+        >
+          <el-input
+            v-model="draft.text"
+            type="textarea"
+            :rows="5"
+            aria-label="脱敏样例文本"
+            placeholder="保留必要语境，移除姓名、证件号等敏感信息"
+          />
           <span class="muted">{{ sampleLength }} / 4000 Unicode 字符</span>
         </el-form-item>
         <div class="form-grid">
-          <el-form-item label="目标原文" required>
-            <el-input v-model="draft.original" aria-label="目标原文" placeholder="须与样例片段完全一致" />
+          <el-form-item
+            label="目标原文"
+            required
+          >
+            <el-input
+              v-model="draft.original"
+              aria-label="目标原文"
+              placeholder="须与样例片段完全一致"
+            />
           </el-form-item>
-          <el-form-item label="目标位置" required>
-            <el-select v-model="targetStart" aria-label="目标出现位置" placeholder="请选择要评测的那一处" :disabled="positions.length === 0">
-              <el-option v-for="position in positions" :key="position.start" :label="position.label" :value="position.start" />
+          <el-form-item
+            label="目标位置"
+            required
+          >
+            <el-select
+              v-model="targetStart"
+              aria-label="目标出现位置"
+              placeholder="请选择要评测的那一处"
+              :disabled="positions.length === 0"
+            >
+              <el-option
+                v-for="position in positions"
+                :key="position.start"
+                :label="position.label"
+                :value="position.start"
+              />
             </el-select>
           </el-form-item>
         </div>
-        <p v-if="positions.length === 0" class="warning-text">样例中找不到目标原文，不能确认纳入。</p>
-        <p v-else-if="targetStart === null" class="warning-text">存在多处相同片段，请从下拉列表选择目标位置。</p>
-        <p class="proof-text sample-preview" aria-label="脱敏样例目标预览">{{ sampleParts.before }}<mark v-if="sampleParts.target">{{ sampleParts.target }}</mark>{{ sampleParts.after }}</p>
+        <p
+          v-if="positions.length === 0"
+          class="warning-text"
+        >
+          样例中找不到目标原文，不能确认纳入。
+        </p>
+        <p
+          v-else-if="targetStart === null"
+          class="warning-text"
+        >
+          存在多处相同片段，请从下拉列表选择目标位置。
+        </p>
+        <p
+          class="proof-text sample-preview"
+          aria-label="脱敏样例目标预览"
+        >
+          {{ sampleParts.before }}<mark v-if="sampleParts.target">{{ sampleParts.target }}</mark>{{ sampleParts.after }}
+        </p>
         <div class="form-grid">
-          <el-form-item label="样例领域" required>
-            <el-select v-model="draft.domain" aria-label="样例领域">
-              <el-option label="通用" value="general" /><el-option label="公文" value="official" /><el-option label="法律" value="legal" />
+          <el-form-item
+            label="样例领域"
+            required
+          >
+            <el-select
+              v-model="draft.domain"
+              aria-label="样例领域"
+            >
+              <el-option
+                label="通用"
+                value="general"
+              /><el-option
+                label="公文"
+                value="official"
+              /><el-option
+                label="法律"
+                value="legal"
+              />
             </el-select>
           </el-form-item>
           <el-form-item label="目标问题类型">
-            <el-select v-model="draft.issue_type" :empty-values="[null, undefined]" aria-label="目标问题类型">
-              <el-option label="任意类型" value="" />
-              <el-option v-for="type in feedbackIssueTypes" :key="type" :label="typeLabel(type)" :value="type" />
+            <el-select
+              v-model="draft.issue_type"
+              :empty-values="[null, undefined]"
+              aria-label="目标问题类型"
+            >
+              <el-option
+                label="任意类型"
+                value=""
+              />
+              <el-option
+                v-for="type in feedbackIssueTypes"
+                :key="type"
+                :label="typeLabel(type)"
+                :value="type"
+              />
             </el-select>
           </el-form-item>
         </div>
-        <el-form-item label="目标预期（须管理员确认）" required>
-          <el-select v-model="draft.expectation" aria-label="目标预期">
-            <el-option label="应报告目标问题（report）" value="report" />
-            <el-option label="不应报告目标问题（no_report）" value="no_report" />
+        <el-form-item
+          label="目标预期（须管理员确认）"
+          required
+        >
+          <el-select
+            v-model="draft.expectation"
+            aria-label="目标预期"
+          >
+            <el-option
+              label="应报告目标问题（report）"
+              value="report"
+            />
+            <el-option
+              label="不应报告目标问题（no_report）"
+              value="no_report"
+            />
           </el-select>
           <span class="muted">初次审核仅按反馈原因预填：漏检、建议不合适为「应报告」，其余为「不应报告」，并非自动裁定。</span>
         </el-form-item>
-        <p v-if="active.kind === 'bad_suggestion'" class="warning-text">建议不合适：首次审核已将原建议预填为禁止替换，请人工确认。纳入样例不等于质量已修复；须提供认可改法才能验证建议正确。</p>
-        <div v-if="draft.expectation === 'report'" class="suggestion-editor">
-          <p class="muted">填写替换「目标原文」的精确文本，而非修改说明。每组最多 10 条、每条最多 500 个 Unicode 字符；保留空格和换行，空文本条目表示删除目标。</p>
-          <div v-for="constraint in suggestionFields" :key="constraint.key" class="suggestion-group">
+        <p
+          v-if="active.kind === 'bad_suggestion'"
+          class="warning-text"
+        >
+          建议不合适：首次审核已将原建议预填为禁止替换，请人工确认。纳入样例不等于质量已修复；须提供认可改法才能验证建议正确。
+        </p>
+        <div
+          v-if="draft.expectation === 'report'"
+          class="suggestion-editor"
+        >
+          <p class="muted">
+            填写替换「目标原文」的精确文本，而非修改说明。每组最多 10 条、每条最多 500 个 Unicode 字符；保留空格和换行，空文本条目表示删除目标。
+          </p>
+          <div
+            v-for="constraint in suggestionFields"
+            :key="constraint.key"
+            class="suggestion-group"
+          >
             <div class="card-heading">
               <strong>{{ constraint.label }}</strong>
-              <el-button :disabled="draft[constraint.key].length >= 10" :aria-label="`添加${constraint.label}`" @click="draft[constraint.key].push('')">添加一条</el-button>
+              <el-button
+                :disabled="draft[constraint.key].length >= 10"
+                :aria-label="`添加${constraint.label}`"
+                @click="draft[constraint.key].push('')"
+              >
+                添加一条
+              </el-button>
             </div>
-            <div v-for="(_, index) in draft[constraint.key]" :key="index" class="suggestion-row">
-              <el-input v-model="draft[constraint.key][index]" type="textarea" :rows="2" :aria-label="`${constraint.label} ${index + 1}`" placeholder="空文本表示删除目标" />
-              <el-button :aria-label="`移除${constraint.label} ${index + 1}`" @click="draft[constraint.key].splice(index, 1)">移除</el-button>
+            <div
+              v-for="(_, index) in draft[constraint.key]"
+              :key="index"
+              class="suggestion-row"
+            >
+              <el-input
+                v-model="draft[constraint.key][index]"
+                type="textarea"
+                :rows="2"
+                :aria-label="`${constraint.label} ${index + 1}`"
+                placeholder="空文本表示删除目标"
+              />
+              <el-button
+                :aria-label="`移除${constraint.label} ${index + 1}`"
+                @click="draft[constraint.key].splice(index, 1)"
+              >
+                移除
+              </el-button>
             </div>
-            <p v-if="!draft[constraint.key].length" class="muted">未设置{{ constraint.label }}</p>
+            <p
+              v-if="!draft[constraint.key].length"
+              class="muted"
+            >
+              未设置{{ constraint.label }}
+            </p>
           </div>
-          <p v-if="!draft.accepted_suggestions.length" class="warning-text">未提供认可改法：只有禁止项时仅能判定命中坏建议，避开禁止项仍为未评估；两组均空时只评检出，不验证建议正确性。</p>
+          <p
+            v-if="!draft.accepted_suggestions.length"
+            class="warning-text"
+          >
+            未提供认可改法：只有禁止项时仅能判定命中坏建议，避开禁止项仍为未评估；两组均空时只评检出，不验证建议正确性。
+          </p>
         </div>
-        <p v-else class="muted">不应报告：只评检出，本次保存不附带替换约束，建议为未评估。</p>
+        <p
+          v-else
+          class="muted"
+        >
+          不应报告：只评检出，本次保存不附带替换约束，建议为未评估。
+        </p>
         <el-form-item label="审核备注（可选）">
-          <el-input v-model="reviewNote" type="textarea" :rows="2" aria-label="审核备注" />
+          <el-input
+            v-model="reviewNote"
+            type="textarea"
+            :rows="2"
+            aria-label="审核备注"
+          />
         </el-form-item>
-        <el-checkbox v-model="expectationConfirmed" aria-label="确认脱敏样例与目标预期">我已核对脱敏内容、目标位置、预期及认可/禁止替换；理解未设置认可改法不能证明建议正确</el-checkbox>
+        <el-checkbox
+          v-model="expectationConfirmed"
+          aria-label="确认脱敏样例与目标预期"
+        >
+          我已核对脱敏内容、目标位置、预期及认可/禁止替换；理解未设置认可改法不能证明建议正确
+        </el-checkbox>
       </el-form>
-      <p v-if="validationError" class="warning-text" role="status">{{ validationError }}</p>
-      <div v-if="reviewError" class="error-box" role="alert">
+      <p
+        v-if="validationError"
+        class="warning-text"
+        role="status"
+      >
+        {{ validationError }}
+      </p>
+      <div
+        v-if="reviewError"
+        class="error-box"
+        role="alert"
+      >
         <p>{{ reviewError }}</p>
-        <el-button v-if="conflict" :disabled="loading" @click="refreshList">重新读取反馈（先确认放弃本地编辑）</el-button>
+        <el-button
+          v-if="conflict"
+          :disabled="loading"
+          @click="refreshList"
+        >
+          重新读取反馈（先确认放弃本地编辑）
+        </el-button>
       </div>
-      <p v-if="reviewNotice" class="success-text" role="status">{{ reviewNotice }}</p>
+      <p
+        v-if="reviewNotice"
+        class="success-text"
+        role="status"
+      >
+        {{ reviewNotice }}
+      </p>
       <div class="review-actions">
-        <el-button type="primary" :disabled="!canConfirm" :loading="saving" @click="submitReview('confirmed')">确认并纳入评测</el-button>
-        <el-button :disabled="saving || runBusy || conflict" @click="submitReview('rejected')">不纳入评测</el-button>
+        <el-button
+          type="primary"
+          :disabled="!canConfirm"
+          :loading="saving"
+          @click="submitReview('confirmed')"
+        >
+          确认并纳入评测
+        </el-button>
+        <el-button
+          :disabled="saving || runBusy || conflict"
+          @click="submitReview('rejected')"
+        >
+          不纳入评测
+        </el-button>
       </div>
     </section>
 
-    <section v-if="status === 'confirmed'" class="evaluation-panel" aria-label="运行已确认样例评测">
+    <section
+      v-if="status === 'confirmed'"
+      class="evaluation-panel"
+      aria-label="运行已确认样例评测"
+    >
       <span class="eyebrow">小样本回归 / 按需调用</span>
       <h3>运行已确认样例</h3>
-      <p class="muted">已选 {{ selectedIds.length }} / 10 条（仅当前页）。仅发送已保存的确认样例，本地未保存编辑不会发送。</p>
-      <p v-if="modelsLoading" role="status">正在加载可用模型…</p>
-      <div v-else-if="modelsError" role="alert" class="error-box">
-        <p>{{ modelsError }}</p><el-button :disabled="runBusy" @click="loadModels">重试加载模型</el-button>
+      <p class="muted">
+        已选 {{ selectedIds.length }} / 10 条（仅当前页）。仅发送已保存的确认样例，本地未保存编辑不会发送。
+      </p>
+      <p
+        v-if="modelsLoading"
+        role="status"
+      >
+        正在加载可用模型…
+      </p>
+      <div
+        v-else-if="modelsError"
+        role="alert"
+        class="error-box"
+      >
+        <p>{{ modelsError }}</p><el-button
+          :disabled="runBusy"
+          @click="loadModels"
+        >
+          重试加载模型
+        </el-button>
       </div>
-      <p v-else-if="models.length === 0" class="muted">暂无可用模型，请由模型配置管理员检查已启用配置。</p>
-      <el-select v-model="selectedModels" multiple :multiple-limit="4" :disabled="runBusy || modelsLoading || !!modelsError"
-        aria-label="选择一至四个评测模型" placeholder="选择 1–4 个可用模型">
-        <el-option v-for="model in models" :key="model.id" :value="model.id" :label="`${model.name}${model.is_active ? '（当前）' : ''} · ${model.model}`" />
+      <p
+        v-else-if="models.length === 0"
+        class="muted"
+      >
+        暂无可用模型，请由模型配置管理员检查已启用配置。
+      </p>
+      <el-select
+        v-model="selectedModels"
+        multiple
+        :multiple-limit="4"
+        :disabled="runBusy || modelsLoading || !!modelsError"
+        aria-label="选择一至四个评测模型"
+        placeholder="选择 1–4 个可用模型"
+      >
+        <el-option
+          v-for="model in models"
+          :key="model.id"
+          :value="model.id"
+          :label="`${model.name}${model.is_active ? '（当前）' : ''} · ${model.model}`"
+        />
       </el-select>
-      <el-button type="primary" :disabled="!canRun" :loading="runBusy" @click="runEvaluation">运行选中样例评测</el-button>
-      <p v-if="runBusy" role="status" class="muted">{{ runPhase === 'confirm' ? '等待费用与发送内容确认…' : '评测中，最长等待 300 秒。关闭面板不保证取消已开始的模型调用，结果不会回填重新打开的面板。' }}</p>
-      <p v-if="runError" class="error-box" role="alert">{{ runError }}</p>
+      <el-button
+        type="primary"
+        :disabled="!canRun"
+        :loading="runBusy"
+        @click="runEvaluation"
+      >
+        运行选中样例评测
+      </el-button>
+      <p
+        v-if="runBusy"
+        role="status"
+        class="muted"
+      >
+        {{ runPhase === 'confirm' ? '等待费用与发送内容确认…' : '评测中，最长等待 300 秒。关闭面板不保证取消已开始的模型调用，结果不会回填重新打开的面板。' }}
+      </p>
+      <p
+        v-if="runError"
+        class="error-box"
+        role="alert"
+      >
+        {{ runError }}
+      </p>
     </section>
 
-    <section v-if="evaluation" class="results-panel" aria-label="目标评测报告">
+    <section
+      v-if="evaluation"
+      class="results-panel"
+      aria-label="目标评测报告"
+    >
       <div class="card-heading">
         <div><span class="eyebrow">本次评测报告</span><h3>只衡量确认目标，不外推全文</h3></div>
-        <el-button aria-label="下载可复现 JSON 报告" @click="downloadReport">下载 JSON 报告</el-button>
+        <el-button
+          aria-label="下载可复现 JSON 报告"
+          @click="downloadReport"
+        >
+          下载 JSON 报告
+        </el-button>
       </div>
-      <p class="muted">{{ evaluation.generated_at }} · 本报告不在服务端持久化，请及时下载。</p>
-      <p class="scope-note">{{ evaluationScopeNotice }}</p>
-      <article v-for="result in evaluation.results" :key="result.config_id" class="model-result">
+      <p class="muted">
+        {{ evaluation.generated_at }} · 本报告不在服务端持久化，请及时下载。
+      </p>
+      <p class="scope-note">
+        {{ evaluationScopeNotice }}
+      </p>
+      <article
+        v-for="result in evaluation.results"
+        :key="result.config_id"
+        class="model-result"
+      >
         <h4>{{ result.config_name }} <span class="muted">{{ result.model }}</span></h4>
         <dl class="metrics">
           <div><dt>目标误报</dt><dd>{{ result.false_positives }} / {{ result.no_report_evaluated }}</dd><small>false_positives / no_report_evaluated</small></div>
@@ -167,29 +534,63 @@
           <div><dt>建议不符</dt><dd>{{ result.suggestion_failed }} / {{ result.suggestion_evaluated }}</dd><small>suggestion_failed · 不计为漏检</small></div>
           <div><dt>建议未评估</dt><dd>{{ result.suggestion_not_evaluated }}</dd><small>not_evaluated · 不计为通过</small></div>
         </dl>
-        <p class="muted">检出分母仅含定位可靠的病例；建议分母仅含可按人工约束判定通过或失败的病例。任一命中建议不符即失败；分母为 0 不代表通过。</p>
-        <ul class="case-list" aria-label="病例评测详情">
-          <li v-for="entry in result.cases" :key="`${entry.feedback_id}:${entry.revision}`">
-            <div class="inline-group"><strong>#{{ entry.feedback_id }}</strong><span>revision {{ entry.revision }}</span>
+        <p class="muted">
+          检出分母仅含定位可靠的病例；建议分母仅含可按人工约束判定通过或失败的病例。任一命中建议不符即失败；分母为 0 不代表通过。
+        </p>
+        <ul
+          class="case-list"
+          aria-label="病例评测详情"
+        >
+          <li
+            v-for="entry in result.cases"
+            :key="`${entry.feedback_id}:${entry.revision}`"
+          >
+            <div class="inline-group">
+              <strong>#{{ entry.feedback_id }}</strong><span>revision {{ entry.revision }}</span>
               <span>{{ entry.expectation === 'report' ? '应报告' : '不应报告' }}（{{ entry.expectation }}）</span>
-              <el-tag :type="entry.detection_status === 'pass' ? 'success' : entry.detection_status === 'fail' ? 'danger' : 'warning'">检出：{{ caseLabels[entry.detection_status] }} / {{ entry.detection_status }}</el-tag>
-              <el-tag :type="entry.suggestion_status === 'pass' ? 'success' : entry.suggestion_status === 'fail' ? 'danger' : 'info'">建议：{{ caseLabels[entry.suggestion_status] }} / {{ entry.suggestion_status }}</el-tag>
+              <el-tag :type="entry.detection_status === 'pass' ? 'success' : entry.detection_status === 'fail' ? 'danger' : 'warning'">
+                检出：{{ caseLabels[entry.detection_status] }} / {{ entry.detection_status }}
+              </el-tag>
+              <el-tag :type="entry.suggestion_status === 'pass' ? 'success' : entry.suggestion_status === 'fail' ? 'danger' : 'info'">
+                建议：{{ caseLabels[entry.suggestion_status] }} / {{ entry.suggestion_status }}
+              </el-tag>
             </div>
-            <p class="muted">{{ entry.detected === null ? '目标检测不可判定' : entry.detected ? '检测到目标' : '未检测到目标' }} · {{ entry.elapsed_ms }} ms</p>
-            <p class="muted">{{ suggestionReasons[entry.suggestion_reason] }}</p>
-            <p v-if="entry.error" class="warning-text">{{ entry.error }}</p>
+            <p class="muted">
+              {{ entry.detected === null ? '目标检测不可判定' : entry.detected ? '检测到目标' : '未检测到目标' }} · {{ entry.elapsed_ms }} ms
+            </p>
+            <p class="muted">
+              {{ suggestionReasons[entry.suggestion_reason] }}
+            </p>
+            <p
+              v-if="entry.error"
+              class="warning-text"
+            >
+              {{ entry.error }}
+            </p>
           </li>
         </ul>
       </article>
       <details class="report-samples">
         <summary>查看本次实际评测样例与 revision（{{ evaluation.samples.length }} 条）</summary>
-        <div v-for="entry in evaluation.samples" :key="entry.id" class="report-sample">
+        <div
+          v-for="entry in evaluation.samples"
+          :key="entry.id"
+          class="report-sample"
+        >
           <p>#{{ entry.id }} · revision {{ entry.revision }} · {{ entry.sample.expectation }} · {{ entry.sample.domain }} · {{ entry.sample.issue_type || '任意类型' }}</p>
           <p>认可替换：{{ JSON.stringify(entry.sample.accepted_suggestions ?? []) }} · 禁止替换：{{ JSON.stringify(entry.sample.rejected_suggestions ?? []) }}</p>
-          <p class="proof-text">{{ feedbackTargetParts(entry.sample.text, entry.sample.start, entry.sample.end, entry.sample.original).before }}<mark>{{ feedbackTargetParts(entry.sample.text, entry.sample.start, entry.sample.end, entry.sample.original).target }}</mark>{{ feedbackTargetParts(entry.sample.text, entry.sample.start, entry.sample.end, entry.sample.original).after }}</p>
+          <p class="proof-text">
+            {{ feedbackTargetParts(entry.sample.text, entry.sample.start, entry.sample.end, entry.sample.original).before }}<mark>{{ feedbackTargetParts(entry.sample.text, entry.sample.start, entry.sample.end, entry.sample.original).target }}</mark>{{ feedbackTargetParts(entry.sample.text, entry.sample.start, entry.sample.end, entry.sample.original).after }}
+          </p>
         </div>
       </details>
-      <p v-if="downloadError" class="error-box" role="alert">{{ downloadError }}</p>
+      <p
+        v-if="downloadError"
+        class="error-box"
+        role="alert"
+      >
+        {{ downloadError }}
+      </p>
     </section>
   </section>
 </template>

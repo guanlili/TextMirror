@@ -4,23 +4,24 @@ TextMirror 放行词（白名单）API
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
+from app.core.pagination import PageParams, paginate_query
 from app.models.dictionary import WhitelistWord
 from app.schemas.dictionary import WhitelistCreate, WhitelistResponse, WhitelistUpdate
 
 router = APIRouter(prefix="/whitelist", tags=["放行词"])
 
 
-@router.get("", response_model=list[WhitelistResponse], summary='获取当前用户的放行词列表')
+@router.get("", summary='获取当前用户的放行词列表')
 async def list_whitelist(
     keyword: Optional[str] = Query(None, description="搜索关键词"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page: PageParams = Depends(),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -30,10 +31,8 @@ async def list_whitelist(
         escaped = keyword.replace("%", "\\%").replace("_", "\\_")
         query = query.where(WhitelistWord.word.contains(escaped))
     query = query.order_by(WhitelistWord.created_at.desc())
-    query = query.offset((page - 1) * page_size).limit(page_size)
-
-    result = await db.execute(query)
-    return result.scalars().all()
+    total, items = await paginate_query(db, query, page)
+    return {"items": [WhitelistResponse.model_validate(w) for w in items], "total": total, "page": page.page, "page_size": page.page_size}
 
 
 @router.post("", response_model=WhitelistResponse, status_code=201, summary='添加放行词')
@@ -51,7 +50,7 @@ async def create_whitelist_word(
         )
     )
     if exists.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="该放行词已存在")
+        raise ConflictError(code="WHITELIST_WORD_EXISTS", message="该放行词已存在")
 
     word = WhitelistWord(
         user_id=current_user.id,
@@ -82,7 +81,7 @@ async def update_whitelist_word(
     )
     word = result.scalar_one_or_none()
     if not word:
-        raise HTTPException(status_code=404, detail="放行词不存在")
+        raise NotFoundError(code="WHITELIST_WORD_NOT_FOUND", message="放行词不存在")
 
     if data.word is not None:
         word.word = data.word
@@ -113,7 +112,7 @@ async def delete_whitelist_word(
     )
     word = result.scalar_one_or_none()
     if not word:
-        raise HTTPException(status_code=404, detail="放行词不存在")
+        raise NotFoundError(code="WHITELIST_WORD_NOT_FOUND", message="放行词不存在")
 
     await db.delete(word)
 
@@ -126,7 +125,7 @@ async def batch_create_whitelist(
 ):
     """批量添加放行词（单次上限 1000 条）"""
     if len(words) > 1000:
-        raise HTTPException(status_code=400, detail="单次最多添加 1000 个放行词")
+        raise BadRequestError(code="BATCH_TOO_LARGE", message="单次最多添加 1000 个放行词")
 
     # 一次查回已存在的词（此前逐词一条 SELECT，千条请求 = 千次往返的长事务）
     existing = set((await db.execute(

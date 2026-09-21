@@ -42,8 +42,15 @@ export function deleteDictionaryApi(id: number): Promise<void> {
   return request.delete(`/dictionary/${id}`)
 }
 
+export interface PaginatedResponse<T> {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+}
+
 /** 获取词条列表 */
-export function listEntriesApi(dictId: number, params?: { keyword?: string; page?: number; page_size?: number }): Promise<EntryItem[]> {
+export function listEntriesApi(dictId: number, params?: { keyword?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<EntryItem>> {
   return request.get(`/dictionary/${dictId}/entries`, { params })
 }
 

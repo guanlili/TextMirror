@@ -160,8 +160,8 @@ async def test_worker_preserves_counter_failure_snapshot_not_success(client, act
     monkeypatch.setattr(proofread, "get_llm_provider", AsyncMock(return_value=provider))
     search = AsyncMock(side_effect=[SearchResult(["https://example.com/news/report"], {}, 1),
                                    fact_check.FactCheckError("SEARCH_AUTH_ERROR", "检索鉴权失败")])
-    monkeypatch.setattr(fact_check, "_search", search)
-    monkeypatch.setattr(fact_check, "_fetch_page", AsyncMock(return_value=fact_check._Page(
+    monkeypatch.setattr(fact_check.orchestrator, "_search", search)
+    monkeypatch.setattr(fact_check.orchestrator, "_fetch_page", AsyncMock(return_value=fact_check._Page(
         "", "正文标题", "https://example.com/news/report", TEXT, None, "2026-09-01T00:00:00Z", "发布方")))
     run = await submit(client, actors)
     async_fact_check.run(run["id"])
@@ -477,7 +477,7 @@ async def test_native_unavailable_guards_do_not_fallback_to_saved_tavily(client,
     assert not options["available"] and options["provider"] == "model"
     assert "不会自动切换" in options["unavailable_reason"]
     response = await client.post(f"{BASE}/runs", json=payload(native.record))
-    assert response.status_code == 503 and response.json()["detail"] == options["unavailable_reason"]
+    assert response.status_code == 503 and response.json()["detail"]["message"] == options["unavailable_reason"]
     native.current = native.admin
     settings = (await client.get(ADMIN)).json()
     assert settings["model_search_supported"] == supported and bool(settings["model_search_reason"]) != supported
@@ -485,7 +485,7 @@ async def test_native_unavailable_guards_do_not_fallback_to_saved_tavily(client,
     if change.get("is_active") is False or change.get("is_enabled") is False:
         assert settings["model_name"] == options["model_name"] == ""
     response = await client.put(ADMIN, json={"enabled": True, "provider": "model"})
-    assert response.status_code == 422 and response.json()["detail"] == options["unavailable_reason"]
+    assert response.status_code == 422 and response.json()["detail"]["message"] == options["unavailable_reason"]
     assert (await client.put(ADMIN, json={"enabled": False, "provider": "model"})).status_code == 200
     native.dispatch.assert_not_called()
 
@@ -617,7 +617,7 @@ async def test_both_providers_require_model_credentials_without_consuming_quota(
     if "api_key" in change:
         assert "API 密钥" in options["unavailable_reason"]
     response = await client.post(f"{BASE}/runs", json=payload(native.record))
-    assert response.status_code == 503 and response.json()["detail"] == options["unavailable_reason"]
+    assert response.status_code == 503 and response.json()["detail"]["message"] == options["unavailable_reason"]
     native.dispatch.assert_not_called()
     async with async_session_factory() as db:
         assert (await db.scalars(select(FactCheckRun.id).where(FactCheckRun.user_id == native.owner.id))).all() == []
@@ -800,10 +800,10 @@ async def test_worker_persists_each_fetch_failure_before_interruption(client, ac
     provider = SimpleNamespace(chat=AsyncMock(return_value=SimpleNamespace(
         content=json.dumps({"claims": [{"segment_id": "s1", "original": TEXT, "statement": TEXT}]}), usage={})), close=AsyncMock())
     monkeypatch.setattr(proofread, "get_llm_provider", AsyncMock(return_value=provider))
-    monkeypatch.setattr(fact_check, "_search", AsyncMock(return_value=SearchResult(urls, {}, 1)))
+    monkeypatch.setattr(fact_check.orchestrator, "_search", AsyncMock(return_value=SearchResult(urls, {}, 1)))
     fetch = AsyncMock(side_effect=[fact_check._FetchError("UNSAFE_ADDRESS", "页面解析到非公网或保留地址。"),
                                   RuntimeError("interrupted before second outcome")])
-    monkeypatch.setattr(fact_check, "_fetch_page", fetch)
+    monkeypatch.setattr(fact_check.orchestrator, "_fetch_page", fetch)
     run = await submit(client, actors)
     async_fact_check.run(run["id"])
     result = (await client.get(f"{BASE}/runs/{run['id']}")).json()
@@ -829,9 +829,9 @@ def mock_extraction_backend(monkeypatch, *responses):
     native_search = AsyncMock(side_effect=AssertionError("Tavily must not use native search"))
     fetch = AsyncMock(side_effect=AssertionError("No search results should require fetching"))
     monkeypatch.setattr(proofread, "get_llm_provider", AsyncMock(return_value=provider))
-    monkeypatch.setattr(fact_check, "_search", search)
-    monkeypatch.setattr(fact_check, "search_model", native_search)
-    monkeypatch.setattr(fact_check, "_fetch_page", fetch)
+    monkeypatch.setattr(fact_check.orchestrator, "_search", search)
+    monkeypatch.setattr(fact_check.orchestrator, "search_model", native_search)
+    monkeypatch.setattr(fact_check.orchestrator, "_fetch_page", fetch)
     return SimpleNamespace(provider=provider, search=search, native_search=native_search, fetch=fetch)
 
 

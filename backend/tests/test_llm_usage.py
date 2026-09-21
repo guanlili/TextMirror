@@ -214,7 +214,7 @@ async def test_ledger_aggregation_excludes_old_results_and_keeps_unknown(client)
             LLMUsage(**defaults, outcome="success", total_tokens=100, created_at=now - timedelta(days=8)),
         ])
         await db.commit()
-        result = await get_model_usage(days=7, db=db, _user=None)
+        result = await get_model_usage(days=7, limit=200, db=db, _user=None)
         assert result["calls"] == 3 and result["total_tokens"] == 10
         assert result["unknown_usage_calls"] == 1
         row = result["items"][0]

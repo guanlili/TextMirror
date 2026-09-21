@@ -4,7 +4,7 @@ TextMirror AI润色 API
 import json
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_factory, get_db
 from app.core.dependencies import get_current_user_optional
+from app.core.exceptions import BadRequestError, ServiceUnavailableError
 from app.core.rate_limit import (
     charge_user_daily_quota,
     check_guest_rate_limit,
@@ -111,10 +112,7 @@ async def text_polish(
             duration_ms=timer.elapsed_ms(),
         )
         await refund_user_daily_quota(current_user)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="润色服务暂时不可用，请稍后重试",
-        )
+        raise ServiceUnavailableError(code="POLISH_SERVICE_ERROR", message="润色服务暂时不可用，请稍后重试")
     except Exception as e:
         import traceback
         logger.error(f"润色过程发生未知错误: {type(e).__name__}: {e}\n{traceback.format_exc()}")
@@ -126,10 +124,7 @@ async def text_polish(
             duration_ms=timer.elapsed_ms(),
         )
         await refund_user_daily_quota(current_user)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="润色过程发生错误，请稍后重试",
-        )
+        raise HTTPException(status_code=500, detail="润色过程发生错误，请稍后重试")
 
     # 构建响应
     versions = [
@@ -323,10 +318,7 @@ def _build_compare_provider(config):
 
 def _require_style(style: str) -> dict:
     if style not in POLISH_STYLES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的润色风格: {style}，可选: {', '.join(POLISH_STYLES.keys())}",
-        )
+        raise BadRequestError(code="UNSUPPORTED_STYLE", message=f"不支持的润色风格: {style}，可选: {', '.join(POLISH_STYLES.keys())}")
     return POLISH_STYLES[style]
 
 
@@ -351,7 +343,7 @@ async def _load_compare_configs(config_ids: List[int]) -> dict:
         )
         configs = {c.id: c for c in result.scalars().all()}
     if len(configs) < 2:
-        raise HTTPException(status_code=400, detail="所选模型配置不足 2 个有效项（已停用的配置不可用）")
+        raise BadRequestError(code="INSUFFICIENT_MODELS", message="所选模型配置不足 2 个有效项（已停用的配置不可用）")
     return configs
 
 

@@ -1,48 +1,118 @@
 <template>
   <div class="dictionary-page">
     <!-- 词库列表 -->
-    <el-card v-if="!currentDict" class="dict-list-card">
+    <el-card
+      v-if="!currentDict"
+      class="dict-list-card"
+    >
       <template #header>
         <div class="card-header">
           <span class="card-title">个性化词库管理</span>
-          <el-button type="primary" size="small" @click="showCreateDialog = true">
+          <el-button
+            type="primary"
+            size="small"
+            @click="showCreateDialog = true"
+          >
             <el-icon><Plus /></el-icon>新建词库
           </el-button>
         </div>
       </template>
 
-      <el-alert type="info" :closable="false" style="margin-bottom: 12px;">
+      <el-alert
+        type="info"
+        :closable="false"
+        style="margin-bottom: 12px;"
+      >
         <template #title>
           维护你的<b>专属纠错规则</b>（错误词 → 正确词）。校对时，错误词一出现就必定被标出，并给出你指定的正确写法——适合行业术语、公司规范用语、常写错的词。词条在本页保存后立即生效。
         </template>
       </el-alert>
 
-      <el-table :data="dictionaries" v-loading="loading" stripe>
-        <el-table-column prop="name" label="词库名称" min-width="150" />
-        <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="entry_count" label="词条数" width="100" align="center" />
-        <el-table-column label="状态" width="100" align="center">
+      <el-table
+        v-loading="loading"
+        :data="dictionaries"
+        stripe
+      >
+        <el-table-column
+          prop="name"
+          label="词库名称"
+          min-width="150"
+        />
+        <el-table-column
+          prop="description"
+          label="描述"
+          min-width="200"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          prop="entry_count"
+          label="词条数"
+          width="100"
+          align="center"
+        />
+        <el-table-column
+          label="状态"
+          width="100"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-switch v-model="row.is_active" @change="handleToggleActive(row as DictionaryItem)" />
+            <el-switch
+              v-model="row.is_active"
+              @change="handleToggleActive(row as DictionaryItem)"
+            />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" align="center">
+        <el-table-column
+          label="操作"
+          width="200"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="openDict(row as DictionaryItem)">管理词条</el-button>
-            <el-button type="warning" link size="small" @click="editDict(row as DictionaryItem)">编辑</el-button>
-            <el-popconfirm title="确定删除该词库？" @confirm="handleDeleteDict(row.id)">
+            <el-button
+              type="primary"
+              link
+              size="small"
+              @click="openDict(row as DictionaryItem)"
+            >
+              管理词条
+            </el-button>
+            <el-button
+              type="warning"
+              link
+              size="small"
+              @click="editDict(row as DictionaryItem)"
+            >
+              编辑
+            </el-button>
+            <el-popconfirm
+              title="确定删除该词库？"
+              @confirm="handleDeleteDict(row.id)"
+            >
               <template #reference>
-                <el-button type="danger" link size="small">删除</el-button>
+                <el-button
+                  type="danger"
+                  link
+                  size="small"
+                >
+                  删除
+                </el-button>
               </template>
             </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
 
-      <el-empty v-if="!loading && dictionaries.length === 0" description="暂无自定义词库">
+      <el-empty
+        v-if="!loading && dictionaries.length === 0"
+        description="暂无自定义词库"
+      >
         <div class="empty-guide">
           <p>例如添加词条「帐号 → 账号」，之后校对凡出现「帐号」必定标出。</p>
-          <el-button type="primary" size="small" @click="fillExampleDict">
+          <el-button
+            type="primary"
+            size="small"
+            @click="fillExampleDict"
+          >
             <el-icon><Plus /></el-icon>创建示例词库
           </el-button>
         </div>
@@ -50,46 +120,106 @@
     </el-card>
 
     <!-- 词条管理 -->
-    <div v-else class="entry-section">
+    <div
+      v-else
+      class="entry-section"
+    >
       <div class="entry-toolbar">
-        <el-button @click="currentDict = null"><el-icon><Back /></el-icon>返回词库列表</el-button>
+        <el-button @click="currentDict = null">
+          <el-icon><Back /></el-icon>返回词库列表
+        </el-button>
         <span class="dict-name">{{ currentDict.name }}</span>
         <el-tag>{{ currentDict.entry_count }} 条词条</el-tag>
         <div style="margin-left: auto; display: flex; gap: 8px;">
-          <el-button type="primary" size="small" @click="showAddEntry = true">
+          <el-button
+            type="primary"
+            size="small"
+            @click="showAddEntry = true"
+          >
             <el-icon><Plus /></el-icon>添加词条
           </el-button>
-          <el-button size="small" @click="showBatchImport = true">批量导入</el-button>
+          <el-button
+            size="small"
+            @click="showBatchImport = true"
+          >
+            批量导入
+          </el-button>
         </div>
       </div>
 
       <el-card>
-        <el-input v-model="entryKeyword" placeholder="搜索词条..." clearable style="width: 260px; margin-bottom: 12px;" @input="debouncedFetchEntries" />
-        <el-table :data="entries" v-loading="entryLoading" stripe>
-          <el-table-column prop="wrong_word" label="错误词" min-width="150">
+        <el-input
+          v-model="entryKeyword"
+          placeholder="搜索词条..."
+          clearable
+          style="width: 260px; margin-bottom: 12px;"
+          @input="debouncedFetchEntries"
+        />
+        <el-table
+          v-loading="entryLoading"
+          :data="entries"
+          stripe
+        >
+          <el-table-column
+            prop="wrong_word"
+            label="错误词"
+            min-width="150"
+          >
             <template #default="{ row }">
               <span style="color: #f56c6c; font-weight: 500;">{{ row.wrong_word }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="correct_word" label="正确词" min-width="150">
+          <el-table-column
+            prop="correct_word"
+            label="正确词"
+            min-width="150"
+          >
             <template #default="{ row }">
               <span style="color: #67c23a; font-weight: 500;">{{ row.correct_word }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="remark" label="备注" min-width="200" show-overflow-tooltip />
-          <el-table-column label="操作" width="80" align="center">
+          <el-table-column
+            prop="remark"
+            label="备注"
+            min-width="200"
+            show-overflow-tooltip
+          />
+          <el-table-column
+            label="操作"
+            width="80"
+            align="center"
+          >
             <template #default="{ row }">
-              <el-popconfirm title="确定删除？" @confirm="handleDeleteEntry(row.id)">
+              <el-popconfirm
+                title="确定删除？"
+                @confirm="handleDeleteEntry(row.id)"
+              >
                 <template #reference>
-                  <el-button type="danger" link size="small">删除</el-button>
+                  <el-button
+                    type="danger"
+                    link
+                    size="small"
+                  >
+                    删除
+                  </el-button>
                 </template>
               </el-popconfirm>
             </template>
           </el-table-column>
         </el-table>
-        <el-empty v-if="!entryLoading && entries.length === 0" description="暂无词条" />
-        <div v-if="entryHasMore" class="load-more">
-          <el-button size="small" :loading="entryLoading" @click="loadMoreEntries">
+        <el-empty
+          v-if="!entryLoading && entries.length === 0"
+          description="暂无词条"
+        />
+        <div
+          v-if="entryHasMore"
+          class="load-more"
+        >
+          <el-button
+            size="small"
+            :loading="entryLoading"
+            @click="loadMoreEntries"
+          >
             加载更多（已加载 {{ entries.length }} / {{ currentDict.entry_count }} 条）
           </el-button>
         </div>
@@ -97,53 +227,140 @@
     </div>
 
     <!-- 新建/编辑词库弹窗 -->
-    <el-dialog v-model="showCreateDialog" :title="editingDict ? '编辑词库' : '新建词库'" width="420px" @close="resetDictForm">
-      <el-form :model="dictForm" label-width="80px">
-        <el-form-item label="名称" required>
-          <el-input v-model="dictForm.name" placeholder="词库名称" maxlength="100" />
+    <el-dialog
+      v-model="showCreateDialog"
+      :title="editingDict ? '编辑词库' : '新建词库'"
+      width="420px"
+      @close="resetDictForm"
+    >
+      <el-form
+        :model="dictForm"
+        label-width="80px"
+      >
+        <el-form-item
+          label="名称"
+          required
+        >
+          <el-input
+            v-model="dictForm.name"
+            placeholder="词库名称"
+            maxlength="100"
+          />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-model="dictForm.description" type="textarea" placeholder="词库描述（可选）" :rows="3" maxlength="500" />
+          <el-input
+            v-model="dictForm.description"
+            type="textarea"
+            placeholder="词库描述（可选）"
+            :rows="3"
+            maxlength="500"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showCreateDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="handleSaveDict">保存</el-button>
+        <el-button @click="showCreateDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="saving"
+          @click="handleSaveDict"
+        >
+          保存
+        </el-button>
       </template>
     </el-dialog>
 
     <!-- 添加词条弹窗 -->
-    <el-dialog v-model="showAddEntry" title="添加词条" width="420px" @close="resetEntryForm">
-      <el-form :model="entryForm" label-width="80px">
-        <el-form-item label="错误词" required>
-          <el-input v-model="entryForm.wrong_word" placeholder="输入错误词" maxlength="200" />
+    <el-dialog
+      v-model="showAddEntry"
+      title="添加词条"
+      width="420px"
+      @close="resetEntryForm"
+    >
+      <el-form
+        :model="entryForm"
+        label-width="80px"
+      >
+        <el-form-item
+          label="错误词"
+          required
+        >
+          <el-input
+            v-model="entryForm.wrong_word"
+            placeholder="输入错误词"
+            maxlength="200"
+          />
         </el-form-item>
-        <el-form-item label="正确词" required>
-          <el-input v-model="entryForm.correct_word" placeholder="输入正确词" maxlength="200" />
+        <el-form-item
+          label="正确词"
+          required
+        >
+          <el-input
+            v-model="entryForm.correct_word"
+            placeholder="输入正确词"
+            maxlength="200"
+          />
         </el-form-item>
         <el-form-item label="备注">
-          <el-input v-model="entryForm.remark" placeholder="备注（可选）" maxlength="500" />
+          <el-input
+            v-model="entryForm.remark"
+            placeholder="备注（可选）"
+            maxlength="500"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showAddEntry = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="handleAddEntry">添加</el-button>
+        <el-button @click="showAddEntry = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="saving"
+          @click="handleAddEntry"
+        >
+          添加
+        </el-button>
       </template>
     </el-dialog>
 
     <!-- 批量导入弹窗 -->
-    <el-dialog v-model="showBatchImport" title="批量导入词条" width="520px">
+    <el-dialog
+      v-model="showBatchImport"
+      title="批量导入词条"
+      width="520px"
+    >
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
         <span style="color: var(--color-text-secondary); font-size: 13px;">每行一条，格式：错误词,正确词,备注（备注可选）</span>
-        <el-button size="small" text type="primary" @click="handleFillExample">填入示例</el-button>
+        <el-button
+          size="small"
+          text
+          type="primary"
+          @click="handleFillExample"
+        >
+          填入示例
+        </el-button>
       </div>
-      <el-input v-model="batchText" type="textarea" :rows="10" placeholder="错误词1,正确词1,备注1&#10;错误词2,正确词2" />
+      <el-input
+        v-model="batchText"
+        type="textarea"
+        :rows="10"
+        placeholder="错误词1,正确词1,备注1&#10;错误词2,正确词2"
+      />
       <template #footer>
         <el-button @click="handleDownloadTemplate">
           <el-icon><Download /></el-icon>下载 CSV 模板
         </el-button>
-        <el-button @click="showBatchImport = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="handleBatchImport">导入</el-button>
+        <el-button @click="showBatchImport = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="saving"
+          @click="handleBatchImport"
+        >
+          导入
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -251,11 +468,12 @@ async function fetchEntries(reset = true) {
   entryLoading.value = true
   try {
     if (reset) entryPage.value = 1
-    const list = await listEntriesApi(currentDict.value.id, {
+    const res = await listEntriesApi(currentDict.value.id, {
       keyword: entryKeyword.value || undefined,
       page: entryPage.value,
       page_size: ENTRY_PAGE_SIZE,
     })
+    const list = res.items
     entries.value = reset ? list : [...entries.value, ...list]
     entryHasMore.value = list.length === ENTRY_PAGE_SIZE
   } catch {
