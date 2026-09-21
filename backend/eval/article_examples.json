@@ -1,0 +1,32 @@
+[
+  {
+    "id": "article-typo",
+    "text": "工做计划已经发给各组，项目负责人将在下周的例会上收集修改意见。研发组先介绍功能范围和验收标准，再说明各阶段的人员安排。测试组负责检查边界条件，并记录发现的问题及其复现步骤。会议结束后，文档管理员统一整理记录，确保每一项修改都有对应的负责人和完成时间。后续如需调整范围，各组应先确认影响，再更新计划，不以增加任务数量代替质量验收。对于暂时无法确定的事项，会议纪要只记录需要核实的内容，不填写未经确认的数据，也不将讨论中的建议写成已经完成的事实。",
+    "domain": "general",
+    "gold_status": "candidate",
+    "complete_gold": false,
+    "targets": [
+      {"start": 0, "end": 2, "original": "工做", "category": "typo", "expectation": "report", "accepted_suggestions": ["工作"]}
+    ]
+  },
+  {
+    "id": "article-grammar",
+    "text": "不得遗憾地告诉大家，原定本周举行的交流活动需要延期。筹备组已完成场地检查，并与各参与方核对新的时间安排。此前发出的报名确认仍然有效，参与者不必重复登记。对于无法参加延期活动的人员，工作人员会提供取消报名和退费说明。新的活动通知将列出时间、地点和联系方式，避免参与者从不同渠道收到不一致的信息。在时间正式确定之前，工作人员不会要求参与者提前购买交通票据。筹备组将继续收集意见，及时回应大家关心的问题，并在后续通知中说明变更原因及处理方式。",
+    "domain": "general",
+    "gold_status": "candidate",
+    "complete_gold": false,
+    "targets": [
+      {"start": 0, "end": 5, "original": "不得遗憾地", "category": "grammar", "expectation": "report", "accepted_suggestions": ["不得不遗憾地", "很遗憾地"]}
+    ]
+  },
+  {
+    "id": "article-negative",
+    "text": "双向车道封闭是本次临时施工的交通安排，并非对所有道路工程的概括。通告同时列出了绕行路线和开放时间，车辆可依据现场标志通行。施工单位将根据天气情况调整作业计划，并在安排变化时及时发布通知。尚未确定的内容以待核实事项列出，不作为已经发生的事实。审阅人员应区分文内信息是否一致与现实信息是否真实，不凭印象推断道路名称、施工方式或工程日期。若缺少确认事实所需的材料，应提出核查请求，而不是直接把原文改成另一种同样没有证据的说法。",
+    "domain": "general",
+    "gold_status": "candidate",
+    "complete_gold": false,
+    "targets": [
+      {"start": 0, "end": 6, "original": "双向车道封闭", "category": "logic", "expectation": "no_report", "accepted_suggestions": []}
+    ]
+  }
+]
