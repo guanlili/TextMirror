@@ -1188,7 +1188,7 @@ async def test_counter_round_failure_never_reports_supported_or_complete(monkeyp
     assert [item[0] for item in events] == sorted(item[0] for item in events)
 
 
-async def test_native_counter_failure_emits_failed_snapshot_and_never_judges(monkeypatch):
+async def test_native_counter_failure_emits_failed_snapshot_and_never_judges(monkeypatch, public_dns):
     calls, events = [], []
 
     async def search(query, provider, sources):
@@ -1204,7 +1204,7 @@ async def test_native_counter_failure_emits_failed_snapshot_and_never_judges(mon
         events.append((percent, message, current))
 
     monkeypatch.setattr(fc.orchestrator, "search_model", search)
-    monkeypatch.setattr(fc, "_fetch_page", fetch)
+    monkeypatch.setattr(fc.orchestrator, "_fetch_page", fetch)
     provider = Provider(extract())
     with pytest.raises(fc.FactCheckError) as exc:
         await run(provider, search_provider="model", on_progress=progress)
@@ -1212,6 +1212,8 @@ async def test_native_counter_failure_emits_failed_snapshot_and_never_judges(mon
     assert len(calls) == 2 and len(provider.calls) == 1
     assert events[-1][0] < 100 and "失败" in events[-1][1]
     claim = events[-1][2]["claims"][0]
+    assert claim["search_rounds"][0]["pages_fetched"] == 1
+    assert public_dns == []
     assert claim["search_rounds"][1]["status"] == "failed"
     assert not claim["checked"] and claim["verdict"] == "insufficient"
 
