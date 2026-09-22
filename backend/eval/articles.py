@@ -105,12 +105,16 @@ def rescore(samples, report, *, selected=False):
 async def capture_runs(samples, args, on_update):
     import app.main  # noqa: F401
     from app.services import proofread
+    from app.services.proofread import orchestrator
 
     trace = ContextVar('article_evaluation_trace')
-    original_prepare = proofread._gather_preparation
+    original_prepare = orchestrator._gather_preparation
     configurations = {}
     slots = asyncio.Semaphore(args.concurrency)
-    service_dir = Path(proofread.__file__).parent
+    service_dir = Path(proofread.__file__).parent.parent
+    source_files = sorted((service_dir / 'proofread').glob('*.py')) + [
+        service_dir / 'format_rules.py', service_dir / 'consistency.py',
+    ]
     report = {
         'schema_version': 1,
         'created_at': datetime.now(timezone.utc).isoformat(),
@@ -124,8 +128,8 @@ async def capture_runs(samples, args, on_update):
         'timeout_seconds': args.timeout,
         'concurrency': args.concurrency,
         'attempt_policy': 'single_attempt',
-        'source_sha256': {name: hashlib.sha256((service_dir / name).read_bytes()).hexdigest()
-                          for name in ('proofread.py', 'format_rules.py', 'consistency.py')},
+        'source_sha256': {path.relative_to(service_dir).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+                          for path in source_files},
         'planned_runs': [{'sample_id': sample['id'], 'depth': depth, 'round': round_number}
                          for round_number in range(1, args.rounds + 1)
                          for depth in args.depth for sample in samples],
@@ -208,13 +212,13 @@ async def capture_runs(samples, args, on_update):
             on_update(report)
             print(f"{sample['id']} {depth} #{round_number}: {run['status']} {run['elapsed_seconds']}s", flush=True)
 
-    proofread._gather_preparation = prepare
+    orchestrator._gather_preparation = prepare
     try:
         await asyncio.gather(*(one(sample, depth, round_number)
                               for round_number in range(1, args.rounds + 1)
                               for depth in args.depth for sample in samples))
     finally:
-        proofread._gather_preparation = original_prepare
+        orchestrator._gather_preparation = original_prepare
     return report
 
 
