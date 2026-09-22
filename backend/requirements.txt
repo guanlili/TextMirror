@@ -23,7 +23,7 @@ redis[hiredis]==6.4.0
 # 由 python-jose 换为 PyJWT：前者依赖链中的 ecdsa 漏洞无可用修复版本
 PyJWT==2.14.0
 passlib[bcrypt]==1.7.4
-bcrypt==4.0.1
+bcrypt==5.0.0
 cryptography==50.0.1
 
 # Logging
