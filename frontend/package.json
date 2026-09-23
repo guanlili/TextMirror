@@ -11,6 +11,7 @@
     "lint:fix": "eslint . --max-warnings 0 --fix",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22.20.3",
     "@vitejs/plugin-vue": "^6.0.9",
     "@vitest/coverage-v8": "^5.0.1",
