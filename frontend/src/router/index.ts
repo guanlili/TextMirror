@@ -192,10 +192,10 @@ router.beforeEach(async (to) => {
     return { name: 'Login', query: { redirect: to.fullPath } }
   }
 
-  // 已登录不允许访问登录页（除非有飞书回调参数）
+  // 显式退出要先通过离开守卫，再由发起方清除凭证。
   if (to.name === 'Login' && token) {
     const hasFeishuParams = to.query.code || to.query.feishu_token
-    if (!hasFeishuParams) return { path: '/' }
+    if (!hasFeishuParams && to.query.logout !== '1') return { path: '/' }
   }
 
   // 动态引入避免 router → stores/site → api/site → utils/request → router 的循环依赖
