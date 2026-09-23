@@ -28,6 +28,17 @@ async function workspace(page: Page) {
 
 const preview = (page: Page) => page.locator('.review-preview .preview-text')
 
+for (const theme of ['dark', 'light']) {
+  test(`恢复持久化 ${theme} 主题且不触发脚本安全策略错误`, async ({ page, context, baseURL }) => {
+    await context.addInitScript(({ value, origin }) => {
+      if (window.location.origin === origin) localStorage.setItem('tm_theme', value)
+    }, { value: theme, origin: new URL(baseURL!).origin })
+    await page.goto('/proofread/document?review=7')
+    await ready(page)
+    await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /\bdark\b/ : /^(?!.*\bdark\b).*$/)
+  })
+}
+
 async function measureUpdate(button: Locator, expected: string): Promise<number> {
   return button.evaluate((element, text) => new Promise<number>((resolve, reject) => {
     const root = document.querySelector('.review-preview .preview-text')!
@@ -217,7 +228,7 @@ test('管理员模型搜索支持供应商显示名、内部代码、模型与�
   const cards = page.locator('.config-card')
   const names = cards.locator('.name-text')
   const query = page.getByRole('textbox', { name: '搜索模型服务' })
-  const status = page.getByRole('combobox', { name: '模型服务状态' })
+  const status = page.locator('.el-select').filter({ has: page.getByRole('combobox', { name: '模型服务状态' }) })
   const empty = page.getByText('没有匹配的模型服务', { exact: true })
   await expect(names).toHaveText(['生产模型', '停用模型'])
   await expect(cards.first().getByText('阿里百炼 (通义千问)', { exact: true })).toBeVisible()
