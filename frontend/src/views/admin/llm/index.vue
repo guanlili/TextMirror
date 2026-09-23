@@ -550,7 +550,7 @@ const modelQuery = ref('')
 const modelStatus = ref('all')
 const filteredConfigs = computed(() => configList.value.filter(item => {
  const query = modelQuery.value.trim().toLowerCase()
- return (!query || `${item.name} ${item.model} ${item.provider}`.toLowerCase().includes(query)) && (modelStatus.value === 'all' || (modelStatus.value === 'enabled' ? item.is_enabled : !item.is_enabled))
+ return (!query || `${item.name} ${item.model} ${item.provider} ${providerNameMap.value[item.provider] || ''}`.toLowerCase().includes(query)) && (modelStatus.value === 'all' || (modelStatus.value === 'enabled' ? item.is_enabled : !item.is_enabled))
 }))
 const submitting = ref(false)
 const testingId = ref<number | null>(null)

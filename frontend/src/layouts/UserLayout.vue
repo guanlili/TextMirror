@@ -328,9 +328,11 @@ watch(() => route.path, () => {
   loadUsage()
 })
 
-function handleLogout() {
+async function handleLogout() {
+  const failure = await router.push({ name: 'Login', query: { logout: '1' } })
+  if (failure) return
   userStore.logout()
-  router.push('/login')
+  await router.replace({ name: 'Login' })
 }
 </script>
 

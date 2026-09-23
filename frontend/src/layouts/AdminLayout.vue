@@ -139,7 +139,12 @@ function handleEscape(event: { key: string }) { if (event.key === 'Escape') mobi
 watch(() => route.path, () => { mobileOpen.value = false })
 onMounted(() => { checkMobile(); window.addEventListener('resize', checkMobile); window.addEventListener('keydown', handleEscape) })
 onBeforeUnmount(() => { window.removeEventListener('resize', checkMobile); window.removeEventListener('keydown', handleEscape) })
-function handleLogout() { userStore.logout(); void router.push('/login') }
+async function handleLogout() {
+  const failure = await router.push({ name: 'Login', query: { logout: '1' } })
+  if (failure) return
+  userStore.logout()
+  await router.replace({ name: 'Login' })
+}
 </script>
 <style scoped>
 .admin-layout { height:100dvh; background:var(--color-bg); }.admin-sidebar { width:224px; flex:0 0 224px; display:flex; flex-direction:column; background:var(--surface); border-right:1px solid var(--color-border); overflow-y:auto; padding:24px 12px 16px; transition:width .2s, flex-basis .2s; }.admin-sidebar.collapsed { width:72px; flex-basis:72px; }
