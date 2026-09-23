@@ -61,7 +61,7 @@ async def test_dictionary_crud_and_entry_isolation(client):
 
     resp = await client.get(f"/api/v1/dictionary/{dict_id}/entries", headers=headers)
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
+    assert len(resp.json()["items"]) == 1
 
     # 他人访问：404（归属隔离——词库不存在于对方命名空间）
     assert (await client.get(f"/api/v1/dictionary/{dict_id}/entries", headers=other_headers)).status_code == 404
@@ -92,7 +92,7 @@ async def test_dictionary_batch_import_and_dedup_on_reload(client):
         params={"page": 2, "page_size": 20}, headers=headers,
     )
     assert resp.status_code == 200
-    assert len(resp.json()) == 10
+    assert len(resp.json()["items"]) == 10
 
 
 async def test_dictionary_batch_over_limit_rejected(client):
@@ -123,16 +123,16 @@ async def test_whitelist_crud_and_search(client):
     # 重复添加拒绝
     assert (await client.post(
         "/api/v1/whitelist", json={"word": "OSPF"}, headers=headers,
-    )).status_code == 400
+    )).status_code == 409
 
     # 关键词搜索命中
     resp = await client.get("/api/v1/whitelist", params={"keyword": "OSPF"}, headers=headers)
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
+    assert len(resp.json()["items"]) == 1
 
     # 删除后 204，列表空
     assert (await client.delete(f"/api/v1/whitelist/{word_id}", headers=headers)).status_code == 204
-    assert len((await client.get("/api/v1/whitelist", headers=headers)).json()) == 0
+    assert len((await client.get("/api/v1/whitelist", headers=headers)).json()["items"]) == 0
 
 
 async def test_whitelist_batch_dedupes_within_request(client):
@@ -163,4 +163,4 @@ async def test_whitelist_batch_over_limit_rejected(client):
     words = [{"word": f"w{i}"} for i in range(1001)]
     resp = await client.post("/api/v1/whitelist/batch", json=words, headers=headers)
     assert resp.status_code == 400
-    assert "1000" in resp.json()["detail"]
+    assert "1000" in resp.json()["detail"]["message"]

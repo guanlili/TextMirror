@@ -22,8 +22,8 @@ describe('fact-check API contract', () => {
   })
   it('工作台分页和原文请求使用统一鉴权客户端', async () => {
     const signal = new AbortController().signal
-    await factCheckHistoryApi({ offset: 20, limit: 20, q: '报告' }, { signal })
-    expect(request.get).toHaveBeenLastCalledWith('/fact-check/history', { signal, headers: { 'X-Silent-Error': 'true' }, params: { offset: 20, limit: 20, q: '报告' } })
+    await factCheckHistoryApi({ page: 2, page_size: 20, q: '报告' }, { signal })
+    expect(request.get).toHaveBeenLastCalledWith('/fact-check/history', { signal, headers: { 'X-Silent-Error': 'true' }, params: { page: 2, page_size: 20, q: '报告' } })
     await factCheckSourceApi(21, { signal })
     expect(request.get).toHaveBeenLastCalledWith('/fact-check/runs/21/source', expect.objectContaining({ signal }))
   })

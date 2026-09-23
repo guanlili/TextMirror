@@ -705,9 +705,12 @@ async def provider_http(client, monkeypatch):
         return httpx.Response(200, json={"choices": [choice]})
 
     monkeypatch.setattr(proofread, "decrypt_secret", lambda value: "test-key")
+    monkeypatch.setattr("app.services.proofread.provider.decrypt_secret", lambda value: "test-key")
     words = {"sensitive": [], "banned": [], "correction": [], "whitelist": []}
     monkeypatch.setattr(proofread, "_load_all_words", AsyncMock(return_value=(words, words)))
+    monkeypatch.setattr("app.services.proofread.words._load_all_words", AsyncMock(return_value=(words, words)))
     monkeypatch.setattr(proofread, "_get_domain_rules", AsyncMock(return_value="测试规则"))
+    monkeypatch.setattr("app.services.proofread.prompts._get_domain_rules", AsyncMock(return_value="测试规则"))
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://mock.invalid") as http:
         monkeypatch.setattr(proofread.OpenAICompatProvider, "_get_shared_client", lambda self: http)
         yield state
@@ -908,6 +911,8 @@ async def test_real_provider_factory_applies_limits_only_with_evaluation_context
 
     monkeypatch.setattr(proofread, "OpenAICompatProvider", factory)
     monkeypatch.setattr(proofread, "decrypt_secret", lambda value: "test-key")
+    monkeypatch.setattr("app.services.proofread.provider.OpenAICompatProvider", factory)
+    monkeypatch.setattr("app.services.proofread.provider.decrypt_secret", lambda value: "test-key")
     ordinary = await proofread.get_llm_provider(config.id)
     assert ordinary.max_retries == config.max_retries and len(ordinary._endpoints) == 2
     token = service._provider_slots.set(asyncio.Semaphore(4))

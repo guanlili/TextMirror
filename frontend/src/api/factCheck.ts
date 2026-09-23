@@ -149,7 +149,7 @@ export interface FactCheckReview {
 }
 export interface FactCheckRequestOptions { signal?: AbortSignal }
 
-export function factCheckHistoryApi(params: { offset: number; limit: number; status?: string; q?: string }, options: FactCheckRequestOptions = {}): Promise<{ items: FactCheckRun[]; total: number }> {
+export function factCheckHistoryApi(params: { page: number; page_size: number; status?: string; q?: string }, options: FactCheckRequestOptions = {}): Promise<{ items: FactCheckRun[]; total: number }> {
   return request.get('/fact-check/history', { ...config(options), params })
 }
 export function factCheckSourceApi(id: number, options: FactCheckRequestOptions = {}): Promise<{ text: string; source_hash: string }> {

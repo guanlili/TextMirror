@@ -12,12 +12,13 @@ TextMirror 开放 API（对外稳定契约）——核心模块
 import json
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.open_common import ERROR_RESPONSES, _open_billing
+from app.api.v1.open_common import ERROR_RESPONSES, _open_billing, check_sync_idempotency, store_sync_idempotency
 from app.core.database import get_db
 from app.core.dependencies import get_current_user_or_apikey
 from app.core.rate_limit import (
@@ -67,11 +68,17 @@ async def open_proofread(
     http_request: Request,
     db: AsyncSession = Depends(get_db),
     auth: Tuple[User, Optional[ApiKey]] = Depends(get_current_user_or_apikey),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key", description="幂等键：相同键的重试不重复计费，直接返回缓存结果"),
 ):
     """
     开放文本审校端点（复用 Web 端同一校对服务）
     """
     user, api_key = auth
+    owner_scope = f"open:api-key:{api_key.id}" if api_key else f"open:user:{user.id}"
+
+    cached = await check_sync_idempotency(owner_scope, idempotency_key)
+    if cached is not None:
+        return JSONResponse(content=cached)
 
     # 计费顺序：RPM → 用户配额预扣 → 密钥日配额预扣（密钥拒绝时自动退还用户预扣）
     await _open_billing(user, api_key)
@@ -156,7 +163,9 @@ async def open_proofread(
         duration_ms=timer.elapsed_ms(),
     )
 
-    return TextProofreadResponse(**result, record_id=record.id)
+    response = TextProofreadResponse(**result, record_id=record.id)
+    await store_sync_idempotency(owner_scope, idempotency_key, response.model_dump(mode="json"))
+    return response
 
 
 
@@ -212,11 +221,17 @@ async def open_proofread_compare(
     http_request: Request,
     db: AsyncSession = Depends(get_db),
     auth: Tuple[User, Optional[ApiKey]] = Depends(get_current_user_or_apikey),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key", description="幂等键：相同键的重试不重复计费，直接返回缓存结果"),
 ):
     """
     开放多模型对比审校端点（复用 Web 端同一对比逻辑）
     """
     user, api_key = auth
+    owner_scope = f"open:api-key:{api_key.id}" if api_key else f"open:user:{user.id}"
+
+    cached = await check_sync_idempotency(owner_scope, idempotency_key)
+    if cached is not None:
+        return JSONResponse(content=cached)
 
     # 加载模型配置（仅启用的可参与对比）
     cfg_result = await db.execute(
@@ -316,7 +331,9 @@ async def open_proofread_compare(
         duration_ms=timer.elapsed_ms(),
     )
 
-    return OpenCompareResponse(record_id=record_id, results=items, consensus_originals=consensus, only_in=only_in)
+    response = OpenCompareResponse(record_id=record_id, results=items, consensus_originals=consensus, only_in=only_in)
+    await store_sync_idempotency(owner_scope, idempotency_key, response.model_dump(mode="json"))
+    return response
 
 
 

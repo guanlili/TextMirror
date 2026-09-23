@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.exceptions import ForbiddenError, NotFoundError, UnauthorizedError
 from app.core.security import decode_token, hash_api_key, is_token_revoked_by_password_change
 
 # HTTP Bearer Token 提取器
@@ -39,33 +40,19 @@ async def get_current_user(
     从 Authorization Header 提取 Bearer Token 并解析用户信息
     """
     if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="未提供认证凭证",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise UnauthorizedError(message="未提供认证凭证")
 
     token = credentials.credentials
     payload = decode_token(token)
     if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token无效或已过期",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise UnauthorizedError(message="Token无效或已过期")
 
     if payload.get("type") != "access":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token类型无效",
-        )
+        raise UnauthorizedError(code="INVALID_TOKEN_TYPE", message="Token类型无效")
 
     user_id = payload.get("sub")
     if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token载荷无效",
-        )
+        raise UnauthorizedError(code="INVALID_TOKEN_PAYLOAD", message="Token载荷无效")
 
     # 延迟导入避免循环依赖
     from app.models.user import User
@@ -76,23 +63,14 @@ async def get_current_user(
     user = result.scalar_one_or_none()
 
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="用户不存在",
-        )
+        raise NotFoundError(code="USER_NOT_FOUND", message="用户不存在")
 
     if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="用户已被禁用",
-        )
+        raise ForbiddenError(code="ACCOUNT_DISABLED", message="用户已被禁用")
 
     # 密码变更后，变更前签发的 Access Token 立即失效（改密/管理员重置均触发）
     if is_token_revoked_by_password_change(payload, user.password_changed_at):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="密码已变更，请重新登录",
-        )
+        raise UnauthorizedError(code="PASSWORD_CHANGED", message="密码已变更，请重新登录")
 
     role_code = payload.get("role_code")
     if not role_code and user.role is not None:
@@ -154,10 +132,7 @@ def require_permission(permission_code: str):
         user_permissions = {row[0] for row in result.fetchall()}
 
         if permission_code not in user_permissions:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"无权执行此操作，需要权限：{permission_code}",
-            )
+            raise ForbiddenError(code="INSUFFICIENT_PERMISSIONS", message=f"需要权限：{permission_code}")
 
         return current_user
 
@@ -173,11 +148,7 @@ async def get_current_user_or_apikey(
     :return: (user, api_key)，api_key 为 None 表示 JWT 登录态调用
     """
     if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "UNAUTHORIZED", "message": "未提供认证凭证，请携带 API 密钥或登录 Token"},
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise UnauthorizedError(message="未提供认证凭证，请携带 API 密钥或登录 Token")
 
     token = credentials.credentials
 
@@ -191,33 +162,18 @@ async def get_current_user_or_apikey(
         )
         api_key = result.scalar_one_or_none()
         if api_key is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"code": "INVALID_API_KEY", "message": "API 密钥无效"},
-            )
+            raise UnauthorizedError(code="INVALID_API_KEY", message="API 密钥无效")
         if not api_key.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"code": "API_KEY_REVOKED", "message": "API 密钥已被吊销"},
-            )
+            raise ForbiddenError(code="API_KEY_REVOKED", message="API 密钥已被吊销")
         if api_key.expires_at and _as_utc(api_key.expires_at) < _utcnow():
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"code": "API_KEY_EXPIRED", "message": "API 密钥已过期"},
-            )
+            raise ForbiddenError(code="API_KEY_EXPIRED", message="API 密钥已过期")
 
         result = await db.execute(select(User).where(User.id == api_key.user_id))
         user = result.scalar_one_or_none()
         if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"code": "API_KEY_REVOKED", "message": "密钥归属账号已删除"},
-            )
+            raise ForbiddenError(code="API_KEY_REVOKED", message="密钥归属账号已删除")
         if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"code": "ACCOUNT_DISABLED", "message": "密钥归属账号已被禁用"},
-            )
+            raise ForbiddenError(code="ACCOUNT_DISABLED", message="密钥归属账号已被禁用")
 
         # last_used_at 节流更新（距上次记录超过 60s 才写库）
         now = _utcnow()

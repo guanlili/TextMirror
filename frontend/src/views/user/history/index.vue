@@ -5,65 +5,173 @@
         <div class="card-header">
           <span class="card-title">校对历史</span>
           <div class="header-filters">
-            <el-select v-model="filterType" placeholder="全部类型" clearable size="small" style="width: 120px;" @change="fetchList">
-              <el-option label="全部" value="" />
-              <el-option label="AI润色" value="polish" />
-              <el-option label="文本校对" value="text" />
-              <el-option label="文档校对" value="document" />
+            <el-select
+              v-model="filterType"
+              placeholder="全部类型"
+              clearable
+              size="small"
+              style="width: 120px;"
+              @change="fetchList"
+            >
+              <el-option
+                label="全部"
+                value=""
+              />
+              <el-option
+                label="AI润色"
+                value="polish"
+              />
+              <el-option
+                label="文本校对"
+                value="text"
+              />
+              <el-option
+                label="文档校对"
+                value="document"
+              />
             </el-select>
-            <el-select v-model="filterDomain" placeholder="全部领域" clearable size="small" style="width: 120px;" @change="fetchList">
-              <el-option label="全部" value="" />
-              <el-option label="通用" value="general" />
-              <el-option label="公文" value="official" />
-              <el-option label="法律" value="legal" />
+            <el-select
+              v-model="filterDomain"
+              placeholder="全部领域"
+              clearable
+              size="small"
+              style="width: 120px;"
+              @change="fetchList"
+            >
+              <el-option
+                label="全部"
+                value=""
+              />
+              <el-option
+                label="通用"
+                value="general"
+              />
+              <el-option
+                label="公文"
+                value="official"
+              />
+              <el-option
+                label="法律"
+                value="legal"
+              />
             </el-select>
           </div>
         </div>
       </template>
 
-      <el-table :data="items" v-loading="loading" stripe @row-click="openDetail">
-        <el-table-column label="类型" width="100" align="center">
+      <el-table
+        v-loading="loading"
+        :data="items"
+        stripe
+        @row-click="openDetail"
+      >
+        <el-table-column
+          label="类型"
+          width="100"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-tag :type="recordTypeTag(row.type)" size="small">
+            <el-tag
+              :type="recordTypeTag(row.type)"
+              size="small"
+            >
               {{ recordTypeLabel(row.type) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="内容预览" min-width="300">
+        <el-table-column
+          label="内容预览"
+          min-width="300"
+        >
           <template #default="{ row }">
-            <div class="preview-text">{{ row.text_preview }}</div>
-            <div v-if="row.source_filename" class="filename-tag">
-              <el-tag size="small" type="info">{{ row.source_filename }}</el-tag>
+            <div class="preview-text">
+              {{ row.text_preview }}
+            </div>
+            <div
+              v-if="row.source_filename"
+              class="filename-tag"
+            >
+              <el-tag
+                size="small"
+                type="info"
+              >
+                {{ row.source_filename }}
+              </el-tag>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="domain" label="领域" width="80" align="center">
-          <template #default="{ row }">{{ domainLabel(row.domain) }}</template>
-        </el-table-column>
-        <el-table-column label="审阅概况" min-width="240">
+        <el-table-column
+          prop="domain"
+          label="领域"
+          width="80"
+          align="center"
+        >
           <template #default="{ row }">
-            <span v-if="row.type === 'polish'" class="summary-text">—</span>
-            <div v-else class="review-summary">
+            {{ domainLabel(row.domain) }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          label="审阅概况"
+          min-width="240"
+        >
+          <template #default="{ row }">
+            <span
+              v-if="row.type === 'polish'"
+              class="summary-text"
+            >—</span>
+            <div
+              v-else
+              class="review-summary"
+            >
               <div class="summary-tags">
-                <el-tag type="info" size="small">{{ modeLabel(row.mode) }}</el-tag>
-                <el-tag :type="coverageTag(row.coverage_status)" size="small" effect="plain">{{ coverageLabel(row.coverage_status) }}</el-tag>
+                <el-tag
+                  type="info"
+                  size="small"
+                >
+                  {{ modeLabel(row.mode) }}
+                </el-tag>
+                <el-tag
+                  :type="coverageTag(row.coverage_status)"
+                  size="small"
+                  effect="plain"
+                >
+                  {{ coverageLabel(row.coverage_status) }}
+                </el-tag>
               </div>
-              <div class="summary-text">已发现 {{ row.review_summary.total }} 项 · {{ decisionSummary(row as HistoryItem) }}</div>
-              <div v-if="row.review_summary.failed_models" class="summary-warning">{{ row.review_summary.failed_models }} 个模型失败，不能视为零问题</div>
+              <div class="summary-text">
+                已发现 {{ row.review_summary.total }} 项 · {{ decisionSummary(row as HistoryItem) }}
+              </div>
+              <div
+                v-if="row.review_summary.failed_models"
+                class="summary-warning"
+              >
+                {{ row.review_summary.failed_models }} 个模型失败，不能视为零问题
+              </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="Token" width="100" align="center">
+        <el-table-column
+          label="Token"
+          width="100"
+          align="center"
+        >
           <template #default="{ row }">
             <span style="font-size: 12px; color: var(--color-text-secondary);">{{ row.token_usage?.total_tokens || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="时间" width="170">
+        <el-table-column
+          label="时间"
+          width="170"
+        >
           <template #default="{ row }">
             <span style="font-size: 12px; color: var(--color-text-secondary);">{{ formatTime(row.created_at) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" align="center">
+        <el-table-column
+          label="操作"
+          width="160"
+          align="center"
+        >
           <template #default="{ row }">
             <el-button
               v-if="row.type === 'text' || row.type === 'document'"
@@ -71,19 +179,37 @@
               link
               size="small"
               @click.stop="continueReview(row as HistoryItem)"
-            >继续审阅</el-button>
-            <el-popconfirm title="确定删除此记录？" @confirm.stop="handleDelete(row.id)">
+            >
+              继续审阅
+            </el-button>
+            <el-popconfirm
+              title="确定删除此记录？"
+              @confirm.stop="handleDelete(row.id)"
+            >
               <template #reference>
-                <el-button type="danger" link size="small" @click.stop>删除</el-button>
+                <el-button
+                  type="danger"
+                  link
+                  size="small"
+                  @click.stop
+                >
+                  删除
+                </el-button>
               </template>
             </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
 
-      <el-empty v-if="!loading && items.length === 0" description="暂无校对历史" />
+      <el-empty
+        v-if="!loading && items.length === 0"
+        description="暂无校对历史"
+      />
 
-      <div class="pagination-wrap" v-if="total > pageSize">
+      <div
+        v-if="total > pageSize"
+        class="pagination-wrap"
+      >
         <el-pagination
           v-model:current-page="page"
           :page-size="pageSize"
@@ -95,26 +221,61 @@
     </el-card>
 
     <!-- 详情抽屉 -->
-    <el-drawer v-model="showDetail" :title="detail?.type === 'polish' ? '润色详情' : '校对详情'" size="min(600px, 100vw)" direction="rtl">
+    <el-drawer
+      v-model="showDetail"
+      :title="detail?.type === 'polish' ? '润色详情' : '校对详情'"
+      size="min(600px, 100vw)"
+      direction="rtl"
+    >
       <template v-if="detail">
         <div class="detail-meta">
-          <el-tag :type="recordTypeTag(detail.type)">{{ recordTypeLabel(detail.type) }}</el-tag>
-          <el-tag type="info">{{ detail.type === 'polish' ? polishStyleLabel(detail.domain) : domainLabel(detail.domain) }}</el-tag>
+          <el-tag :type="recordTypeTag(detail.type)">
+            {{ recordTypeLabel(detail.type) }}
+          </el-tag>
+          <el-tag type="info">
+            {{ detail.type === 'polish' ? polishStyleLabel(detail.domain) : domainLabel(detail.domain) }}
+          </el-tag>
           <template v-if="detail.type !== 'polish'">
-            <el-tag type="info">{{ modeLabel(detail.mode) }}</el-tag>
-            <el-tag :type="coverageTag(detail.coverage_status)" effect="plain">{{ coverageLabel(detail.coverage_status) }}</el-tag>
+            <el-tag type="info">
+              {{ modeLabel(detail.mode) }}
+            </el-tag>
+            <el-tag
+              :type="coverageTag(detail.coverage_status)"
+              effect="plain"
+            >
+              {{ coverageLabel(detail.coverage_status) }}
+            </el-tag>
           </template>
-          <span v-if="detail.source_filename" style="font-size: 13px; color: var(--color-text-secondary);">{{ detail.source_filename }}</span>
+          <span
+            v-if="detail.source_filename"
+            style="font-size: 13px; color: var(--color-text-secondary);"
+          >{{ detail.source_filename }}</span>
         </div>
 
-        <div v-if="detail.type !== 'polish'" class="review-summary">
-          <div class="summary-text">已发现 {{ detail.review_summary.total }} 项 · {{ decisionSummary(detail) }}</div>
-          <div class="summary-text">按已保存审阅统计；未保存操作不计入。</div>
-          <div v-if="detail.review_summary.failed_models" class="summary-warning">{{ detail.review_summary.failed_models }} 个模型失败，不能视为零问题。</div>
+        <div
+          v-if="detail.type !== 'polish'"
+          class="review-summary"
+        >
+          <div class="summary-text">
+            已发现 {{ detail.review_summary.total }} 项 · {{ decisionSummary(detail) }}
+          </div>
+          <div class="summary-text">
+            按已保存审阅统计；未保存操作不计入。
+          </div>
+          <div
+            v-if="detail.review_summary.failed_models"
+            class="summary-warning"
+          >
+            {{ detail.review_summary.failed_models }} 个模型失败，不能视为零问题。
+          </div>
         </div>
 
-        <el-divider content-position="left">原文</el-divider>
-        <div class="detail-text">{{ detail.original_text }}</div>
+        <el-divider content-position="left">
+          原文
+        </el-divider>
+        <div class="detail-text">
+          {{ detail.original_text }}
+        </div>
 
         <div class="rerun-bar">
           <el-button
@@ -122,7 +283,9 @@
             type="primary"
             size="small"
             @click="continueReview(detail)"
-          >继续审阅</el-button>
+          >
+            继续审阅
+          </el-button>
           <el-button
             v-if="detail.type === 'polish'"
             type="primary"
@@ -143,35 +306,80 @@
 
         <!-- AI润色结果 -->
         <template v-if="detail.type === 'polish'">
-          <el-divider content-position="left">润色结果</el-divider>
+          <el-divider content-position="left">
+            润色结果
+          </el-divider>
           <div class="polish-versions">
-            <div v-for="(ver, i) in (detail.result?.versions || [])" :key="`${ver.label}-${i}`" class="polish-version-item">
+            <div
+              v-for="(ver, i) in (detail.result?.versions || [])"
+              :key="`${ver.label}-${i}`"
+              class="polish-version-item"
+            >
               <div class="version-label">
-                <el-tag size="small">{{ ver.label }}</el-tag>
+                <el-tag size="small">
+                  {{ ver.label }}
+                </el-tag>
               </div>
-              <div class="version-content">{{ ver.content }}</div>
+              <div class="version-content">
+                {{ ver.content }}
+              </div>
             </div>
-            <div v-if="!detail.result?.versions?.length && detail.modified_text" class="detail-text" style="white-space: pre-wrap;">{{ detail.modified_text }}</div>
+            <div
+              v-if="!detail.result?.versions?.length && detail.modified_text"
+              class="detail-text"
+              style="white-space: pre-wrap;"
+            >
+              {{ detail.modified_text }}
+            </div>
           </div>
         </template>
 
         <!-- 校对问题列表 -->
         <template v-else>
-          <el-divider content-position="left">问题列表 ({{ detail.issues?.length || 0 }})</el-divider>
+          <el-divider content-position="left">
+            问题列表 ({{ detail.issues?.length || 0 }})
+          </el-divider>
           <div class="detail-issues">
-            <div v-for="(issue, i) in (detail.issues || [])" :key="`${issue.start ?? ''}-${issue.end ?? ''}-${issue.type}-${i}`" class="issue-item">
+            <div
+              v-for="(issue, i) in (detail.issues || [])"
+              :key="`${issue.start ?? ''}-${issue.end ?? ''}-${issue.type}-${i}`"
+              class="issue-item"
+            >
               <div class="issue-head">
-                <el-tag :type="severityColor(issue.severity)" size="small">{{ typeLabel(issue.type) }}</el-tag>
-                <el-tag :type="severityColor(issue.severity)" size="small" effect="plain">{{ severityLabel(issue.severity) }}</el-tag>
-                <el-tag type="info" size="small" effect="plain">{{ issue._accepted ? '已采纳' : issue._ignored ? '已忽略' : '待处理' }}</el-tag>
+                <el-tag
+                  :type="severityColor(issue.severity)"
+                  size="small"
+                >
+                  {{ typeLabel(issue.type) }}
+                </el-tag>
+                <el-tag
+                  :type="severityColor(issue.severity)"
+                  size="small"
+                  effect="plain"
+                >
+                  {{ severityLabel(issue.severity) }}
+                </el-tag>
+                <el-tag
+                  type="info"
+                  size="small"
+                  effect="plain"
+                >
+                  {{ issue._accepted ? '已采纳' : issue._ignored ? '已忽略' : '待处理' }}
+                </el-tag>
               </div>
               <div class="issue-body">
                 <div><span class="label">原文：</span><span class="text-del">{{ issue.original }}</span></div>
                 <div><span class="label">建议：</span><span class="text-add">{{ issue.suggestion }}</span></div>
-                <div v-if="issue.explanation"><span class="label">说明：</span><span class="text-muted">{{ issue.explanation }}</span></div>
+                <div v-if="issue.explanation">
+                  <span class="label">说明：</span><span class="text-muted">{{ issue.explanation }}</span>
+                </div>
               </div>
             </div>
-            <el-empty v-if="!detail.issues?.length" :description="emptyIssuesLabel(detail.coverage_status)" :image-size="60" />
+            <el-empty
+              v-if="!detail.issues?.length"
+              :description="emptyIssuesLabel(detail.coverage_status)"
+              :image-size="60"
+            />
           </div>
         </template>
       </template>

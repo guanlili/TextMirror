@@ -89,6 +89,7 @@ def install(monkeypatch):
     def setup(provider, *, global_words=None, user_words=None, domain_rules="管理员要求逻辑核对"):
         prep = AsyncMock(return_value=((global_words or {}, user_words or {}, domain_rules), provider))
         monkeypatch.setattr(proofread, "_gather_preparation", prep)
+        monkeypatch.setattr("app.services.proofread.orchestrator._gather_preparation", prep)
         return prep
     return setup
 

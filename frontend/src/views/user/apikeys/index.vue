@@ -4,79 +4,176 @@
       <template #header>
         <div class="card-header">
           <span class="card-title">API 密钥</span>
-          <el-button type="primary" size="small" @click="openCreateDialog">
+          <el-button
+            type="primary"
+            size="small"
+            @click="openCreateDialog"
+          >
             <el-icon><Plus /></el-icon>创建密钥
           </el-button>
         </div>
       </template>
 
-      <el-alert type="info" :closable="false" style="margin-bottom: 14px;">
+      <el-alert
+        type="info"
+        :closable="false"
+        style="margin-bottom: 14px;"
+      >
         <template #title>
           用于将文本审校能力集成到你的工作流中：请求头携带
           <code>Authorization: Bearer tm_...</code>
           调用 <code>POST /api/v1/open/proofread</code>。
-          <el-link type="primary" style="vertical-align: baseline;" @click="openDocs">查看接口文档</el-link>
+          <el-link
+            type="primary"
+            style="vertical-align: baseline;"
+            @click="openDocs"
+          >
+            查看接口文档
+          </el-link>
         </template>
       </el-alert>
 
-      <el-table :data="list" v-loading="loading" stripe>
-        <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip />
-        <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip>
+      <el-table
+        v-loading="loading"
+        :data="list"
+        stripe
+      >
+        <el-table-column
+          prop="name"
+          label="名称"
+          min-width="120"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          prop="remark"
+          label="备注"
+          min-width="120"
+          show-overflow-tooltip
+        >
           <template #default="{ row }">
-            <span v-if="row.remark" style="color: #999;">{{ row.remark }}</span>
-            <span v-else style="color: #ccc;">-</span>
+            <span
+              v-if="row.remark"
+              style="color: #999;"
+            >{{ row.remark }}</span>
+            <span
+              v-else
+              style="color: #ccc;"
+            >-</span>
           </template>
         </el-table-column>
-        <el-table-column label="密钥" min-width="190">
+        <el-table-column
+          label="密钥"
+          min-width="190"
+        >
           <template #default="{ row }">
             <code class="key-display">{{ row.key_display }}</code>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="90" align="center">
+        <el-table-column
+          label="状态"
+          width="90"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
+            <el-tag
+              :type="statusTagType(row.status)"
+              size="small"
+            >
+              {{ statusText(row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="今日调用" width="90" align="center">
+        <el-table-column
+          label="今日调用"
+          width="90"
+          align="center"
+        >
           <template #default="{ row }">
             <span>{{ row.used_today ?? '-' }}<template v-if="row.daily_quota"> / {{ row.daily_quota }}</template></span>
           </template>
         </el-table-column>
-        <el-table-column label="近7日" width="80" align="center">
+        <el-table-column
+          label="近7日"
+          width="80"
+          align="center"
+        >
           <template #default="{ row }">
             <span>{{ row.used_7d ?? 0 }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="过期时间" width="170">
+        <el-table-column
+          label="过期时间"
+          width="170"
+        >
           <template #default="{ row }">
-            <span v-if="row.expires_at" style="font-size: 12px; color: #999;">{{ formatTime(row.expires_at) }}</span>
+            <span
+              v-if="row.expires_at"
+              style="font-size: 12px; color: #999;"
+            >{{ formatTime(row.expires_at) }}</span>
             <span v-else>永不</span>
           </template>
         </el-table-column>
-        <el-table-column label="最近使用" width="170">
+        <el-table-column
+          label="最近使用"
+          width="170"
+        >
           <template #default="{ row }">
-            <span v-if="row.last_used_at" style="font-size: 12px; color: #999;">{{ formatTime(row.last_used_at) }}</span>
-            <span v-else style="color: #999;">未使用</span>
+            <span
+              v-if="row.last_used_at"
+              style="font-size: 12px; color: #999;"
+            >{{ formatTime(row.last_used_at) }}</span>
+            <span
+              v-else
+              style="color: #999;"
+            >未使用</span>
           </template>
         </el-table-column>
-        <el-table-column label="回调" width="90" align="center">
+        <el-table-column
+          label="回调"
+          width="90"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-tooltip v-if="row.webhook_last" :hide-after="0" placement="top">
+            <el-tooltip
+              v-if="row.webhook_last"
+              :hide-after="0"
+              placement="top"
+            >
               <template #content>
                 最近投递：{{ row.webhook_last.event }}
                 （{{ row.webhook_last.status === 'delivered' ? '送达' : '失败' }}
-                <template v-if="row.webhook_last.status_code">HTTP {{ row.webhook_last.status_code }}</template>）
+                <template v-if="row.webhook_last.status_code">
+                  HTTP {{ row.webhook_last.status_code }}
+                </template>）
               </template>
-              <el-tag :type="row.webhook_last.status === 'delivered' ? 'success' : 'danger'" size="small" style="cursor: default;">
+              <el-tag
+                :type="row.webhook_last.status === 'delivered' ? 'success' : 'danger'"
+                size="small"
+                style="cursor: default;"
+              >
                 {{ row.webhook_last.status === 'delivered' ? '已送达' : '投递失败' }}
               </el-tag>
             </el-tooltip>
-            <span v-else style="color: #ccc;">-</span>
+            <span
+              v-else
+              style="color: #ccc;"
+            >-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="130" align="center">
+        <el-table-column
+          label="操作"
+          width="130"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openWebhookDialog(row as ApiKeyItem)">回调</el-button>
+            <el-button
+              link
+              type="primary"
+              size="small"
+              @click="openWebhookDialog(row as ApiKeyItem)"
+            >
+              回调
+            </el-button>
             <el-popconfirm
               v-if="row.status === 'active'"
               title="吊销后立即失效且不可恢复，确定？"
@@ -85,14 +182,26 @@
               @confirm="handleRevoke(row.id)"
             >
               <template #reference>
-                <el-button type="danger" link size="small">吊销</el-button>
+                <el-button
+                  type="danger"
+                  link
+                  size="small"
+                >
+                  吊销
+                </el-button>
               </template>
             </el-popconfirm>
-            <span v-else style="color: #999;">-</span>
+            <span
+              v-else
+              style="color: #999;"
+            >-</span>
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="!loading && list.length === 0" description="暂无密钥，点击右上角创建" />
+      <el-empty
+        v-if="!loading && list.length === 0"
+        description="暂无密钥，点击右上角创建"
+      />
     </el-card>
 
     <!-- 创建弹窗：表单态 ⇄ 密钥展示态（单弹窗，避免双弹窗动画叠加导致遮罩残留） -->
@@ -104,9 +213,16 @@
       @closed="onDialogClosed"
     >
       <template v-if="!createdKey">
-        <el-form :model="form" label-width="90px">
+        <el-form
+          :model="form"
+          label-width="90px"
+        >
           <el-form-item label="名称">
-            <el-input v-model="form.name" placeholder="如：CI 自动审校（可留空自动命名）" maxlength="100" />
+            <el-input
+              v-model="form.name"
+              placeholder="如：CI 自动审校（可留空自动命名）"
+              maxlength="100"
+            />
           </el-form-item>
           <el-form-item label="每日上限">
             <el-input-number
@@ -116,7 +232,9 @@
               placeholder="不填则跟随账号配额"
               style="width: 100%;"
             />
-            <div class="form-tip">留空表示跟随账号的每日配额</div>
+            <div class="form-tip">
+              留空表示跟随账号的每日配额
+            </div>
           </el-form-item>
           <el-form-item label="过期时间">
             <el-date-picker
@@ -127,16 +245,28 @@
             />
           </el-form-item>
           <el-form-item label="备注">
-            <el-input v-model="form.remark" placeholder="如：供 Jenkins 流水线使用（可选）" maxlength="500" />
+            <el-input
+              v-model="form.remark"
+              placeholder="如：供 Jenkins 流水线使用（可选）"
+              maxlength="500"
+            />
           </el-form-item>
         </el-form>
       </template>
       <template v-else>
-        <el-alert type="warning" :closable="false" style="margin-bottom: 14px;"
-          title="完整密钥仅展示这一次，关闭后无法找回，请立即复制保存" />
+        <el-alert
+          type="warning"
+          :closable="false"
+          style="margin-bottom: 14px;"
+          title="完整密钥仅展示这一次，关闭后无法找回，请立即复制保存"
+        />
         <div class="key-box">
           <code>{{ createdKey.key }}</code>
-          <el-button type="primary" size="small" @click="copyKey">
+          <el-button
+            type="primary"
+            size="small"
+            @click="copyKey"
+          >
             {{ copied ? '已复制' : '复制' }}
           </el-button>
         </div>
@@ -146,53 +276,123 @@
       </template>
       <template #footer>
         <template v-if="!createdKey">
-          <el-button @click="showDialog = false">取消</el-button>
-          <el-button type="primary" :loading="saving" @click="handleCreate">创建</el-button>
+          <el-button @click="showDialog = false">
+            取消
+          </el-button>
+          <el-button
+            type="primary"
+            :loading="saving"
+            @click="handleCreate"
+          >
+            创建
+          </el-button>
         </template>
-        <el-button v-else type="primary" @click="showDialog = false">我已保存</el-button>
+        <el-button
+          v-else
+          type="primary"
+          @click="showDialog = false"
+        >
+          我已保存
+        </el-button>
       </template>
     </el-dialog>
     <!-- 回调管理弹窗 -->
-    <el-dialog v-model="showWebhookDialog" title="任务回调（Webhook）" width="520px">
+    <el-dialog
+      v-model="showWebhookDialog"
+      title="任务回调（Webhook）"
+      width="520px"
+    >
       <template v-if="webhookKey">
-        <el-alert type="info" :closable="false" style="margin-bottom: 14px;"
-          title="异步文档审校任务完成/失败时向该地址推送签名通知（POST）。重新保存会轮换签名密钥。" />
+        <el-alert
+          type="info"
+          :closable="false"
+          style="margin-bottom: 14px;"
+          title="异步文档审校任务完成/失败时向该地址推送签名通知（POST）。重新保存会轮换签名密钥。"
+        />
 
-        <el-descriptions :column="1" border size="small" style="margin-bottom: 14px;" v-if="webhookKey.webhook_last">
+        <el-descriptions
+          v-if="webhookKey.webhook_last"
+          :column="1"
+          border
+          size="small"
+          style="margin-bottom: 14px;"
+        >
           <el-descriptions-item label="最近投递">
-            <el-tag :type="webhookKey.webhook_last.status === 'delivered' ? 'success' : 'danger'" size="small">
+            <el-tag
+              :type="webhookKey.webhook_last.status === 'delivered' ? 'success' : 'danger'"
+              size="small"
+            >
               {{ webhookKey.webhook_last.status === 'delivered' ? '送达' : '失败' }}
             </el-tag>
             {{ webhookKey.webhook_last.event }}
-            <template v-if="webhookKey.webhook_last.status_code">（HTTP {{ webhookKey.webhook_last.status_code }}）</template>
+            <template v-if="webhookKey.webhook_last.status_code">
+              （HTTP {{ webhookKey.webhook_last.status_code }}）
+            </template>
             <span style="color: #999; font-size: 12px; margin-left: 6px;">{{ formatTime(webhookKey.webhook_last.timestamp) }}</span>
-            <div v-if="webhookKey.webhook_last.error" style="color: #f56c6c; font-size: 12px;">{{ webhookKey.webhook_last.error }}</div>
+            <div
+              v-if="webhookKey.webhook_last.error"
+              style="color: #f56c6c; font-size: 12px;"
+            >
+              {{ webhookKey.webhook_last.error }}
+            </div>
           </el-descriptions-item>
         </el-descriptions>
 
         <el-form label-width="80px">
           <el-form-item label="回调地址">
-            <el-input v-model="webhookForm.url" placeholder="https://your-server.com/hook" />
-            <div class="form-tip">http/https；不允许内网地址</div>
+            <el-input
+              v-model="webhookForm.url"
+              placeholder="https://your-server.com/hook"
+            />
+            <div class="form-tip">
+              http/https；不允许内网地址
+            </div>
           </el-form-item>
         </el-form>
 
         <template v-if="webhookSecretShown">
-          <el-alert type="warning" :closable="false" style="margin: 12px 0;"
-            title="签名密钥仅展示这一次，请立即复制保存（用于校验 X-TextMirror-Signature 头）" />
+          <el-alert
+            type="warning"
+            :closable="false"
+            style="margin: 12px 0;"
+            title="签名密钥仅展示这一次，请立即复制保存（用于校验 X-TextMirror-Signature 头）"
+          />
           <div class="key-box">
             <code>{{ webhookSecretShown }}</code>
-            <el-button type="primary" size="small" @click="copyWebhookSecret">{{ webhookSecretCopied ? '已复制' : '复制' }}</el-button>
+            <el-button
+              type="primary"
+              size="small"
+              @click="copyWebhookSecret"
+            >
+              {{ webhookSecretCopied ? '已复制' : '复制' }}
+            </el-button>
           </div>
         </template>
       </template>
       <template #footer>
         <template v-if="webhookKey?.webhook_url">
-          <el-button type="danger" link @click="handleClearWebhook">清除回调</el-button>
-          <el-button @click="handleTestWebhook" :loading="testingWebhook">发送测试</el-button>
+          <el-button
+            type="danger"
+            link
+            @click="handleClearWebhook"
+          >
+            清除回调
+          </el-button>
+          <el-button
+            :loading="testingWebhook"
+            @click="handleTestWebhook"
+          >
+            发送测试
+          </el-button>
         </template>
-        <el-button @click="showWebhookDialog = false">关闭</el-button>
-        <el-button type="primary" :loading="savingWebhook" @click="handleSaveWebhook">
+        <el-button @click="showWebhookDialog = false">
+          关闭
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="savingWebhook"
+          @click="handleSaveWebhook"
+        >
           {{ webhookKey?.webhook_url ? '保存（轮换密钥）' : '保存' }}
         </el-button>
       </template>

@@ -429,7 +429,7 @@ async def test_model_drift_fails_before_external_call(client, actors, monkeypatc
 
 async def test_engine_extract_only_never_searches_and_selection_preserves_source(monkeypatch):
     search = AsyncMock(return_value=fc.SearchResult([], {}, 1))
-    monkeypatch.setattr(fc, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
     report = await engine_run(Provider(extract()), extraction_only=True)
     search.assert_not_awaited()
     assert report["claims"] and not report["claims"][0]["checked"]
@@ -443,8 +443,8 @@ async def test_engine_extract_only_never_searches_and_selection_preserves_source
 async def test_deep_engine_has_three_bounded_rounds_and_snapshot(monkeypatch):
     search = AsyncMock(return_value=fc.SearchResult(["https://example.com/news/report"], {}, 1))
     fetch = AsyncMock(side_effect=lambda url, sources: page(url=url))
-    monkeypatch.setattr(fc, "_search", search)
-    monkeypatch.setattr(fc, "_fetch_page", fetch)
+    monkeypatch.setattr(fc.orchestrator, "_search", search)
+    monkeypatch.setattr(fc.orchestrator, "_fetch_page", fetch)
     result = await engine_run(Provider(extract(), decision()), depth="deep", supplemental_urls=["https://example.com/news/original"])
     assert search.await_count == 3 and fetch.await_count == 2
     assert [item["kind"] for item in result["claims"][0]["search_rounds"]] == ["initial", "counter", "followup"]

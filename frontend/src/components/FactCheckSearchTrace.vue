@@ -1,30 +1,134 @@
 <template>
-  <section class="search-trace" aria-label="检索资料与佐证" data-testid="fact-check-search-trace">
-    <header class="trace-heading"><h4>检索资料与佐证</h4><span>SEARCH → EVIDENCE</span></header>
-    <div class="trace-counts"><span>候选链接 <b>{{ traced ? sourceCount : '未记录' }}</b></span><span>已引用材料 <b>{{ claim.evidence.length }}</b></span></div>
-    <p class="trace-note">搜到不等于证实，标题仅为资料线索。请结合逐字正文引文与口径检查判断支持、反驳或仅作背景；重复材料不计作独立佐证。</p>
-    <p class="trace-note">这里只展示检索接口返回的候选资料，不代表模型内部访问的全部网页。</p>
-    <p v-if="!rounds.length" class="trace-notice">此报告未记录检索过程，不能还原当时搜索过哪些资料。</p>
-    <article v-for="(round, roundIndex) in rounds" :key="round.kind" class="search-round" :data-status="round.status">
-      <header class="round-heading"><strong><span class="round-number">{{ String(roundIndex + 1).padStart(2, '0') }}</span>{{ roundLabels[round.kind] }}</strong><span>{{ roundStatusLabels[round.status] }}</span></header>
-      <p class="search-query"><span>搜索词</span>{{ round.query }}</p>
-      <p class="trace-note">本轮取得正文 {{ round.pages_fetched }} 页<template v-if="round.error_codes.length"> · {{ round.error_codes.join('、') }}</template></p>
-      <p v-if="round.sources == null" class="trace-notice">历史记录未保存候选资料列表，无法补还原当时搜索的链接；不表示没有搜索。</p>
-      <p v-else-if="!round.sources.length" class="trace-notice">{{ emptyRoundLabel(round.status) }}</p>
-      <ol v-else class="source-list" :aria-label="`${roundLabels[round.kind]}的资料`">
-        <li v-for="(source, sourceIndex) in round.sources" :key="`${sourceIndex}-${source.url}`" class="source-card" :data-status="source.status" data-testid="fact-check-search-source">
-          <div class="source-heading"><span class="source-number">{{ roundIndex + 1 }}.{{ sourceIndex + 1 }}</span><span class="source-status">{{ sourceStatusLabels[source.status] }}</span><span v-if="source.origin === 'supplemental'" class="source-origin">用户补充</span></div>
-          <h5><a v-if="sourceLink(source)" :href="sourceLink(source)" target="_blank" rel="noopener noreferrer">{{ source.title || '未提供标题' }}</a><span v-else>{{ source.title || '未提供标题' }}</span></h5>
-          <p class="source-url">{{ source.url }}</p>
-          <p class="source-reason">{{ source.reason || defaultReason(source) }}<code v-if="source.error_code"> · {{ source.error_code }}</code></p>
-          <template v-for="evidence in sourceEvidence(source)" :key="evidence.id">
-            <div class="source-relation" :data-stance="evidence.stance"><strong>{{ stanceLabels[evidence.stance] }}</strong><span>引用 {{ evidence.id }}</span></div>
+  <section
+    class="search-trace"
+    aria-label="检索资料与佐证"
+    data-testid="fact-check-search-trace"
+  >
+    <header class="trace-heading">
+      <h4>检索资料与佐证</h4><span>SEARCH → EVIDENCE</span>
+    </header>
+    <div class="trace-counts">
+      <span>候选链接 <b>{{ traced ? sourceCount : '未记录' }}</b></span><span>已引用材料 <b>{{ claim.evidence.length }}</b></span>
+    </div>
+    <p class="trace-note">
+      搜到不等于证实，标题仅为资料线索。请结合逐字正文引文与口径检查判断支持、反驳或仅作背景；重复材料不计作独立佐证。
+    </p>
+    <p class="trace-note">
+      这里只展示检索接口返回的候选资料，不代表模型内部访问的全部网页。
+    </p>
+    <p
+      v-if="!rounds.length"
+      class="trace-notice"
+    >
+      此报告未记录检索过程，不能还原当时搜索过哪些资料。
+    </p>
+    <article
+      v-for="(round, roundIndex) in rounds"
+      :key="round.kind"
+      class="search-round"
+      :data-status="round.status"
+    >
+      <header class="round-heading">
+        <strong><span class="round-number">{{ String(roundIndex + 1).padStart(2, '0') }}</span>{{ roundLabels[round.kind] }}</strong><span>{{ roundStatusLabels[round.status] }}</span>
+      </header>
+      <p class="search-query">
+        <span>搜索词</span>{{ round.query }}
+      </p>
+      <p class="trace-note">
+        本轮取得正文 {{ round.pages_fetched }} 页<template v-if="round.error_codes.length">
+          · {{ round.error_codes.join('、') }}
+        </template>
+      </p>
+      <p
+        v-if="round.sources == null"
+        class="trace-notice"
+      >
+        历史记录未保存候选资料列表，无法补还原当时搜索的链接；不表示没有搜索。
+      </p>
+      <p
+        v-else-if="!round.sources.length"
+        class="trace-notice"
+      >
+        {{ emptyRoundLabel(round.status) }}
+      </p>
+      <ol
+        v-else
+        class="source-list"
+        :aria-label="`${roundLabels[round.kind]}的资料`"
+      >
+        <li
+          v-for="(source, sourceIndex) in round.sources"
+          :key="`${sourceIndex}-${source.url}`"
+          class="source-card"
+          :data-status="source.status"
+          data-testid="fact-check-search-source"
+        >
+          <div class="source-heading">
+            <span class="source-number">{{ roundIndex + 1 }}.{{ sourceIndex + 1 }}</span><span class="source-status">{{ sourceStatusLabels[source.status] }}</span><span
+              v-if="source.origin === 'supplemental'"
+              class="source-origin"
+            >用户补充</span>
+          </div>
+          <h5>
+            <a
+              v-if="sourceLink(source)"
+              :href="sourceLink(source)"
+              target="_blank"
+              rel="noopener noreferrer"
+            >{{ source.title || '未提供标题' }}</a><span v-else>{{ source.title || '未提供标题' }}</span>
+          </h5>
+          <p class="source-url">
+            {{ source.url }}
+          </p>
+          <p class="source-reason">
+            {{ source.reason || defaultReason(source) }}<code v-if="source.error_code"> · {{ source.error_code }}</code>
+          </p>
+          <template
+            v-for="evidence in sourceEvidence(source)"
+            :key="evidence.id"
+          >
+            <div
+              class="source-relation"
+              :data-stance="evidence.stance"
+            >
+              <strong>{{ stanceLabels[evidence.stance] }}</strong><span>引用 {{ evidence.id }}</span>
+            </div>
             <blockquote>{{ evidence.quote }}</blockquote>
-            <details v-if="evidence.checks" class="source-checks"><summary>如何与这条事实对应？</summary><dl><template v-for="(label, key) in checkLabels" :key="key"><dt>{{ label }} · {{ consistencyLabels[evidence.checks[key].status] }}</dt><dd>{{ evidence.checks[key].reason }}</dd></template></dl><p class="trace-note">以上是模型依据正文的语义评估，不是程序独立验证。</p></details>
-            <p v-else class="trace-note">此历史证据未记录逐项检查，不能补造佐证理由。</p>
-            <button type="button" class="evidence-jump" @click="emit('show-evidence', evidence.id)">查看证据详情与原文快照 →</button>
+            <details
+              v-if="evidence.checks"
+              class="source-checks"
+            >
+              <summary>如何与这条事实对应？</summary><dl>
+                <template
+                  v-for="(label, key) in checkLabels"
+                  :key="key"
+                >
+                  <dt>{{ label }} · {{ consistencyLabels[evidence.checks[key].status] }}</dt><dd>{{ evidence.checks[key].reason }}</dd>
+                </template>
+              </dl><p class="trace-note">
+                以上是模型依据正文的语义评估，不是程序独立验证。
+              </p>
+            </details>
+            <p
+              v-else
+              class="trace-note"
+            >
+              此历史证据未记录逐项检查，不能补造佐证理由。
+            </p>
+            <button
+              type="button"
+              class="evidence-jump"
+              @click="emit('show-evidence', evidence.id)"
+            >
+              查看证据详情与原文快照 →
+            </button>
           </template>
-          <p v-if="!sourceEvidence(source).length" class="not-evidence">{{ source.status === 'failed' ? '未读到正文，无法判断支持或反驳。' : source.status === 'pending' ? '尚未形成正文证据。' : '未作为本次结论的引用依据；不等于该资料无关或陈述为假。' }}</p>
+          <p
+            v-if="!sourceEvidence(source).length"
+            class="not-evidence"
+          >
+            {{ source.status === 'failed' ? '未读到正文，无法判断支持或反驳。' : source.status === 'pending' ? '尚未形成正文证据。' : '未作为本次结论的引用依据；不等于该资料无关或陈述为假。' }}
+          </p>
         </li>
       </ol>
     </article>

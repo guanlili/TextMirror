@@ -1,5 +1,7 @@
+import hashlib
 import json
 import stat
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -68,45 +70,54 @@ def test_cli_rescore_is_offline_and_private(tmp_path, monkeypatch):
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
+@pytest.mark.parametrize('depth', ['standard', 'deep'])
 @pytest.mark.parametrize('content,expected_status', [('[]', 'complete'), ('invalid self-check', 'error')])
-async def test_capture_pins_config_and_restores_preparation(monkeypatch, content, expected_status):
+async def test_capture_pins_config_and_restores_preparation(monkeypatch, content, expected_status, depth):
     from app.services import proofread
+    from app.services.proofread import orchestrator
 
     calls = []
     class Provider:
         config_id = 13
         model = 'test-model'
         default_temperature = 0.3
+        timeout = 5
         api_base = 'https://example.com/v1'
-        _endpoints = ['/chat/completions']
+        _endpoints = ['/chat/completions', '/completions']
 
         async def chat(self, *args, **kwargs):
             calls.append(self.max_retries)
-            return SimpleNamespace(finish_reason='stop', content=content)
+            assert self._endpoints == ['/chat/completions']
+            assert self.usage_business == 'evaluation'
+            response_content = content if depth == 'standard' or len(calls) > 1 else '[]'
+            return SimpleNamespace(finish_reason='stop', content=response_content, usage={})
 
         async def close(self):
             pass
 
-    async def prepare(*args):
-        return ({}, {}, 'rules'), Provider()
+    async def prepare(user_id, domain, config_id):
+        assert config_id == 13
+        global_words = {'sensitive': [], 'banned': [], 'correction': [], 'whitelist': []}
+        user_words = {'correction': [], 'whitelist': []}
+        return (global_words, user_words, 'rules'), Provider()
 
-    async def run(text, domain, config_id, depth):
-        _, provider = await proofread._gather_preparation(None, domain, config_id)
-        await provider.chat([])
-        return {'issues': [], 'coverage': {'status': 'complete', 'failed_chunks': []}}
-
-    monkeypatch.setattr(proofread, '_gather_preparation', prepare)
-    monkeypatch.setattr(proofread, 'proofread_text', run)
-    args = SimpleNamespace(config_id=13, rounds=1, depth=['standard'], timeout=5, concurrency=1)
+    monkeypatch.setattr(orchestrator, '_gather_preparation', prepare)
+    args = SimpleNamespace(config_id=13, rounds=1, depth=[depth], timeout=5, concurrency=1)
     report = await articles.capture_runs([sample()], args, lambda result: None)
-    assert calls == [1]
+    assert calls == [1] * (2 if depth == 'deep' else 1)
     assert report['runs'][0]['status'] == expected_status
     assert report['runs'][0]['configuration']['model'] == 'test-model'
-    assert report['runs'][0]['calls'][0]['content'] == content
-    assert report['runs'][0]['calls'][0]['parse_valid'] == (expected_status == 'complete')
+    assert report['runs'][0]['calls'][-1]['content'] == content
+    assert report['runs'][0]['calls'][-1]['parse_valid'] == (expected_status == 'complete')
     assert report['collection_complete'] is True
     assert 'api_key' not in json.dumps(report)
-    assert proofread._gather_preparation is prepare
+    assert orchestrator._gather_preparation is prepare
+    service_dir = Path(proofread.__file__).parent.parent
+    expected_sources = {f'proofread/{path.name}' for path in (service_dir / 'proofread').glob('*.py')}
+    expected_sources.update({'format_rules.py', 'consistency.py'})
+    assert set(report['source_sha256']) == expected_sources
+    for name, digest in report['source_sha256'].items():
+        assert digest == hashlib.sha256((service_dir / name).read_bytes()).hexdigest()
 
 
 def test_rescore_rejects_changed_article_but_allows_annotation_changes():
@@ -179,17 +190,18 @@ async def test_capture_failure_retains_gold_and_logger_state(monkeypatch):
     from loguru import logger
 
     from app.services import proofread
+    from app.services.proofread import orchestrator
 
     async def fail(*args, **kwargs):
         raise TimeoutError
 
     monkeypatch.setattr(proofread, 'proofread_text', fail)
-    original_prepare = proofread._gather_preparation
+    original_prepare = orchestrator._gather_preparation
     args = SimpleNamespace(config_id=13, rounds=1, depth=['standard'], timeout=5, concurrency=1)
     report = await articles.capture_runs([sample()], args, lambda result: None)
     assert report['runs'][0]['status'] == 'timeout'
     assert report['summary']['groups'][0]['report']['total'] == 1
-    assert proofread._gather_preparation is original_prepare
+    assert orchestrator._gather_preparation is original_prepare
     messages = []
     sink = logger.add(lambda message: messages.append(str(message)))
     try:

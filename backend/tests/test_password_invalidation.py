@@ -118,7 +118,7 @@ async def test_password_change_revokes_access_token(client, logged_in):
 
     me = await client.get("/api/v1/auth/me", headers=auth)
     assert me.status_code == 401
-    assert "密码已变更" in me.json()["detail"]
+    assert "密码已变更" in me.json()["detail"]["message"]
 
 
 async def test_password_change_revokes_refresh_token(client, logged_in):
@@ -136,7 +136,7 @@ async def test_password_change_revokes_refresh_token(client, logged_in):
         json={"refresh_token": tokens["refresh_token"]},
     )
     assert refresh.status_code == 401
-    assert "密码已变更" in refresh.json()["detail"]
+    assert "密码已变更" in refresh.json()["detail"]["message"]
 
 
 async def test_new_login_after_change_works(client, logged_in):

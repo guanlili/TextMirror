@@ -155,7 +155,7 @@ async def test_set_webhook_rejects_private_url(client):
             headers={"Authorization": f"Bearer {token}"},
         )
     assert resp.status_code == 400
-    assert "内网" in resp.json()["detail"]
+    assert "内网" in resp.json()["detail"]["message"]
 
 
 async def test_webhook_ownership_and_clear(client):

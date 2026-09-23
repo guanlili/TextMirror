@@ -9,24 +9,33 @@
             :src="siteStore.faviconUrl"
             class="logo-icon logo-img"
             alt="平台图标"
-          />
-          <svg v-else viewBox="0 0 24 24" fill="currentColor" class="logo-icon">
-            <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/>
+          >
+          <svg
+            v-else
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            class="logo-icon"
+          >
+            <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" />
           </svg>
         </div>
-        <h1 class="brand-title">{{ siteStore.platformName }}</h1>
-        <p class="brand-subtitle">{{ siteStore.platformSubtitle }}</p>
+        <h1 class="brand-title">
+          {{ siteStore.platformName }}
+        </h1>
+        <p class="brand-subtitle">
+          {{ siteStore.platformSubtitle }}
+        </p>
         <div class="brand-features">
           <div class="feature-item">
-            <span class="feature-dot"></span>
+            <span class="feature-dot" />
             <span>AI智能文本校对与润色</span>
           </div>
           <div class="feature-item">
-            <span class="feature-dot"></span>
+            <span class="feature-dot" />
             <span>多领域专业化审校能力</span>
           </div>
           <div class="feature-item">
-            <span class="feature-dot"></span>
+            <span class="feature-dot" />
             <span>企业级安全与权限管控</span>
           </div>
         </div>
@@ -46,15 +55,24 @@
             :src="siteStore.faviconUrl"
             class="logo-icon-sm logo-img-sm"
             alt="平台图标"
-          />
-          <svg v-else viewBox="0 0 24 24" fill="currentColor" class="logo-icon-sm">
-            <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/>
+          >
+          <svg
+            v-else
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            class="logo-icon-sm"
+          >
+            <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" />
           </svg>
           <span class="mobile-title">{{ siteStore.platformName }}</span>
         </div>
 
-        <h2 class="login-title">{{ siteStore.loginSlogan || '欢迎登录' }}</h2>
-        <p class="login-desc">请选择登录方式进入系统</p>
+        <h2 class="login-title">
+          {{ siteStore.loginSlogan || '欢迎登录' }}
+        </h2>
+        <p class="login-desc">
+          请选择登录方式进入系统
+        </p>
 
         <!-- 登录方式Tab -->
         <div class="login-tabs">
@@ -78,7 +96,10 @@
         </div>
 
         <!-- 账号密码登录 -->
-        <div v-show="activeTab === 'account'" class="login-form-wrapper">
+        <div
+          v-show="activeTab === 'account'"
+          class="login-form-wrapper"
+        >
           <el-form
             ref="loginFormRef"
             :model="loginForm"
@@ -125,27 +146,62 @@
           </el-form>
 
           <!-- 一键登录（内网演示便利，管理员可在后台关闭） -->
-          <div v-if="siteStore.quickLoginEnabled" class="quick-login-row">
-            <el-button :loading="quickLoading === 'admin'" size="default" class="quick-btn" @click="handleQuickLogin('admin')">
+          <div
+            v-if="siteStore.quickLoginEnabled"
+            class="quick-login-row"
+          >
+            <el-button
+              :loading="quickLoading === 'admin'"
+              size="default"
+              class="quick-btn"
+              @click="handleQuickLogin('admin')"
+            >
               一键管理员
             </el-button>
-            <el-button :loading="quickLoading === 'demo'" size="default" class="quick-btn" @click="handleQuickLogin('demo')">
+            <el-button
+              :loading="quickLoading === 'demo'"
+              size="default"
+              class="quick-btn"
+              @click="handleQuickLogin('demo')"
+            >
               体验账号
             </el-button>
           </div>
         </div>
 
         <!-- 飞书扫码登录 -->
-        <div v-show="activeTab === 'feishu'" class="feishu-login-wrapper">
-          <div v-if="feishuConfig.enabled" class="feishu-qrcode-area">
+        <div
+          v-show="activeTab === 'feishu'"
+          class="feishu-login-wrapper"
+        >
+          <div
+            v-if="feishuConfig.enabled"
+            class="feishu-qrcode-area"
+          >
             <div class="feishu-icon-wrapper">
-              <svg viewBox="0 0 48 48" class="feishu-logo">
-                <rect width="48" height="48" rx="10" fill="#3370FF"/>
-                <path d="M14 14h8v8h-8z M26 14h8v8h-8z M14 26h8v8h-8z M26 26h8v4a4 4 0 01-4 4h-4v-8z" fill="white" opacity="0.95"/>
+              <svg
+                viewBox="0 0 48 48"
+                class="feishu-logo"
+              >
+                <rect
+                  width="48"
+                  height="48"
+                  rx="10"
+                  fill="#3370FF"
+                />
+                <path
+                  d="M14 14h8v8h-8z M26 14h8v8h-8z M14 26h8v8h-8z M26 26h8v4a4 4 0 01-4 4h-4v-8z"
+                  fill="white"
+                  opacity="0.95"
+                />
               </svg>
             </div>
-            <p class="feishu-main-tip">使用飞书账号快速登录</p>
-            <p class="feishu-sub-tip">点击下方按钮跳转到飞书进行授权</p>
+            <p class="feishu-main-tip">
+              使用飞书账号快速登录
+            </p>
+            <p class="feishu-sub-tip">
+              点击下方按钮跳转到飞书进行授权
+            </p>
             <el-button
               type="primary"
               size="large"
@@ -153,27 +209,60 @@
               :loading="feishuLoading"
               @click="handleFeishuLogin"
             >
-              <svg viewBox="0 0 20 20" fill="currentColor" style="width:18px;height:18px;margin-right:8px;">
-                <rect width="20" height="20" rx="4" fill="currentColor" opacity="0.15"/>
-                <path d="M5 5h4v4H5z M11 5h4v4h-4z M5 11h4v4H5z M11 11h4v2a2 2 0 01-2 2h-2v-4z" fill="currentColor"/>
+              <svg
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                style="width:18px;height:18px;margin-right:8px;"
+              >
+                <rect
+                  width="20"
+                  height="20"
+                  rx="4"
+                  fill="currentColor"
+                  opacity="0.15"
+                />
+                <path
+                  d="M5 5h4v4H5z M11 5h4v4h-4z M5 11h4v4H5z M11 11h4v2a2 2 0 01-2 2h-2v-4z"
+                  fill="currentColor"
+                />
               </svg>
               飞书授权登录
             </el-button>
           </div>
-          <div v-else class="feishu-disabled">
-            <el-icon :size="48" color="#ccc"><WarningFilled /></el-icon>
+          <div
+            v-else
+            class="feishu-disabled"
+          >
+            <el-icon
+              :size="48"
+              color="#ccc"
+            >
+              <WarningFilled />
+            </el-icon>
             <p>飞书登录功能暂未启用</p>
-            <p class="feishu-disabled-sub">请联系管理员开启飞书对接配置</p>
+            <p class="feishu-disabled-sub">
+              请联系管理员开启飞书对接配置
+            </p>
           </div>
         </div>
 
         <!-- 底部 -->
-        <div class="login-footer" v-if="siteStore.guestModeEnabled">
-          <el-button text type="info" @click="router.push('/')">
+        <div
+          v-if="siteStore.guestModeEnabled"
+          class="login-footer"
+        >
+          <el-button
+            text
+            type="info"
+            @click="router.push('/')"
+          >
             游客模式体验
           </el-button>
         </div>
-        <div class="login-footer login-footer-text" v-else-if="siteStore.footerText">
+        <div
+          v-else-if="siteStore.footerText"
+          class="login-footer login-footer-text"
+        >
           {{ siteStore.footerText }}
         </div>
       </div>

@@ -4,12 +4,20 @@
       <template #header>
         <div style="display: flex; align-items: center; justify-content: space-between;">
           <span style="font-weight: 600;">文档管理</span>
-          <el-tag type="info" size="small">支持 .doc / .docx / .pdf / .txt，最大 20MB</el-tag>
+          <el-tag
+            type="info"
+            size="small"
+          >
+            支持 .doc / .docx / .pdf / .txt，最大 20MB
+          </el-tag>
         </div>
       </template>
 
       <!-- 搜索栏 -->
-      <div class="toolbar" style="display: flex; gap: 12px; margin-bottom: 16px;">
+      <div
+        class="toolbar"
+        style="display: flex; gap: 12px; margin-bottom: 16px;"
+      >
         <el-input
           v-model="keyword"
           placeholder="搜索文件名或上传者"
@@ -18,51 +26,141 @@
           @keyup.enter="handleSearch"
           @clear="handleSearch"
         >
-          <template #prefix><el-icon><Search /></el-icon></template>
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
         </el-input>
-        <el-select v-model="filterExt" placeholder="文件类型" clearable style="width: 140px;" @change="handleSearch">
-          <el-option label=".doc" value=".doc" />
-          <el-option label=".docx" value=".docx" />
-          <el-option label=".pdf" value=".pdf" />
-          <el-option label=".txt" value=".txt" />
+        <el-select
+          v-model="filterExt"
+          placeholder="文件类型"
+          clearable
+          style="width: 140px;"
+          @change="handleSearch"
+        >
+          <el-option
+            label=".doc"
+            value=".doc"
+          />
+          <el-option
+            label=".docx"
+            value=".docx"
+          />
+          <el-option
+            label=".pdf"
+            value=".pdf"
+          />
+          <el-option
+            label=".txt"
+            value=".txt"
+          />
         </el-select>
-        <el-button type="primary" @click="handleSearch"><el-icon><Search /></el-icon>查询</el-button>
+        <el-button
+          type="primary"
+          @click="handleSearch"
+        >
+          <el-icon><Search /></el-icon>查询
+        </el-button>
       </div>
 
       <!-- 文档列表 -->
-      <el-table :data="documents" stripe v-loading="loading" style="width: 100%;">
-        <el-table-column prop="filename" label="文件名" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="file_ext" label="类型" width="80" align="center">
+      <el-table
+        v-loading="loading"
+        :data="documents"
+        stripe
+        style="width: 100%;"
+      >
+        <el-table-column
+          prop="filename"
+          label="文件名"
+          min-width="220"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          prop="file_ext"
+          label="类型"
+          width="80"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-tag size="small" :type="extTagType(row.file_ext)">{{ row.file_ext }}</el-tag>
+            <el-tag
+              size="small"
+              :type="extTagType(row.file_ext)"
+            >
+              {{ row.file_ext }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="大小" width="100" align="center">
-          <template #default="{ row }">{{ formatSize(row.file_size) }}</template>
-        </el-table-column>
-        <el-table-column label="文本字数" width="100" align="center">
-          <template #default="{ row }">{{ row.text_length.toLocaleString() }}</template>
-        </el-table-column>
-        <el-table-column prop="username" label="上传者" width="120" />
-        <el-table-column prop="created_at" label="上传时间" width="170" />
-        <el-table-column label="操作" width="160" align="center" fixed="right">
+        <el-table-column
+          label="大小"
+          width="100"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleDownload(row as AdminDocumentItem)">
+            {{ formatSize(row.file_size) }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          label="文本字数"
+          width="100"
+          align="center"
+        >
+          <template #default="{ row }">
+            {{ row.text_length.toLocaleString() }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="username"
+          label="上传者"
+          width="120"
+        />
+        <el-table-column
+          prop="created_at"
+          label="上传时间"
+          width="170"
+        />
+        <el-table-column
+          label="操作"
+          width="160"
+          align="center"
+          fixed="right"
+        >
+          <template #default="{ row }">
+            <el-button
+              type="primary"
+              link
+              size="small"
+              @click="handleDownload(row as AdminDocumentItem)"
+            >
               <el-icon><Download /></el-icon>下载
             </el-button>
-            <el-popconfirm title="确定删除该文档？" @confirm="handleDelete(row as AdminDocumentItem)">
+            <el-popconfirm
+              title="确定删除该文档？"
+              @confirm="handleDelete(row as AdminDocumentItem)"
+            >
               <template #reference>
-                <el-button type="danger" link size="small"><el-icon><Delete /></el-icon>删除</el-button>
+                <el-button
+                  type="danger"
+                  link
+                  size="small"
+                >
+                  <el-icon><Delete /></el-icon>删除
+                </el-button>
               </template>
             </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
 
-      <el-empty v-if="!loading && documents.length === 0" description="暂无上传文件记录" />
+      <el-empty
+        v-if="!loading && documents.length === 0"
+        description="暂无上传文件记录"
+      />
 
       <!-- 分页 -->
-      <div v-if="total > 0" style="display: flex; justify-content: flex-end; margin-top: 16px;">
+      <div
+        v-if="total > 0"
+        style="display: flex; justify-content: flex-end; margin-top: 16px;"
+      >
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"

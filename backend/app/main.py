@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from loguru import logger
 
 import app.models.api_key  # noqa
@@ -63,18 +64,31 @@ async def lifespan(app: FastAPI):
     logger.info(f"👋 {settings.APP_NAME} 已安全关闭")
 
 
-def _open_http_exception_handler(request, exc):
-    """开放 API 子应用的 HTTP 异常兜底：非契约格式（如路由 404/405）转为 code+message"""
-    from fastapi.responses import JSONResponse
+def _normalize_http_exception(request: Request, exc) -> "JSONResponse":
+    """HTTP 异常兜底：确保 detail 始终为 {code, message} 字典（内部/开放 API 统一契约）"""
     detail = exc.detail
-    if not (isinstance(detail, dict) and "code" in detail):
-        code = {404: "NOT_FOUND", 405: "METHOD_NOT_ALLOWED"}.get(exc.status_code, "HTTP_ERROR")
-        detail = {"code": code, "message": str(detail) if detail else "请求错误"}
-    return JSONResponse(status_code=exc.status_code, content={"detail": detail}, headers=getattr(exc, "headers", None))
+    if isinstance(detail, dict) and "code" in detail:
+        return JSONResponse(status_code=exc.status_code, content={"detail": detail}, headers=getattr(exc, "headers", None))
+    # _SanitizedValidationRoute 返回 list[dict] 格式的校验错误，保留结构化格式
+    if isinstance(detail, list):
+        return JSONResponse(status_code=exc.status_code, content={"detail": detail}, headers=getattr(exc, "headers", None))
+    code_map = {400: "BAD_REQUEST", 401: "UNAUTHORIZED", 403: "FORBIDDEN", 404: "NOT_FOUND",
+                405: "METHOD_NOT_ALLOWED", 409: "CONFLICT", 422: "VALIDATION_ERROR",
+                429: "RATE_LIMITED", 503: "SERVICE_UNAVAILABLE"}
+    code = code_map.get(exc.status_code, "HTTP_ERROR")
+    message = str(detail) if detail else "请求错误"
+    return JSONResponse(status_code=exc.status_code, content={"detail": {"code": code, "message": message}}, headers=getattr(exc, "headers", None))
 
 
-# 慢请求阈值：超过打 warning（duration_ms 只覆盖 LLM 动作，此前请求级耗时无埋点，
-# 线上「某接口慢」只能翻容器日志逐条看）
+async def _internal_exception_handler(request: Request, exc: Exception):
+    """主应用兜底 500：未捕获异常也保持 code+message 契约"""
+    logger.error(f"[http] 未捕获异常 {request.method} {request.url.path}: {type(exc).__name__}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": {"code": "INTERNAL_ERROR", "message": "服务器内部错误，请稍后重试"}},
+    )
+
+
 SLOW_REQUEST_MS = int(os.getenv("SLOW_REQUEST_MS", "3000"))
 
 
@@ -118,17 +132,23 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type", "X-Silent-Error"],
     )
 
+    # ---- 全局异常处理（内部 API 统一 {code, message} 契约）----
+    from fastapi.exceptions import RequestValidationError
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    from app.api.v1.open_common import internal_exception_handler, validation_exception_handler
+
+    app.add_exception_handler(StarletteHTTPException, _normalize_http_exception)
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(Exception, _internal_exception_handler)
+
     # ---- 路由注册 ----
     app.include_router(api_router, prefix=settings.API_PREFIX)
 
     # ---- 开放 API 子应用 ----
     # 独立命名空间 /api/v1/open/*，只含对外稳定契约端点；
     # 文档页常开（主应用 /docs 仅 DEBUG 开启，内部端点不对外暴露）
-    from fastapi.exceptions import RequestValidationError
-    from starlette.exceptions import HTTPException as StarletteHTTPException
-
     from app.api.v1.open import router as open_router
-    from app.api.v1.open_common import internal_exception_handler, validation_exception_handler
 
     open_api_app = FastAPI(
         title=f"{settings.APP_NAME} Open API",
@@ -153,7 +173,7 @@ def create_app() -> FastAPI:
     open_api_app.include_router(open_router)
     # 422 参数错误与 500 兜底统一为 code+message 契约（其余错误已由端点自行保证）
     open_api_app.add_exception_handler(RequestValidationError, validation_exception_handler)
-    open_api_app.add_exception_handler(StarletteHTTPException, _open_http_exception_handler)
+    open_api_app.add_exception_handler(StarletteHTTPException, _normalize_http_exception)
     open_api_app.add_exception_handler(Exception, internal_exception_handler)
     app.mount(f"{settings.API_PREFIX}/open", open_api_app)
 

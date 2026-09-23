@@ -2,23 +2,57 @@
   <div class="admin-settings">
     <!-- 平台品牌设置 -->
     <el-card>
-      <template #header><span style="font-weight: 600;">平台品牌设置</span></template>
-      <el-form label-width="160px" style="max-width: 680px;" :model="siteConfig">
+      <template #header>
+        <span style="font-weight: 600;">平台品牌设置</span>
+      </template>
+      <el-form
+        label-width="160px"
+        style="max-width: 680px;"
+        :model="siteConfig"
+      >
         <el-form-item label="平台名称">
-          <el-input v-model="siteConfig.platform_name" placeholder="请输入平台名称" maxlength="20" show-word-limit />
-          <div class="form-tip">显示在导航栏、浏览器页签及各页面标题中</div>
+          <el-input
+            v-model="siteConfig.platform_name"
+            placeholder="请输入平台名称"
+            maxlength="20"
+            show-word-limit
+          />
+          <div class="form-tip">
+            显示在导航栏、浏览器页签及各页面标题中
+          </div>
         </el-form-item>
         <el-form-item label="平台副标题">
-          <el-input v-model="siteConfig.platform_subtitle" placeholder="请输入平台副标题" maxlength="30" show-word-limit />
-          <div class="form-tip">显示在导航栏平台名称右侧、浏览器页签中</div>
+          <el-input
+            v-model="siteConfig.platform_subtitle"
+            placeholder="请输入平台副标题"
+            maxlength="30"
+            show-word-limit
+          />
+          <div class="form-tip">
+            显示在导航栏平台名称右侧、浏览器页签中
+          </div>
         </el-form-item>
         <el-form-item label="登录页标语">
-          <el-input v-model="siteConfig.login_slogan" placeholder="留空显示「欢迎登录」" maxlength="20" show-word-limit />
-          <div class="form-tip">登录页主标题，如「XX集团文档审校系统」</div>
+          <el-input
+            v-model="siteConfig.login_slogan"
+            placeholder="留空显示「欢迎登录」"
+            maxlength="20"
+            show-word-limit
+          />
+          <div class="form-tip">
+            登录页主标题，如「XX集团文档审校系统」
+          </div>
         </el-form-item>
         <el-form-item label="页脚文案">
-          <el-input v-model="siteConfig.footer_text" placeholder="如：© 2026 XX科技有限公司 | 京ICP备XXXXXXXX号" maxlength="60" show-word-limit />
-          <div class="form-tip">显示在页面底部（公司名/备案号等），留空不显示</div>
+          <el-input
+            v-model="siteConfig.footer_text"
+            placeholder="如：© 2026 XX科技有限公司 | 京ICP备XXXXXXXX号"
+            maxlength="60"
+            show-word-limit
+          />
+          <div class="form-tip">
+            显示在页面底部（公司名/备案号等），留空不显示
+          </div>
         </el-form-item>
         <el-form-item label="游客模式">
           <el-switch v-model="guestModeOn" />
@@ -31,7 +65,11 @@
         <el-form-item label="浏览器图标">
           <div class="favicon-config">
             <div class="favicon-preview">
-              <img :src="siteConfig.favicon_url" alt="favicon" class="favicon-img" />
+              <img
+                :src="siteConfig.favicon_url"
+                alt="favicon"
+                class="favicon-img"
+              >
             </div>
             <div class="favicon-options">
               <!-- 本地上传 -->
@@ -42,7 +80,10 @@
                   accept=".png,.jpg,.jpeg,.svg,.ico,.webp,.gif"
                   class="icon-upload"
                 >
-                  <el-button size="small" type="primary">
+                  <el-button
+                    size="small"
+                    type="primary"
+                  >
                     <el-icon><Upload /></el-icon>上传本地图标
                   </el-button>
                 </el-upload>
@@ -56,31 +97,50 @@
                   :key="icon.url"
                   class="preset-item"
                   :class="{ 'is-active': siteConfig.favicon_url === icon.url }"
-                  @click="siteConfig.favicon_url = icon.url"
                   :title="icon.name"
+                  @click="siteConfig.favicon_url = icon.url"
                 >
-                  <img :src="icon.url" :alt="icon.name" />
+                  <img
+                    :src="icon.url"
+                    :alt="icon.name"
+                  >
                 </div>
               </div>
             </div>
           </div>
-          <div class="form-tip">上传后可在左侧预览效果，点击“保存品牌设置”后生效</div>
+          <div class="form-tip">
+            上传后可在左侧预览效果，点击“保存品牌设置”后生效
+          </div>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="saving" @click="saveSiteConfig">
+          <el-button
+            type="primary"
+            :loading="saving"
+            @click="saveSiteConfig"
+          >
             保存品牌设置
           </el-button>
-          <el-button @click="resetSiteConfig">重置</el-button>
+          <el-button @click="resetSiteConfig">
+            重置
+          </el-button>
         </el-form-item>
       </el-form>
     </el-card>
 
     <!-- 系统基本设置 -->
     <el-card style="margin-top: 16px;">
-      <template #header><span style="font-weight: 600;">系统基本设置</span></template>
-      <el-form label-width="160px" style="max-width: 600px;">
+      <template #header>
+        <span style="font-weight: 600;">系统基本设置</span>
+      </template>
+      <el-form
+        label-width="160px"
+        style="max-width: 600px;"
+      >
         <el-form-item label="版本号">
-          <el-input v-model="settings.version" disabled />
+          <el-input
+            v-model="settings.version"
+            disabled
+          />
         </el-form-item>
         <el-form-item label="调试模式">
           <el-switch v-model="settings.debug" />
@@ -93,45 +153,90 @@
           <span style="font-size: 12px; color: #999; margin-left: 12px;">开启后仅管理员可访问</span>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="saveBasicSettings">保存设置</el-button>
+          <el-button
+            type="primary"
+            @click="saveBasicSettings"
+          >
+            保存设置
+          </el-button>
         </el-form-item>
       </el-form>
     </el-card>
 
     <!-- 飞书对接配置 -->
     <el-card style="margin-top: 16px;">
-      <template #header><span style="font-weight: 600;">飞书对接配置</span></template>
-      <el-form label-width="160px" style="max-width: 680px;" :model="feishuSettings">
+      <template #header>
+        <span style="font-weight: 600;">飞书对接配置</span>
+      </template>
+      <el-form
+        label-width="160px"
+        style="max-width: 680px;"
+        :model="feishuSettings"
+      >
         <el-form-item label="启用飞书登录">
           <el-switch v-model="feishuSettings.enabled" />
           <span style="font-size: 12px; color: #999; margin-left: 12px;">开启后登录页显示飞书扫码入口</span>
         </el-form-item>
         <el-form-item label="App ID">
-          <el-input v-model="feishuSettings.app_id" placeholder="飞书自建应用的App ID" />
+          <el-input
+            v-model="feishuSettings.app_id"
+            placeholder="飞书自建应用的App ID"
+          />
         </el-form-item>
         <el-form-item label="App Secret">
-          <el-input v-model="feishuSettings.app_secret" type="password" show-password placeholder="飞书自建应用的App Secret" />
+          <el-input
+            v-model="feishuSettings.app_secret"
+            type="password"
+            show-password
+            placeholder="飞书自建应用的App Secret"
+          />
         </el-form-item>
         <el-form-item label="回调地址">
-          <el-input v-model="feishuSettings.redirect_uri" placeholder="https://your-domain.com/login" />
-          <div class="form-tip">飞书应用后台「安全设置」中配置的重定向URL，需与此一致</div>
+          <el-input
+            v-model="feishuSettings.redirect_uri"
+            placeholder="https://your-domain.com/login"
+          />
+          <div class="form-tip">
+            飞书应用后台「安全设置」中配置的重定向URL，需与此一致
+          </div>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="saveFeishuSettings">保存飞书配置</el-button>
+          <el-button
+            type="primary"
+            @click="saveFeishuSettings"
+          >
+            保存飞书配置
+          </el-button>
         </el-form-item>
       </el-form>
     </el-card>
 
     <!-- 用户安全设置 -->
     <el-card style="margin-top: 16px;">
-      <template #header><span style="font-weight: 600;">用户安全设置</span></template>
-      <el-form label-width="160px" style="max-width: 600px;" :model="securitySettings">
+      <template #header>
+        <span style="font-weight: 600;">用户安全设置</span>
+      </template>
+      <el-form
+        label-width="160px"
+        style="max-width: 600px;"
+        :model="securitySettings"
+      >
         <el-form-item label="新用户初始密码">
-          <el-input v-model="securitySettings.default_password" placeholder="admin123" />
-          <div class="form-tip">飞书首次登录自动创建用户时使用此密码，管理员重置密码时也使用此值</div>
+          <el-input
+            v-model="securitySettings.default_password"
+            placeholder="admin123"
+          />
+          <div class="form-tip">
+            飞书首次登录自动创建用户时使用此密码，管理员重置密码时也使用此值
+          </div>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="saveSecuritySettings">保存安全设置</el-button>
+          <el-button
+            type="primary"
+            @click="saveSecuritySettings"
+          >
+            保存安全设置
+          </el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -141,12 +246,25 @@
 
     <!-- 数据维护 -->
     <el-card style="margin-top: 16px;">
-      <template #header><span style="font-weight: 600;">数据维护</span></template>
+      <template #header>
+        <span style="font-weight: 600;">数据维护</span>
+      </template>
       <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-        <el-button @click="handleClean('logs')">清理日志</el-button>
-        <el-button @click="handleClean('temp')">清理临时文件</el-button>
-        <el-button @click="handleClean('cache')">清理缓存</el-button>
-        <el-button type="danger" @click="handleClean('expired')">清理过期放行词</el-button>
+        <el-button @click="handleClean('logs')">
+          清理日志
+        </el-button>
+        <el-button @click="handleClean('temp')">
+          清理临时文件
+        </el-button>
+        <el-button @click="handleClean('cache')">
+          清理缓存
+        </el-button>
+        <el-button
+          type="danger"
+          @click="handleClean('expired')"
+        >
+          清理过期放行词
+        </el-button>
       </div>
     </el-card>
   </div>

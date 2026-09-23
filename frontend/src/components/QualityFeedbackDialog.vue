@@ -1,52 +1,139 @@
 <template>
   <div class="quality-feedback-bar">
     <span>有遗漏或不合适的建议？反馈经人工确认后才会用于评测。</span>
-    <el-button size="small" :disabled="recordId === null" @click="open()">上报漏检</el-button>
+    <el-button
+      size="small"
+      :disabled="recordId === null"
+      @click="open()"
+    >
+      上报漏检
+    </el-button>
     <span v-if="recordId === null">登录后生成的审校记录才能提交反馈。</span>
   </div>
-  <el-dialog v-model="visible" :title="isMissed ? '上报漏检' : '补充忽略原因（可选）'" width="min(680px, 94vw)">
-    <p class="feedback-note">这不会改变审阅决定，也不代表已确认模型错误。请勿在补充说明中填写敏感信息。</p>
-    <el-form label-position="top" :disabled="submitting || !!success" @submit.prevent="submit">
+  <el-dialog
+    v-model="visible"
+    :title="isMissed ? '上报漏检' : '补充忽略原因（可选）'"
+    width="min(680px, 94vw)"
+  >
+    <p class="feedback-note">
+      这不会改变审阅决定，也不代表已确认模型错误。请勿在补充说明中填写敏感信息。
+    </p>
+    <el-form
+      label-position="top"
+      :disabled="submitting || !!success"
+      @submit.prevent="submit"
+    >
       <template v-if="isMissed">
         <el-form-item label="在不可变原文中选中漏检片段">
-          <textarea class="feedback-source" :value="sourceText" readonly aria-label="选择漏检原文" @select="captureSelection" />
+          <textarea
+            class="feedback-source"
+            :value="sourceText"
+            readonly
+            aria-label="选择漏检原文"
+            @select="captureSelection"
+          />
         </el-form-item>
         <el-form-item label="目标片段（也可粘贴原文，最多 500 字）">
-          <el-input v-model="original" placeholder="从上方原文选取，或粘贴需要反馈的片段" />
+          <el-input
+            v-model="original"
+            placeholder="从上方原文选取，或粘贴需要反馈的片段"
+          />
         </el-form-item>
-        <el-form-item v-if="targets.length > 1" label="选择具体位置">
-          <el-select v-model="start" placeholder="同一片段出现多次，请选择位置" class="feedback-full-width">
-            <el-option v-for="target in targets" :key="target.start" :label="target.label" :value="target.start" />
+        <el-form-item
+          v-if="targets.length > 1"
+          label="选择具体位置"
+        >
+          <el-select
+            v-model="start"
+            placeholder="同一片段出现多次，请选择位置"
+            class="feedback-full-width"
+          >
+            <el-option
+              v-for="target in targets"
+              :key="target.start"
+              :label="target.label"
+              :value="target.start"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="问题类型">
           <el-select v-model="issueType">
-            <el-option v-for="type in feedbackIssueTypes" :key="type" :value="type" :label="typeLabel(type)" />
+            <el-option
+              v-for="type in feedbackIssueTypes"
+              :key="type"
+              :value="type"
+              :label="typeLabel(type)"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="建议改为（可选）">
-          <el-input v-model="suggestion" placeholder="不确定时可以留空" />
+          <el-input
+            v-model="suggestion"
+            placeholder="不确定时可以留空"
+          />
         </el-form-item>
       </template>
       <template v-else>
-        <div class="feedback-target"><span>{{ original }}</span><span aria-hidden="true"> → </span><span>{{ suggestion || '无替换建议' }}</span></div>
+        <div class="feedback-target">
+          <span>{{ original }}</span><span aria-hidden="true"> → </span><span>{{ suggestion || '无替换建议' }}</span>
+        </div>
         <el-form-item label="为什么保留原文？">
           <el-radio-group v-model="kind">
-            <el-radio-button v-for="reason in reasons" :key="reason" :value="reason">{{ feedbackKindLabels[reason] }}</el-radio-button>
+            <el-radio-button
+              v-for="reason in reasons"
+              :key="reason"
+              :value="reason"
+            >
+              {{ feedbackKindLabels[reason] }}
+            </el-radio-button>
           </el-radio-group>
         </el-form-item>
       </template>
-      <p v-if="selectedTarget" class="feedback-location">{{ selectedTarget.label }}</p>
+      <p
+        v-if="selectedTarget"
+        class="feedback-location"
+      >
+        {{ selectedTarget.label }}
+      </p>
       <el-form-item label="补充说明（可选）">
-        <el-input v-model="note" type="textarea" :rows="3" placeholder="例如适用语境或判断依据，最多 1000 字" />
+        <el-input
+          v-model="note"
+          type="textarea"
+          :rows="3"
+          placeholder="例如适用语境或判断依据，最多 1000 字"
+        />
       </el-form-item>
-      <el-alert v-if="validationError" type="info" :title="validationError" :closable="false" />
-      <el-alert v-if="error" type="error" :title="error" :closable="false" />
-      <el-alert v-if="success" type="success" :title="success" :closable="false" />
+      <el-alert
+        v-if="validationError"
+        type="info"
+        :title="validationError"
+        :closable="false"
+      />
+      <el-alert
+        v-if="error"
+        type="error"
+        :title="error"
+        :closable="false"
+      />
+      <el-alert
+        v-if="success"
+        type="success"
+        :title="success"
+        :closable="false"
+      />
     </el-form>
     <template #footer>
-      <el-button @click="visible = false">关闭</el-button>
-      <el-button type="primary" :loading="submitting" :disabled="!!validationError || !!success" @click="submit">提交反馈</el-button>
+      <el-button @click="visible = false">
+        关闭
+      </el-button>
+      <el-button
+        type="primary"
+        :loading="submitting"
+        :disabled="!!validationError || !!success"
+        @click="submit"
+      >
+        提交反馈
+      </el-button>
     </template>
   </el-dialog>
 </template>

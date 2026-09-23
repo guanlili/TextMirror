@@ -2,9 +2,21 @@
   <div class="audit-page">
     <!-- 统计卡片 -->
     <div class="stats-row">
-      <el-card v-for="s in statCards" :key="s.label" class="stat-card" shadow="hover">
-        <div class="stat-value" :style="{ color: s.color }">{{ s.value }}</div>
-        <div class="stat-label">{{ s.label }}</div>
+      <el-card
+        v-for="s in statCards"
+        :key="s.label"
+        class="stat-card"
+        shadow="hover"
+      >
+        <div
+          class="stat-value"
+          :style="{ color: s.color }"
+        >
+          {{ s.value }}
+        </div>
+        <div class="stat-label">
+          {{ s.label }}
+        </div>
       </el-card>
     </div>
 
@@ -12,15 +24,56 @@
     <el-card class="filter-card">
       <div class="quick-chips">
         <span class="quick-label">快捷：</span>
-        <el-button size="small" :type="filters.status === 'failed' ? 'primary' : ''" @click="applyQuick({ status: filters.status === 'failed' ? '' : 'failed' })">失败操作</el-button>
-        <el-button size="small" :type="isQuickGroup('login') ? 'primary' : ''" @click="applyQuickGroup('login')">登录动态</el-button>
-        <el-button size="small" :type="isQuickGroup('proofread') ? 'primary' : ''" @click="applyQuickGroup('proofread')">审校行为</el-button>
-        <el-button size="small" :type="isQuickGroup('apikey') ? 'primary' : ''" @click="applyQuickGroup('apikey')">密钥操作</el-button>
-        <el-button size="small" :type="isQuickGroup('admin') ? 'primary' : ''" @click="applyQuickGroup('admin')">管理操作</el-button>
+        <el-button
+          size="small"
+          :type="filters.status === 'failed' ? 'primary' : ''"
+          @click="applyQuick({ status: filters.status === 'failed' ? '' : 'failed' })"
+        >
+          失败操作
+        </el-button>
+        <el-button
+          size="small"
+          :type="isQuickGroup('login') ? 'primary' : ''"
+          @click="applyQuickGroup('login')"
+        >
+          登录动态
+        </el-button>
+        <el-button
+          size="small"
+          :type="isQuickGroup('proofread') ? 'primary' : ''"
+          @click="applyQuickGroup('proofread')"
+        >
+          审校行为
+        </el-button>
+        <el-button
+          size="small"
+          :type="isQuickGroup('apikey') ? 'primary' : ''"
+          @click="applyQuickGroup('apikey')"
+        >
+          密钥操作
+        </el-button>
+        <el-button
+          size="small"
+          :type="isQuickGroup('admin') ? 'primary' : ''"
+          @click="applyQuickGroup('admin')"
+        >
+          管理操作
+        </el-button>
       </div>
-      <el-form :inline="true" :model="filters" class="filter-form" @submit.prevent="handleSearch">
+      <el-form
+        :inline="true"
+        :model="filters"
+        class="filter-form"
+        @submit.prevent="handleSearch"
+      >
         <el-form-item label="操作类型">
-          <el-select v-model="filters.action_type" placeholder="全部" clearable filterable style="width: 170px;">
+          <el-select
+            v-model="filters.action_type"
+            placeholder="全部"
+            clearable
+            filterable
+            style="width: 170px;"
+          >
             <el-option
               v-for="t in actionTypes"
               :key="t.action"
@@ -30,19 +83,46 @@
           </el-select>
         </el-form-item>
         <el-form-item label="用户类型">
-          <el-select v-model="filters.user_type" placeholder="全部" clearable style="width: 120px;">
-            <el-option label="登录用户" value="registered" />
-            <el-option label="游客" value="guest" />
+          <el-select
+            v-model="filters.user_type"
+            placeholder="全部"
+            clearable
+            style="width: 120px;"
+          >
+            <el-option
+              label="登录用户"
+              value="registered"
+            />
+            <el-option
+              label="游客"
+              value="guest"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="filters.status" placeholder="全部" clearable style="width: 100px;">
-            <el-option label="成功" value="success" />
-            <el-option label="失败" value="failed" />
+          <el-select
+            v-model="filters.status"
+            placeholder="全部"
+            clearable
+            style="width: 100px;"
+          >
+            <el-option
+              label="成功"
+              value="success"
+            />
+            <el-option
+              label="失败"
+              value="failed"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="IP">
-          <el-input v-model="filters.ip" placeholder="IP地址" clearable style="width: 140px;" />
+          <el-input
+            v-model="filters.ip"
+            placeholder="IP地址"
+            clearable
+            style="width: 140px;"
+          />
         </el-form-item>
         <el-form-item label="时间">
           <el-date-picker
@@ -56,79 +136,181 @@
           />
         </el-form-item>
         <el-form-item label="关键词">
-          <el-input v-model="filters.keyword" placeholder="用户名/工号/内容" clearable style="width: 160px;" />
+          <el-input
+            v-model="filters.keyword"
+            placeholder="用户名/工号/内容"
+            clearable
+            style="width: 160px;"
+          />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="handleSearch">查询</el-button>
-          <el-button @click="resetFilters">重置</el-button>
+          <el-button
+            type="primary"
+            @click="handleSearch"
+          >
+            查询
+          </el-button>
+          <el-button @click="resetFilters">
+            重置
+          </el-button>
         </el-form-item>
       </el-form>
     </el-card>
 
     <!-- 日志列表 -->
     <el-card>
-      <el-table :data="logs" v-loading="loading" stripe style="width: 100%;">
-        <el-table-column label="时间" width="170" prop="created_at">
+      <el-table
+        v-loading="loading"
+        :data="logs"
+        stripe
+        style="width: 100%;"
+      >
+        <el-table-column
+          label="时间"
+          width="170"
+          prop="created_at"
+        >
           <template #default="{ row }">
             {{ formatTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作类型" width="120" align="center">
+        <el-table-column
+          label="操作类型"
+          width="120"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-tag :type="actionTagType(row.action_type)" size="small">
+            <el-tag
+              :type="actionTagType(row.action_type)"
+              size="small"
+            >
               {{ actionLabel(row.action_type) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="用户" width="140">
+        <el-table-column
+          label="用户"
+          width="140"
+        >
           <template #default="{ row }">
             <template v-if="row.is_guest">
-              <el-tag type="info" size="small">游客</el-tag>
+              <el-tag
+                type="info"
+                size="small"
+              >
+                游客
+              </el-tag>
             </template>
             <template v-else>
               <span style="font-weight: 500;">{{ row.username }}</span>
-              <div style="font-size: 11px; color: #999;">{{ row.employee_id }}</div>
+              <div style="font-size: 11px; color: #999;">
+                {{ row.employee_id }}
+              </div>
             </template>
           </template>
         </el-table-column>
-        <el-table-column label="IP地址" width="130" prop="client_ip" />
-        <el-table-column label="设备" width="80" align="center">
+        <el-table-column
+          label="IP地址"
+          width="130"
+          prop="client_ip"
+        />
+        <el-table-column
+          label="设备"
+          width="80"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-icon v-if="row.device_type === 'mobile'" title="手机"><Iphone /></el-icon>
-            <el-icon v-else-if="row.device_type === 'tablet'" title="平板"><Iphone /></el-icon>
-            <el-icon v-else title="桌面"><Monitor /></el-icon>
+            <el-icon
+              v-if="row.device_type === 'mobile'"
+              title="手机"
+            >
+              <Iphone />
+            </el-icon>
+            <el-icon
+              v-else-if="row.device_type === 'tablet'"
+              title="平板"
+            >
+              <Iphone />
+            </el-icon>
+            <el-icon
+              v-else
+              title="桌面"
+            >
+              <Monitor />
+            </el-icon>
           </template>
         </el-table-column>
-        <el-table-column label="内容摘要" min-width="200">
+        <el-table-column
+          label="内容摘要"
+          min-width="200"
+        >
           <template #default="{ row }">
-            <div v-if="row.input_preview" class="content-preview">
+            <div
+              v-if="row.input_preview"
+              class="content-preview"
+            >
               <span class="preview-label">输入:</span> {{ row.input_preview }}
             </div>
-            <div v-if="row.output_preview" class="content-preview">
+            <div
+              v-if="row.output_preview"
+              class="content-preview"
+            >
               <span class="preview-label">输出:</span> {{ row.output_preview }}
             </div>
-            <div v-if="row.file_name" class="content-preview">
+            <div
+              v-if="row.file_name"
+              class="content-preview"
+            >
               <el-icon><Document /></el-icon> {{ row.file_name }}
             </div>
-            <span v-if="!row.input_preview && !row.output_preview && !row.file_name" style="color: #999;">-</span>
+            <span
+              v-if="!row.input_preview && !row.output_preview && !row.file_name"
+              style="color: #999;"
+            >-</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="80" align="center">
+        <el-table-column
+          label="状态"
+          width="80"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-tag :type="row.status === 'success' ? 'success' : 'danger'" size="small">
+            <el-tag
+              :type="row.status === 'success' ? 'success' : 'danger'"
+              size="small"
+            >
               {{ row.status === 'success' ? '成功' : '失败' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="耗时" width="80" align="center">
+        <el-table-column
+          label="耗时"
+          width="80"
+          align="center"
+        >
           <template #default="{ row }">
             <span v-if="row.duration_ms != null">{{ row.duration_ms }}ms</span>
-            <span v-else style="color: #999;">-</span>
+            <span
+              v-else
+              style="color: #999;"
+            >-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="80" align="center" fixed="right">
+        <el-table-column
+          label="操作"
+          width="80"
+          align="center"
+          fixed="right"
+        >
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="showDetail(row.id)">详情</el-button>
+            <el-button
+              type="primary"
+              link
+              size="small"
+              @click="showDetail(row.id)"
+            >
+              详情
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -147,38 +329,83 @@
     </el-card>
 
     <!-- 详情抽屉 -->
-    <el-drawer v-model="detailVisible" title="日志详情" size="560px" destroy-on-close>
-      <div v-if="detail" class="detail-content">
-        <el-descriptions :column="1" border size="small">
+    <el-drawer
+      v-model="detailVisible"
+      title="日志详情"
+      size="560px"
+      destroy-on-close
+    >
+      <div
+        v-if="detail"
+        class="detail-content"
+      >
+        <el-descriptions
+          :column="1"
+          border
+          size="small"
+        >
           <el-descriptions-item label="操作类型">
-            <el-tag :type="actionTagType(detail.action_type)" size="small">{{ actionLabel(detail.action_type) }}</el-tag>
+            <el-tag
+              :type="actionTagType(detail.action_type)"
+              size="small"
+            >
+              {{ actionLabel(detail.action_type) }}
+            </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="操作时间">{{ formatTime(detail.created_at) }}</el-descriptions-item>
+          <el-descriptions-item label="操作时间">
+            {{ formatTime(detail.created_at) }}
+          </el-descriptions-item>
           <el-descriptions-item label="用户">
-            <template v-if="detail.is_guest">游客</template>
-            <template v-else>{{ detail.username }} ({{ detail.employee_id }})</template>
+            <template v-if="detail.is_guest">
+              游客
+            </template>
+            <template v-else>
+              {{ detail.username }} ({{ detail.employee_id }})
+            </template>
           </el-descriptions-item>
-          <el-descriptions-item label="IP地址">{{ detail.client_ip }}</el-descriptions-item>
-          <el-descriptions-item label="设备类型">{{ deviceLabel(detail.device_type) }}</el-descriptions-item>
+          <el-descriptions-item label="IP地址">
+            {{ detail.client_ip }}
+          </el-descriptions-item>
+          <el-descriptions-item label="设备类型">
+            {{ deviceLabel(detail.device_type) }}
+          </el-descriptions-item>
           <el-descriptions-item label="User-Agent">
             <span style="font-size: 11px; word-break: break-all;">{{ detail.user_agent || '-' }}</span>
           </el-descriptions-item>
           <el-descriptions-item label="操作状态">
-            <el-tag :type="detail.status === 'success' ? 'success' : 'danger'" size="small">
+            <el-tag
+              :type="detail.status === 'success' ? 'success' : 'danger'"
+              size="small"
+            >
               {{ detail.status === 'success' ? '成功' : '失败' }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item v-if="detail.duration_ms != null" label="耗时">{{ detail.duration_ms }}ms</el-descriptions-item>
-          <el-descriptions-item v-if="detail.error_message" label="错误信息">
+          <el-descriptions-item
+            v-if="detail.duration_ms != null"
+            label="耗时"
+          >
+            {{ detail.duration_ms }}ms
+          </el-descriptions-item>
+          <el-descriptions-item
+            v-if="detail.error_message"
+            label="错误信息"
+          >
             <span style="color: #f56c6c;">{{ detail.error_message }}</span>
           </el-descriptions-item>
         </el-descriptions>
 
         <!-- 额外参数 -->
-        <div v-if="detail.extra_params" class="detail-section">
+        <div
+          v-if="detail.extra_params"
+          class="detail-section"
+        >
           <h4>操作参数</h4>
           <div class="params-grid">
-            <div v-for="(val, key) in detail.extra_params" :key="key" class="param-item">
+            <div
+              v-for="(val, key) in detail.extra_params"
+              :key="key"
+              class="param-item"
+            >
               <span class="param-key">{{ key }}:</span>
               <span class="param-val">{{ Array.isArray(val) ? val.join(', ') : val }}</span>
             </div>
@@ -186,35 +413,74 @@
         </div>
 
         <!-- 文件信息 -->
-        <div v-if="detail.file_name" class="detail-section">
+        <div
+          v-if="detail.file_name"
+          class="detail-section"
+        >
           <h4>文件信息</h4>
-          <el-descriptions :column="1" border size="small">
-            <el-descriptions-item label="文件名">{{ detail.file_name }}</el-descriptions-item>
-            <el-descriptions-item v-if="detail.file_size" label="文件大小">{{ formatSize(detail.file_size) }}</el-descriptions-item>
-            <el-descriptions-item v-if="detail.file_id" label="文件ID">{{ detail.file_id }}</el-descriptions-item>
-            <el-descriptions-item v-if="detail.file_path" label="服务器路径">
+          <el-descriptions
+            :column="1"
+            border
+            size="small"
+          >
+            <el-descriptions-item label="文件名">
+              {{ detail.file_name }}
+            </el-descriptions-item>
+            <el-descriptions-item
+              v-if="detail.file_size"
+              label="文件大小"
+            >
+              {{ formatSize(detail.file_size) }}
+            </el-descriptions-item>
+            <el-descriptions-item
+              v-if="detail.file_id"
+              label="文件ID"
+            >
+              {{ detail.file_id }}
+            </el-descriptions-item>
+            <el-descriptions-item
+              v-if="detail.file_path"
+              label="服务器路径"
+            >
               <span style="font-size: 11px; word-break: break-all;">{{ detail.file_path }}</span>
             </el-descriptions-item>
           </el-descriptions>
         </div>
 
         <!-- 输入内容 -->
-        <div v-if="detail.input_text" class="detail-section">
+        <div
+          v-if="detail.input_text"
+          class="detail-section"
+        >
           <h4>输入内容 <span class="text-count">({{ detail.input_length }}字)</span></h4>
-          <div class="text-block">{{ detail.input_text }}</div>
+          <div class="text-block">
+            {{ detail.input_text }}
+          </div>
         </div>
 
         <!-- 输出内容 -->
-        <div v-if="detail.output_text" class="detail-section">
+        <div
+          v-if="detail.output_text"
+          class="detail-section"
+        >
           <h4>输出结果 <span class="text-count">({{ detail.output_length }}字)</span></h4>
-          <div class="text-block">{{ detail.output_text }}</div>
+          <div class="text-block">
+            {{ detail.output_text }}
+          </div>
         </div>
 
         <!-- Token 用量 -->
-        <div v-if="detail.token_usage" class="detail-section">
+        <div
+          v-if="detail.token_usage"
+          class="detail-section"
+        >
           <h4>Token 消耗</h4>
           <div class="params-grid">
-            <div v-for="(val, key) in detail.token_usage" :key="key" class="param-item">
+            <div
+              v-for="(val, key) in detail.token_usage"
+              :key="key"
+              class="param-item"
+            >
               <span class="param-key">{{ key }}:</span>
               <span class="param-val">{{ val }}</span>
             </div>

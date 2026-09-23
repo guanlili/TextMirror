@@ -83,7 +83,7 @@ describe('CollaborationProgress', () => {
   it('text page wires report outside result branch, excludes normal retry, and retains report on version restore', () => {
     expect(textPage.indexOf('<CollaborationProgress')).toBeLessThan(textPage.indexOf('v-if="!showResult"'))
     expect(textPage).toContain('v-if="!compareResult && !collaboration"')
-    expect(textPage).toContain('v-if="proofreadMode === \'single\'" class="setting-row"')
+    expect(textPage).toMatch(/v-if="proofreadMode === 'single'"\s+class="setting-row"/)
     expect(textPage).toContain("collaboration.value = review.collaboration ?? null")
     const restore = textPage.slice(textPage.indexOf('function restoreVersion('), textPage.indexOf('async function confirmLeave('))
     expect(restore).not.toContain('collaboration.value =')

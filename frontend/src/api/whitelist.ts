@@ -12,8 +12,15 @@ export interface WhitelistItem {
   created_at?: string
 }
 
+export interface PaginatedResponse<T> {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+}
+
 /** 获取放行词列表 */
-export function listWhitelistApi(params?: { keyword?: string; page?: number; page_size?: number }): Promise<WhitelistItem[]> {
+export function listWhitelistApi(params?: { keyword?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<WhitelistItem>> {
   return request.get('/whitelist', { params })
 }
 

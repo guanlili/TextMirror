@@ -4,12 +4,12 @@ TextMirror 开放 API——AI 润色模块（同步三版本 + SSE 流式）
 import json
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi.responses import JSONResponse, StreamingResponse
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.open_common import ERROR_RESPONSES, _open_billing
+from app.api.v1.open_common import ERROR_RESPONSES, _open_billing, check_sync_idempotency, store_sync_idempotency
 from app.core.database import async_session_factory, get_db
 from app.core.dependencies import get_current_user_or_apikey
 from app.core.rate_limit import refund_api_key_daily_usage, refund_user_daily_quota
@@ -84,9 +84,16 @@ async def open_polish(
     http_request: Request,
     db: AsyncSession = Depends(get_db),
     auth: Tuple[User, Optional[ApiKey]] = Depends(get_current_user_or_apikey),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key", description="幂等键：相同键的重试不重复计费，直接返回缓存结果"),
 ):
     """开放 AI 润色端点（复用 Web 端同一润色服务，三版本并发）"""
     user, api_key = auth
+    owner_scope = f"open:api-key:{api_key.id}" if api_key else f"open:user:{user.id}"
+
+    cached = await check_sync_idempotency(owner_scope, idempotency_key)
+    if cached is not None:
+        return JSONResponse(content=cached)
+
     # 计费顺序与审校端点一致：RPM → 用户配额预扣 → 密钥日配额预扣
     await _open_billing(user, api_key)
 
@@ -161,12 +168,14 @@ async def open_polish(
         duration_ms=timer.elapsed_ms(),
     )
 
-    return OpenPolishResponse(
+    response = OpenPolishResponse(
         versions=versions,
         style=result["style"],
         style_name=result["style_name"],
         usage=result["usage"],
     )
+    await store_sync_idempotency(owner_scope, idempotency_key, response.model_dump(mode="json"))
+    return response
 
 
 @router.post(

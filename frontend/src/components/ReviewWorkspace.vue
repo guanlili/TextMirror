@@ -1,66 +1,244 @@
 <template>
-  <section class="review-workspace" aria-label="审阅草稿与版本">
+  <section
+    class="review-workspace"
+    aria-label="审阅草稿与版本"
+  >
     <div class="workspace-toolbar">
       <div class="workspace-heading">
         <strong>审阅工作区</strong>
-        <el-tag :type="dirty ? 'warning' : 'success'" size="small">{{ statusText }}</el-tag>
+        <el-tag
+          :type="dirty ? 'warning' : 'success'"
+          size="small"
+        >
+          {{ statusText }}
+        </el-tag>
         <span class="workspace-meta">{{ domain }} · {{ collaboration ? '协作审校' : depth }}</span>
       </div>
       <div class="workspace-actions">
-        <el-button :disabled="!canSave" :loading="busy === 'draft'" @click="save('draft')">保存草稿</el-button>
-        <el-input v-model="versionLabel" class="version-label" placeholder="版本名称（可不填）" maxlength="80" :disabled="!!busy" aria-label="版本名称（可不填）" />
-        <el-button :disabled="!canSave || versionLimitReached" :loading="busy === 'version'" @click="save('version')">保存版本</el-button>
-        <el-button @click="drawerOpen = true">版本对比</el-button>
-        <el-button v-if="busy" text @click="cancelRequest">取消请求</el-button>
+        <el-button
+          :disabled="!canSave"
+          :loading="busy === 'draft'"
+          @click="save('draft')"
+        >
+          保存草稿
+        </el-button>
+        <el-input
+          v-model="versionLabel"
+          class="version-label"
+          placeholder="版本名称（可不填）"
+          maxlength="80"
+          :disabled="!!busy"
+          aria-label="版本名称（可不填）"
+        />
+        <el-button
+          :disabled="!canSave || versionLimitReached"
+          :loading="busy === 'version'"
+          @click="save('version')"
+        >
+          保存版本
+        </el-button>
+        <el-button @click="drawerOpen = true">
+          版本对比
+        </el-button>
+        <el-button
+          v-if="busy"
+          text
+          @click="cancelRequest"
+        >
+          取消请求
+        </el-button>
       </div>
     </div>
 
-    <p v-if="recordId === null" class="workspace-note">需登录保存草稿和版本；当前内容仅保留在本次页面内存中，不会写入本地存储。</p>
-    <p v-else class="workspace-note">草稿手动保存，版本最多 20 个（当前 {{ versions.length }} 个）。恢复版本仅更新当前草稿，需另行保存。</p>
-    <p v-if="versionLimitReached" class="workspace-note">已达到 20 个版本上限；仍可保存草稿。</p>
-    <p v-if="compare" class="workspace-note">多模型审阅 · {{ compare.results.length }} 个模型 · {{ compareCoverageLabel(compare) }}；各模型结果和未审范围随草稿、版本一起保存。</p>
-    <p v-else-if="collaboration" class="workspace-note">协作报告来自原始结果，只读且不随版本恢复改变。{{ collaboration.status === 'complete' ? '流程已完成，仍需人工复核。' : '流程未完整完成；保存或恢复版本不代表协作已完成。' }}</p>
-    <p v-else-if="!coverage" class="workspace-note">本记录未保存审校覆盖范围，无法确认是否检查全文。</p>
-    <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
-    <el-alert v-if="needsLoad" title="已有保存草稿，继续审阅或以当前内容替换前需先明确加载。当前本地内容尚未被覆盖。" type="warning" :closable="false" show-icon />
-    <div v-if="recordId !== null && (needsLoad || mustRefresh || conflict)" class="recovery-actions">
-      <el-button v-if="needsLoad && !mustRefresh" :disabled="!!busy" @click="loadSavedDraft">加载已保存草稿</el-button>
-      <el-button :disabled="!!busy" @click="loadRemote">重新读取已保存草稿</el-button>
+    <p
+      v-if="recordId === null"
+      class="workspace-note"
+    >
+      需登录保存草稿和版本；当前内容仅保留在本次页面内存中，不会写入本地存储。
+    </p>
+    <p
+      v-else
+      class="workspace-note"
+    >
+      草稿手动保存，版本最多 20 个（当前 {{ versions.length }} 个）。恢复版本仅更新当前草稿，需另行保存。
+    </p>
+    <p
+      v-if="versionLimitReached"
+      class="workspace-note"
+    >
+      已达到 20 个版本上限；仍可保存草稿。
+    </p>
+    <p
+      v-if="compare"
+      class="workspace-note"
+    >
+      多模型审阅 · {{ compare.results.length }} 个模型 · {{ compareCoverageLabel(compare) }}；各模型结果和未审范围随草稿、版本一起保存。
+    </p>
+    <p
+      v-else-if="collaboration"
+      class="workspace-note"
+    >
+      协作报告来自原始结果，只读且不随版本恢复改变。{{ collaboration.status === 'complete' ? '流程已完成，仍需人工复核。' : '流程未完整完成；保存或恢复版本不代表协作已完成。' }}
+    </p>
+    <p
+      v-else-if="!coverage"
+      class="workspace-note"
+    >
+      本记录未保存审校覆盖范围，无法确认是否检查全文。
+    </p>
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      :closable="false"
+      show-icon
+    />
+    <el-alert
+      v-if="needsLoad"
+      title="已有保存草稿，继续审阅或以当前内容替换前需先明确加载。当前本地内容尚未被覆盖。"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
+    <div
+      v-if="recordId !== null && (needsLoad || mustRefresh || conflict)"
+      class="recovery-actions"
+    >
+      <el-button
+        v-if="needsLoad && !mustRefresh"
+        :disabled="!!busy"
+        @click="loadSavedDraft"
+      >
+        加载已保存草稿
+      </el-button>
+      <el-button
+        :disabled="!!busy"
+        @click="loadRemote"
+      >
+        重新读取已保存草稿
+      </el-button>
     </div>
-    <p v-if="notice" class="workspace-note" role="status">{{ notice }}</p>
+    <p
+      v-if="notice"
+      class="workspace-note"
+      role="status"
+    >
+      {{ notice }}
+    </p>
 
-    <el-drawer v-model="drawerOpen" title="版本对比" size="90%" append-to-body class="review-comparison-drawer">
-      <p class="comparison-note">从左到右比较采纳决策。范围为原文 Unicode 字符的 0 起始半开区间 [start, end)，不比较逐字符排版差异。</p>
+    <el-drawer
+      v-model="drawerOpen"
+      title="版本对比"
+      size="90%"
+      append-to-body
+      class="review-comparison-drawer"
+    >
+      <p class="comparison-note">
+        从左到右比较采纳决策。范围为原文 Unicode 字符的 0 起始半开区间 [start, end)，不比较逐字符排版差异。
+      </p>
       <div class="comparison-columns">
-        <section v-for="side in sides" :key="side" class="comparison-pane" :aria-label="side === 'left' ? '左侧版本' : '右侧版本'">
+        <section
+          v-for="side in sides"
+          :key="side"
+          class="comparison-pane"
+          :aria-label="side === 'left' ? '左侧版本' : '右侧版本'"
+        >
           <div class="comparison-controls">
-            <el-select v-if="side === 'left'" v-model="leftChoice" aria-label="左侧版本">
-              <el-option v-for="option in choices" :key="option.value" :label="option.label" :value="option.value" />
+            <el-select
+              v-if="side === 'left'"
+              v-model="leftChoice"
+              aria-label="左侧版本"
+            >
+              <el-option
+                v-for="option in choices"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
             </el-select>
-            <el-select v-else v-model="rightChoice" aria-label="右侧版本">
-              <el-option v-for="option in choices" :key="option.value" :label="option.label" :value="option.value" />
+            <el-select
+              v-else
+              v-model="rightChoice"
+              aria-label="右侧版本"
+            >
+              <el-option
+                v-for="option in choices"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
             </el-select>
-            <el-button v-if="panes[side].version" :disabled="!canSave" @click="restoreVersion(panes[side].version!)">恢复此版本</el-button>
+            <el-button
+              v-if="panes[side].version"
+              :disabled="!canSave"
+              @click="restoreVersion(panes[side].version!)"
+            >
+              恢复此版本
+            </el-button>
           </div>
-          <p v-if="panes[side].version" class="comparison-note">{{ panes[side].version?.created_at }}</p>
-          <p v-if="panes[side].coverage" class="comparison-note">
+          <p
+            v-if="panes[side].version"
+            class="comparison-note"
+          >
+            {{ panes[side].version?.created_at }}
+          </p>
+          <p
+            v-if="panes[side].coverage"
+            class="comparison-note"
+          >
             {{ panes[side].coverage?.status === 'partial' ? '部分完成' : '已完成' }} ·
             {{ panes[side].coverage?.completed_chunks }}/{{ panes[side].coverage?.total_chunks }} 段
           </p>
-          <p v-if="panes[side].compare" class="comparison-note">
+          <p
+            v-if="panes[side].compare"
+            class="comparison-note"
+          >
             {{ compareCoverageLabel(panes[side].compare!) }} · {{ panes[side].compare?.results.map(model => model.config_name).join(' / ') }}
           </p>
-          <el-alert v-if="panes[side].error" :title="panes[side].error" type="error" :closable="false" />
-          <pre v-else class="comparison-text">{{ panes[side].text }}</pre>
+          <el-alert
+            v-if="panes[side].error"
+            :title="panes[side].error"
+            type="error"
+            :closable="false"
+          />
+          <pre
+            v-else
+            class="comparison-text"
+          >{{ panes[side].text }}</pre>
         </section>
       </div>
-      <section class="decision-changes" aria-label="采纳差异">
+      <section
+        class="decision-changes"
+        aria-label="采纳差异"
+      >
         <h3>采纳差异（{{ comparison.changes.length }}）</h3>
-        <el-alert v-if="comparison.error" :title="comparison.error" type="error" :closable="false" />
-        <p v-else-if="!comparison.changes.length" class="comparison-note">采纳决策无变化。忽略状态与未审范围仍随草稿或版本保存。</p>
-        <ol v-else class="decision-list">
-          <li v-for="change in comparison.changes" :key="`${change.start}:${change.end}`" class="decision-item">
-            <el-tag :type="change.kind === 'added' ? 'success' : change.kind === 'removed' ? 'danger' : 'warning'" size="small">{{ changeLabels[change.kind] }}</el-tag>
+        <el-alert
+          v-if="comparison.error"
+          :title="comparison.error"
+          type="error"
+          :closable="false"
+        />
+        <p
+          v-else-if="!comparison.changes.length"
+          class="comparison-note"
+        >
+          采纳决策无变化。忽略状态与未审范围仍随草稿或版本保存。
+        </p>
+        <ol
+          v-else
+          class="decision-list"
+        >
+          <li
+            v-for="change in comparison.changes"
+            :key="`${change.start}:${change.end}`"
+            class="decision-item"
+          >
+            <el-tag
+              :type="change.kind === 'added' ? 'success' : change.kind === 'removed' ? 'danger' : 'warning'"
+              size="small"
+            >
+              {{ changeLabels[change.kind] }}
+            </el-tag>
             <span>[{{ change.start }}, {{ change.end }})</span>
             <span class="decision-original">{{ change.original }}</span>
             <span>{{ decisionLabel(change.before) }} → {{ decisionLabel(change.after) }}</span>

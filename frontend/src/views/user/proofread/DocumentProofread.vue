@@ -1,12 +1,22 @@
 <template>
   <div class="document-proofread-page">
+    <ProofreadEntry v-if="step === 'upload'" />
     <!-- 步骤一：上传文件 -->
-    <div v-if="step === 'upload'" class="upload-section">
+    <div
+      v-if="step === 'upload'"
+      class="upload-section"
+    >
       <el-card>
         <template #header>
           <div class="card-header">
             <span class="card-title">文档上传校对</span>
-            <el-tag type="primary" effect="plain" size="small">支持 Word / PDF / TXT，最大 20MB</el-tag>
+            <el-tag
+              type="primary"
+              effect="plain"
+              size="small"
+            >
+              支持 Word / PDF / TXT，最大 20MB
+            </el-tag>
           </div>
         </template>
 
@@ -21,30 +31,36 @@
           :on-exceed="() => ElMessage.warning('只能上传一个文件')"
           accept=".doc,.docx,.pdf,.txt"
         >
-          <el-icon class="upload-icon"><UploadFilled /></el-icon>
-          <div class="el-upload__text">将文件拖到此处，或 <em>点击上传</em></div>
+          <el-icon class="upload-icon">
+            <UploadFilled />
+          </el-icon>
+          <div class="el-upload__text">
+            将文件拖到此处，或 <em>点击上传</em>
+          </div>
           <template #tip>
-            <div class="upload-tip">支持 .doc / .docx / .pdf / .txt 格式，单文件最大 20MB，PDF 最多 100 页</div>
+            <div class="upload-tip">
+              支持 .doc / .docx / .pdf / .txt 格式，单文件最大 20MB，PDF 最多 100 页
+            </div>
           </template>
         </el-upload>
 
         <!-- 校对设置 -->
-        <div class="proofread-settings" v-if="selectedFile">
+        <div
+          v-if="selectedFile"
+          class="proofread-settings"
+        >
           <div class="file-info">
             <el-icon><Document /></el-icon>
             <span>{{ selectedFile.name }}</span>
-            <el-tag size="small">{{ formatSize(selectedFile.size) }}</el-tag>
+            <el-tag size="small">
+              {{ formatSize(selectedFile.size) }}
+            </el-tag>
           </div>
-          <div class="setting-row">
-            <span class="setting-label">领域选择：</span>
-            <el-radio-group v-model="domain" aria-describedby="document-domain-help">
-              <el-radio value="general">通用</el-radio>
-              <el-radio value="official">公文</el-radio>
-              <el-radio value="legal">法律</el-radio>
-            </el-radio-group>
-            <p id="document-domain-help" class="setting-help" aria-live="polite">{{ proofreadDomainHints[domain] }}</p>
-          </div>
-          <div v-if="modelOptions.length > 1" class="setting-row">
+          <ProfessionalRules v-model="domain" />
+          <div
+            v-if="modelOptions.length > 1"
+            class="setting-row"
+          >
             <span class="setting-label">校对模型：</span>
             <el-select
               v-model="selectedModelId"
@@ -60,9 +76,19 @@
                 :value="m.id"
               />
             </el-select>
-            <p id="document-model-help" class="setting-help">默认使用标记“当前”的模型；不同模型的速度、效果和用量不同。</p>
+            <p
+              id="document-model-help"
+              class="setting-help"
+            >
+              默认使用标记“当前”的模型；不同模型的速度、效果和用量不同。
+            </p>
           </div>
-          <el-button type="primary" size="large" :loading="uploading || proofreading" @click="handleStartProofread">
+          <el-button
+            type="primary"
+            size="large"
+            :loading="uploading || proofreading"
+            @click="handleStartProofread"
+          >
             <el-icon><Edit /></el-icon>
             {{ statusText }}
           </el-button>
@@ -71,19 +97,49 @@
     </div>
 
     <!-- 步骤二：校对进度 -->
-    <div v-else-if="step === 'processing'" class="processing-section">
+    <div
+      v-else-if="step === 'processing'"
+      class="processing-section"
+    >
       <el-card>
         <div class="processing-content">
-          <el-steps :active="stepIndex" align-center style="width: 480px; max-width: 100%; margin-bottom: 20px;">
-            <el-step title="上传提取" description="解析文档文本" />
-            <el-step title="AI 校对" description="大模型逐片检查" />
-            <el-step title="整理结果" description="准备人工审阅" />
-            <el-step title="保存完成" description="写入历史记录" />
+          <el-steps
+            :active="stepIndex"
+            align-center
+            style="width: 480px; max-width: 100%; margin-bottom: 20px;"
+          >
+            <el-step
+              title="上传提取"
+              description="解析文档文本"
+            />
+            <el-step
+              title="AI 校对"
+              description="大模型逐片检查"
+            />
+            <el-step
+              title="整理结果"
+              description="准备人工审阅"
+            />
+            <el-step
+              title="保存完成"
+              description="写入历史记录"
+            />
           </el-steps>
-          <el-icon class="processing-icon" :size="40"><Loading /></el-icon>
+          <el-icon
+            class="processing-icon"
+            :size="40"
+          >
+            <Loading />
+          </el-icon>
           <h3>{{ statusText }}</h3>
-          <p class="processing-info">{{ processingInfo }}</p>
-          <el-progress :percentage="progress" :stroke-width="8" style="width: 400px; max-width: 100%; margin-top: 16px;" />
+          <p class="processing-info">
+            {{ processingInfo }}
+          </p>
+          <el-progress
+            :percentage="progress"
+            :stroke-width="8"
+            style="width: 400px; max-width: 100%; margin-top: 16px;"
+          />
           <el-button
             type="danger"
             plain
@@ -100,29 +156,49 @@
     </div>
 
     <!-- 步骤三：双栏对照结果 -->
-    <div v-else-if="step === 'result'" class="result-section">
-      <ReviewWorkspace
+    <div
+      v-else-if="step === 'result'"
+      class="result-section"
+    >
+      <div class="document-review-heading">
+        <span>文档审校结果</span><h2>逐条确认，让文档准备就绪</h2><p>{{ resultFilename }} · {{ pendingCount }} 项待处理 · {{ acceptedCount }} 项已接受</p>
+      </div>
+      <details class="document-review-tools">
+        <summary>草稿与版本管理</summary>
+        <ReviewWorkspace
+          :record-id="recordId"
+          :source-text="sourceText"
+          :issues="issues"
+          :coverage="coverage"
+          :domain="domain"
+          :depth="depth"
+          :config-id="selectedModelId"
+          :saved-review="savedReview"
+          @saved="handleReviewSaved"
+          @restore="handleReviewRestore"
+        />
+      </details>
+      <QualityFeedbackDialog
+        ref="qualityFeedback"
         :record-id="recordId"
         :source-text="sourceText"
-        :issues="issues"
-        :coverage="coverage"
-        :domain="domain"
-        :depth="depth"
-        :config-id="selectedModelId"
-        :saved-review="savedReview"
-        @saved="handleReviewSaved"
-        @restore="handleReviewRestore"
       />
-      <QualityFeedbackDialog ref="qualityFeedback" :record-id="recordId" :source-text="sourceText" />
-      <FactCheckPanel :record-id="recordId" :source-text="sourceText" @started="router.replace({ query: { ...route.query, review: String($event) } })" />
-      <ProofreadCoverage
-        v-model:coverage="coverage"
-        :source-text="sourceText"
-        :domain="domain"
-        :depth="depth"
-        :config-id="selectedModelId"
-        @issues="mergeIssues"
-      />
+      <details class="document-review-tools">
+        <summary>检查覆盖范围与事实核查 · {{ coverage?.status === 'complete' ? '全文检查已完成' : coverage?.status === 'partial' ? '仍有未检查的内容' : '覆盖范围未确认' }}</summary>
+        <FactCheckPanel
+          :record-id="recordId"
+          :source-text="sourceText"
+          @started="router.replace({ query: { ...route.query, review: String($event) } })"
+        />
+        <ProofreadCoverage
+          v-model:coverage="coverage"
+          :source-text="sourceText"
+          :domain="domain"
+          :depth="depth"
+          :config-id="selectedModelId"
+          @issues="mergeIssues"
+        />
+      </details>
       <!-- 顶部操作栏 -->
       <div class="result-toolbar">
         <el-button @click="handleReupload">
@@ -130,15 +206,29 @@
         </el-button>
         <div class="toolbar-info">
           <el-tag><el-icon><Document /></el-icon>&nbsp;{{ resultFilename }}</el-tag>
-          <el-tag :type="isPartial ? 'warning' : 'success'">{{ isPartial ? '部分完成 · ' : '' }}共 {{ issues.length }} 个问题</el-tag>
-          <el-tag type="info">{{ acceptedCount }} 已接受</el-tag>
-          <el-tag type="warning">{{ pendingCount }} 待处理</el-tag>
+          <el-tag :type="isPartial ? 'warning' : 'success'">
+            {{ isPartial ? '部分完成 · ' : '' }}共 {{ issues.length }} 个问题
+          </el-tag>
+          <el-tag type="info">
+            {{ acceptedCount }} 已接受
+          </el-tag>
+          <el-tag type="warning">
+            {{ pendingCount }} 待处理
+          </el-tag>
         </div>
         <div class="toolbar-actions">
-          <el-button type="warning" @click="handleAcceptAll" :disabled="pendingCount === 0">
+          <el-button
+            type="warning"
+            :disabled="pendingCount === 0"
+            @click="handleAcceptAll"
+          >
             一键修改全部
           </el-button>
-          <el-button type="primary" :loading="exporting" @click="handleExportText">
+          <el-button
+            type="primary"
+            :loading="exporting"
+            @click="handleExportText"
+          >
             <el-icon><Download /></el-icon>导出修订文本
           </el-button>
           <el-button
@@ -148,7 +238,12 @@
           >
             {{ wordExportLabel }}
           </el-button>
-          <el-button :loading="exporting" @click="handleExportReport">导出问题报告</el-button>
+          <el-button
+            :loading="exporting"
+            @click="handleExportReport"
+          >
+            导出问题报告
+          </el-button>
         </div>
       </div>
 
@@ -178,7 +273,12 @@
               <span class="issues-title">
                 <el-icon><Document /></el-icon>
                 问题列表
-                <el-tag type="info" effect="plain" size="small" round>{{ filteredIssues.length }}</el-tag>
+                <el-tag
+                  type="info"
+                  effect="plain"
+                  size="small"
+                  round
+                >{{ filteredIssues.length }}</el-tag>
               </span>
               <el-select
                 v-model="filterType"
@@ -190,26 +290,61 @@
                 <template #prefix>
                   <el-icon><Filter /></el-icon>
                 </template>
-                <el-option label="全部类型" value="">
-                  <el-icon style="vertical-align:middle;margin-right:6px;"><Menu /></el-icon>全部类型
+                <el-option
+                  label="全部类型"
+                  value=""
+                >
+                  <el-icon style="vertical-align:middle;margin-right:6px;">
+                    <Menu />
+                  </el-icon>全部类型
                 </el-option>
-                <el-option label="错别字" value="typo">
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;"><EditPen /></el-icon>错别字
+                <el-option
+                  label="错别字"
+                  value="typo"
+                >
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;">
+                    <EditPen />
+                  </el-icon>错别字
                 </el-option>
-                <el-option label="语法错误" value="grammar">
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#e6a23c;"><Reading /></el-icon>语法错误
+                <el-option
+                  label="语法错误"
+                  value="grammar"
+                >
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:#e6a23c;">
+                    <Reading />
+                  </el-icon>语法错误
                 </el-option>
-                <el-option label="标点符号" value="punctuation">
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#909399;"><Operation /></el-icon>标点符号
+                <el-option
+                  label="标点符号"
+                  value="punctuation"
+                >
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:#909399;">
+                    <Operation />
+                  </el-icon>标点符号
                 </el-option>
-                <el-option label="表达优化" value="style">
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#409eff;"><MagicStick /></el-icon>表达优化
+                <el-option
+                  label="表达优化"
+                  value="style"
+                >
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:#409eff;">
+                    <MagicStick />
+                  </el-icon>表达优化
                 </el-option>
-                <el-option label="敏感词" value="sensitive">
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;"><Warning /></el-icon>敏感词
+                <el-option
+                  label="敏感词"
+                  value="sensitive"
+                >
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;">
+                    <Warning />
+                  </el-icon>敏感词
                 </el-option>
-                <el-option label="逻辑问题" value="logic">
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#67c23a;"><Connection /></el-icon>逻辑问题
+                <el-option
+                  label="逻辑问题"
+                  value="logic"
+                >
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:#67c23a;">
+                    <Connection />
+                  </el-icon>逻辑问题
                 </el-option>
               </el-select>
             </div>
@@ -229,30 +364,63 @@
             >
               <div class="issue-header">
                 <span class="issue-number">#{{ getGlobalIndex(issue) + 1 }}</span>
-                <el-tag :type="severityColor(issue.severity)" size="small">
+                <el-tag
+                  :type="severityColor(issue.severity)"
+                  size="small"
+                >
                   {{ typeLabel(issue.type) }}
                 </el-tag>
-                <el-tag :type="severityColor(issue.severity)" size="small" effect="plain">
+                <el-tag
+                  :type="severityColor(issue.severity)"
+                  size="small"
+                  effect="plain"
+                >
                   {{ severityLabel(issue.severity) }}
                 </el-tag>
               </div>
               <div class="issue-body">
-                <div class="issue-context">{{ issueContext(issue) }}</div>
-                <div class="issue-diff">
-                  <span class="text text-del" :title="issue.original">{{ issue.original }}</span>
-                  <el-icon class="arrow-icon"><Right /></el-icon>
-                  <span class="text text-add" :title="issue.suggestion">{{ issue.suggestion }}</span>
+                <div class="issue-context">
+                  {{ issueContext(issue) }}
                 </div>
-                <div v-if="issue.explanation" class="issue-explanation">
+                <div class="issue-diff">
+                  <span
+                    class="text text-del"
+                    :title="issue.original"
+                  >{{ issue.original }}</span>
+                  <el-icon class="arrow-icon">
+                    <Right />
+                  </el-icon>
+                  <span
+                    class="text text-add"
+                    :title="issue.suggestion"
+                  >{{ issue.suggestion }}</span>
+                </div>
+                <div
+                  v-if="issue.explanation"
+                  class="issue-explanation"
+                >
                   <el-icon><InfoFilled /></el-icon>
                   <span>{{ issue.explanation }}</span>
                 </div>
               </div>
-              <div class="issue-actions" v-if="!issue._accepted && !issue._ignored">
-                <el-button v-if="issue.suggestion" type="primary" size="small" @click="acceptIssue(issue)">
+              <div
+                v-if="!issue._accepted && !issue._ignored"
+                class="issue-actions"
+              >
+                <el-button
+                  v-if="issue.suggestion"
+                  type="primary"
+                  size="small"
+                  @click="acceptIssue(issue)"
+                >
                   <el-icon><Check /></el-icon>仅修改此处
                 </el-button>
-                <el-button v-else-if="issue.type === 'sensitive' && issue.original" type="warning" size="small" @click="deleteIssue(issue)">
+                <el-button
+                  v-else-if="issue.type === 'sensitive' && issue.original"
+                  type="warning"
+                  size="small"
+                  @click="deleteIssue(issue)"
+                >
                   <el-icon><Delete /></el-icon>仅删除此处
                 </el-button>
                 <el-button
@@ -260,19 +428,56 @@
                   size="small"
                   title="仅处理已报告且原文、建议相同的位置"
                   @click="acceptMatching(issue)"
-                >全文同类</el-button>
-                <el-button size="small" @click="ignoreIssue(issue)">
+                >
+                  全文同类
+                </el-button>
+                <el-button
+                  size="small"
+                  @click="ignoreIssue(issue)"
+                >
                   <el-icon><Close /></el-icon>忽略
                 </el-button>
               </div>
-              <div class="issue-status" v-else>
-                <el-tag v-if="issue._accepted" type="success" size="small">已接受</el-tag>
-                <el-tag v-if="issue._ignored" type="info" size="small">已忽略</el-tag>
-                <el-button v-if="issue._ignored" text size="small" :disabled="recordId === null" @click="qualityFeedback?.open(issue)">补充原因（可选）</el-button>
-                <el-button text size="small" @click="undoIssue(issue)">撤销</el-button>
+              <div
+                v-else
+                class="issue-status"
+              >
+                <el-tag
+                  v-if="issue._accepted"
+                  type="success"
+                  size="small"
+                >
+                  已接受
+                </el-tag>
+                <el-tag
+                  v-if="issue._ignored"
+                  type="info"
+                  size="small"
+                >
+                  已忽略
+                </el-tag>
+                <el-button
+                  v-if="issue._ignored"
+                  text
+                  size="small"
+                  :disabled="recordId === null"
+                  @click="qualityFeedback?.open(issue)"
+                >
+                  补充原因（可选）
+                </el-button>
+                <el-button
+                  text
+                  size="small"
+                  @click="undoIssue(issue)"
+                >
+                  撤销
+                </el-button>
               </div>
             </div>
-            <el-empty v-if="filteredIssues.length === 0" :description="emptyIssuesText" />
+            <el-empty
+              v-if="filteredIssues.length === 0"
+              :description="emptyIssuesText"
+            />
           </div>
         </el-card>
       </div>
@@ -281,6 +486,8 @@
 </template>
 
 <script setup lang="ts">
+import ProfessionalRules from '@/components/ProfessionalRules.vue'
+import ProofreadEntry from '@/components/ProofreadEntry.vue'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type UploadFile } from 'element-plus'
@@ -297,7 +504,7 @@ import {
   type ReviewResponse,
   type ReviewRestorePayload,
 } from '@/api/review'
-import { severityColor, severityLabel, typeLabel, proofreadDomainHints } from '@/utils/proofread'
+import { severityColor, severityLabel, typeLabel } from '@/utils/proofread'
 import { reviewStateFingerprint } from '@/utils/review'
 import { formatSize } from '@/utils/format'
 import { useProofreadReview, type ReviewIssue } from '@/composables/useProofreadReview'
@@ -1378,4 +1585,12 @@ function resetAll() {
     }
   }
 }
+
+.upload-section :deep(.el-card) { box-shadow: none; border-radius: 12px; }
+.upload-section :deep(.el-upload-dragger) { padding: 60px 24px; background: var(--surface-soft); border-radius: 12px; }
+.document-review-heading { margin: 4px 0 24px; }.document-review-heading > span { color: var(--color-primary); font-size: 12px; }.document-review-heading h2 { margin: 10px 0; font-size: 24px; font-weight: 600; }.document-review-heading p { color: var(--color-text-secondary); font-size: 13px; }
+.document-review-tools { border: 1px solid var(--color-border); background: var(--surface); border-radius: 8px; margin-bottom: 10px; }.document-review-tools summary { padding: 13px 16px; cursor: pointer; color: var(--color-text-secondary); font-size: 13px; }
+.result-toolbar { margin-top: 16px; box-shadow: none; border: 1px solid var(--color-border); flex-wrap: wrap; }.result-columns { grid-template-columns: minmax(0,1.35fr) minmax(340px,1fr); }.column-card { box-shadow: none; }
+@media(max-width:1150px) { .result-columns { grid-template-columns: 1fr; height: auto; }.result-columns .column-card { max-height: 650px; } }
+@media(max-width:700px) { .document-review-heading h2 { font-size: 21px; }.upload-section .card-header { flex-wrap: wrap; gap: 12px; } }
 </style>

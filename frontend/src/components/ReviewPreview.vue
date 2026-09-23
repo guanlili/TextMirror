@@ -1,15 +1,37 @@
 <template>
   <div class="review-preview">
     <div class="preview-toolbar">
-      <el-radio-group v-model="view" size="small" aria-label="预览内容">
-        <el-radio-button value="modified">修订预览</el-radio-button>
-        <el-radio-button value="original">{{ originalHtml ? '原始排版' : '原文' }}</el-radio-button>
+      <el-radio-group
+        v-model="view"
+        size="small"
+        aria-label="预览内容"
+      >
+        <el-radio-button value="modified">
+          修订预览
+        </el-radio-button>
+        <el-radio-button value="original">
+          {{ originalHtml ? '原始排版' : '原文' }}
+        </el-radio-button>
       </el-radio-group>
       <span>{{ Array.from(view === 'modified' ? currentText : sourceText).length }} 字</span>
     </div>
-    <p v-if="view === 'original'" class="preview-tip">此处保留原文；已采纳的修改请查看修订预览。</p>
-    <div v-if="view === 'original' && originalHtml" class="formatted-original" v-html="safeOriginalHtml"></div>
-    <div v-else ref="previewRef" class="preview-text" v-html="previewHtml"></div>
+    <p
+      v-if="view === 'original'"
+      class="preview-tip"
+    >
+      此处保留原文；已采纳的修改请查看修订预览。
+    </p>
+    <div
+      v-if="view === 'original' && originalHtml"
+      class="formatted-original"
+      v-html="safeOriginalHtml"
+    />
+    <div
+      v-else
+      ref="previewRef"
+      class="preview-text"
+      v-html="previewHtml"
+    />
   </div>
 </template>
 

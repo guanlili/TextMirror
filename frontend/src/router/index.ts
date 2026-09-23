@@ -31,8 +31,14 @@ const userRoutes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/layouts/UserLayout.vue'),
-    redirect: '/proofread/text',
+    redirect: '/workbench',
     children: [
+      {
+        path: 'workbench',
+        name: 'Workbench',
+        component: () => import('@/views/user/workbench/index.vue'),
+        meta: { title: '工作台', icon: 'House' },
+      },
       {
         path: 'proofread/text',
         name: 'TextProofread',
@@ -99,11 +105,13 @@ const adminRoutes: RouteRecordRaw[] = [
     redirect: '/admin/dashboard',
     meta: { title: '管理后台', requireAuth: true, requireAdmin: true },
     children: [
+      { path: 'usage', name: 'AdminUsage', component: () => import('@/views/admin/usage/index.vue'), meta: { title: '调用与用量', icon: 'TrendCharts' } },
+      { path: 'quality', name: 'AdminQuality', component: () => import('@/views/admin/quality/index.vue'), meta: { title: '质量反馈', icon: 'ChatDotRound' } },
       {
         path: 'dashboard',
         name: 'AdminDashboard',
         component: () => import('@/views/admin/dashboard/index.vue'),
-        meta: { title: '仪表盘', icon: 'DataAnalysis' },
+        meta: { title: '运营概览', icon: 'DataAnalysis' },
       },
       {
         path: 'users',
@@ -121,7 +129,7 @@ const adminRoutes: RouteRecordRaw[] = [
         path: 'policy',
         name: 'AdminPolicy',
         component: () => import('@/views/admin/policy/index.vue'),
-        meta: { title: '策略管理', icon: 'Setting' },
+        meta: { title: '访问与额度', icon: 'Setting' },
       },
       {
         path: 'apikeys',
@@ -133,7 +141,7 @@ const adminRoutes: RouteRecordRaw[] = [
         path: 'llm',
         name: 'AdminLLM',
         component: () => import('@/views/admin/llm/index.vue'),
-        meta: { title: '大模型配置', icon: 'Cpu' },
+        meta: { title: '模型服务', icon: 'Cpu' },
       },
       {
         path: 'global-dict',
@@ -184,10 +192,10 @@ router.beforeEach(async (to) => {
     return { name: 'Login', query: { redirect: to.fullPath } }
   }
 
-  // 已登录不允许访问登录页（除非有飞书回调参数）
+  // 显式退出要先通过离开守卫，再由发起方清除凭证。
   if (to.name === 'Login' && token) {
     const hasFeishuParams = to.query.code || to.query.feishu_token
-    if (!hasFeishuParams) return { path: '/' }
+    if (!hasFeishuParams && to.query.logout !== '1') return { path: '/' }
   }
 
   // 动态引入避免 router → stores/site → api/site → utils/request → router 的循环依赖

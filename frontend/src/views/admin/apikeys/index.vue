@@ -5,10 +5,25 @@
         <div class="card-header">
           <span class="card-title">API 密钥管理</span>
           <div class="filter-bar">
-            <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 120px;" @change="handleFilterChange">
-              <el-option label="正常" value="active" />
-              <el-option label="已吊销" value="revoked" />
-              <el-option label="已过期" value="expired" />
+            <el-select
+              v-model="statusFilter"
+              placeholder="全部状态"
+              clearable
+              style="width: 120px;"
+              @change="handleFilterChange"
+            >
+              <el-option
+                label="正常"
+                value="active"
+              />
+              <el-option
+                label="已吊销"
+                value="revoked"
+              />
+              <el-option
+                label="已过期"
+                value="expired"
+              />
             </el-select>
             <el-input
               v-model="keyword"
@@ -25,8 +40,15 @@
         </div>
       </template>
 
-      <el-table :data="list" v-loading="loading" stripe>
-        <el-table-column label="归属用户" min-width="140">
+      <el-table
+        v-loading="loading"
+        :data="list"
+        stripe
+      >
+        <el-table-column
+          label="归属用户"
+          min-width="140"
+        >
           <template #default="{ row }">
             <div class="user-cell">
               <span>{{ row.username }}</span>
@@ -34,70 +56,167 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="name" label="名称" min-width="110" show-overflow-tooltip />
-        <el-table-column label="密钥" min-width="170">
+        <el-table-column
+          prop="name"
+          label="名称"
+          min-width="110"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          label="密钥"
+          min-width="170"
+        >
           <template #default="{ row }">
             <code class="key-display">{{ row.key_display }}</code>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="86" align="center">
+        <el-table-column
+          label="状态"
+          width="86"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
+            <el-tag
+              :type="statusTagType(row.status)"
+              size="small"
+            >
+              {{ statusText(row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="今日调用" width="90" align="center">
+        <el-table-column
+          label="今日调用"
+          width="90"
+          align="center"
+        >
           <template #default="{ row }">
             <span>{{ row.used_today ?? '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="近7日" width="80" align="center">
+        <el-table-column
+          label="近7日"
+          width="80"
+          align="center"
+        >
           <template #default="{ row }">
             <span>{{ row.used_7d ?? 0 }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="回调" width="90" align="center">
+        <el-table-column
+          label="回调"
+          width="90"
+          align="center"
+        >
           <template #default="{ row }">
-            <el-tooltip v-if="row.webhook_last" :hide-after="0" placement="top">
+            <el-tooltip
+              v-if="row.webhook_last"
+              :hide-after="0"
+              placement="top"
+            >
               <template #content>
                 最近投递：{{ row.webhook_last.event }}
                 （{{ row.webhook_last.status === 'delivered' ? '送达' : '失败' }}
-                <template v-if="row.webhook_last.status_code">HTTP {{ row.webhook_last.status_code }}</template>）
+                <template v-if="row.webhook_last.status_code">
+                  HTTP {{ row.webhook_last.status_code }}
+                </template>）
               </template>
-              <el-tag :type="row.webhook_last.status === 'delivered' ? 'success' : 'danger'" size="small" style="cursor: default;">
+              <el-tag
+                :type="row.webhook_last.status === 'delivered' ? 'success' : 'danger'"
+                size="small"
+                style="cursor: default;"
+              >
                 {{ row.webhook_last.status === 'delivered' ? '已送达' : '投递失败' }}
               </el-tag>
             </el-tooltip>
-            <el-tag v-else-if="row.webhook_url" type="info" size="small" style="cursor: default;">未投递</el-tag>
-            <span v-else style="color: #ccc;">-</span>
+            <el-tag
+              v-else-if="row.webhook_url"
+              type="info"
+              size="small"
+              style="cursor: default;"
+            >
+              未投递
+            </el-tag>
+            <span
+              v-else
+              style="color: #ccc;"
+            >-</span>
           </template>
         </el-table-column>
-        <el-table-column label="每日上限" width="100" align="center">
+        <el-table-column
+          label="每日上限"
+          width="100"
+          align="center"
+        >
           <template #default="{ row }">
             <span v-if="row.daily_quota">{{ row.daily_quota }}</span>
-            <span v-else style="color: #999;">跟随用户</span>
+            <span
+              v-else
+              style="color: #999;"
+            >跟随用户</span>
           </template>
         </el-table-column>
-        <el-table-column label="过期时间" width="160">
+        <el-table-column
+          label="过期时间"
+          width="160"
+        >
           <template #default="{ row }">
-            <span v-if="row.expires_at" style="font-size: 12px; color: #999;">{{ formatTime(row.expires_at) }}</span>
-            <span v-else style="color: #999;">永不</span>
+            <span
+              v-if="row.expires_at"
+              style="font-size: 12px; color: #999;"
+            >{{ formatTime(row.expires_at) }}</span>
+            <span
+              v-else
+              style="color: #999;"
+            >永不</span>
           </template>
         </el-table-column>
-        <el-table-column label="最近使用" width="160">
+        <el-table-column
+          label="最近使用"
+          width="160"
+        >
           <template #default="{ row }">
-            <span v-if="row.last_used_at" style="font-size: 12px; color: #999;">{{ formatTime(row.last_used_at) }}</span>
-            <span v-else style="color: #999;">未使用</span>
+            <span
+              v-if="row.last_used_at"
+              style="font-size: 12px; color: #999;"
+            >{{ formatTime(row.last_used_at) }}</span>
+            <span
+              v-else
+              style="color: #999;"
+            >未使用</span>
           </template>
         </el-table-column>
-        <el-table-column prop="remark" label="备注" min-width="110" show-overflow-tooltip>
+        <el-table-column
+          prop="remark"
+          label="备注"
+          min-width="110"
+          show-overflow-tooltip
+        >
           <template #default="{ row }">
-            <span v-if="row.remark" style="color: #999;">{{ row.remark }}</span>
-            <span v-else style="color: #ccc;">-</span>
+            <span
+              v-if="row.remark"
+              style="color: #999;"
+            >{{ row.remark }}</span>
+            <span
+              v-else
+              style="color: #ccc;"
+            >-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" align="center" fixed="right">
+        <el-table-column
+          label="操作"
+          width="150"
+          align="center"
+          fixed="right"
+        >
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openEditDialog(row as AdminApiKeyItem)">编辑</el-button>
+            <el-button
+              link
+              type="primary"
+              size="small"
+              @click="openEditDialog(row as AdminApiKeyItem)"
+            >
+              编辑
+            </el-button>
             <el-popconfirm
               v-if="row.is_active"
               :title="`吊销「${row.name}」？立即失效，可恢复。`"
@@ -106,7 +225,13 @@
               @confirm="handleToggleActive(row as AdminApiKeyItem, false)"
             >
               <template #reference>
-                <el-button type="danger" link size="small">吊销</el-button>
+                <el-button
+                  type="danger"
+                  link
+                  size="small"
+                >
+                  吊销
+                </el-button>
               </template>
             </el-popconfirm>
             <el-popconfirm
@@ -116,13 +241,22 @@
               @confirm="handleToggleActive(row as AdminApiKeyItem, true)"
             >
               <template #reference>
-                <el-button type="success" link size="small">恢复</el-button>
+                <el-button
+                  type="success"
+                  link
+                  size="small"
+                >
+                  恢复
+                </el-button>
               </template>
             </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="!loading && list.length === 0" description="暂无密钥" />
+      <el-empty
+        v-if="!loading && list.length === 0"
+        description="暂无密钥"
+      />
 
       <div class="pagination-wrapper">
         <el-pagination
@@ -137,8 +271,15 @@
     </el-card>
 
     <!-- 编辑弹窗：每日上限 / 备注 -->
-    <el-dialog v-model="showEditDialog" title="编辑密钥" width="440px">
-      <el-form :model="editForm" label-width="90px">
+    <el-dialog
+      v-model="showEditDialog"
+      title="编辑密钥"
+      width="440px"
+    >
+      <el-form
+        :model="editForm"
+        label-width="90px"
+      >
         <el-form-item label="归属用户">
           <span>{{ editingKey?.username }}（{{ editingKey?.employee_id }}）</span>
         </el-form-item>
@@ -150,7 +291,9 @@
             placeholder="留空则跟随用户配额"
             style="width: 100%;"
           />
-          <div class="form-tip">清空表示跟随该用户的每日配额</div>
+          <div class="form-tip">
+            清空表示跟随该用户的每日配额
+          </div>
         </el-form-item>
         <el-form-item label="备注">
           <el-input
@@ -163,8 +306,16 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showEditDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="handleSave">保存</el-button>
+        <el-button @click="showEditDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="saving"
+          @click="handleSave"
+        >
+          保存
+        </el-button>
       </template>
     </el-dialog>
   </div>

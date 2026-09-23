@@ -182,7 +182,7 @@ describe('FactCheckPanel', () => {
     const { state, root } = mount(); await open(state)
     const label = provider === 'model' ? '模型原生联网' : 'Tavily'
     const current = descendants(root).find(item => item.props['data-testid'] === 'fact-check-current-provider')!
-    expect(text(current)).toBe(`当前搜索服务：${label} · 当前模型配置：${options.model_name}`)
+    expect(text(current).trim()).toBe(`当前搜索服务：${label} · 当前模型配置：${options.model_name}`)
     await vi.advanceTimersByTimeAsync(10000)
     await state.startRun()
     expect(request.post).not.toHaveBeenCalled()
@@ -194,7 +194,7 @@ describe('FactCheckPanel', () => {
     }, { signal: expect.any(AbortSignal), headers: { 'X-Silent-Error': 'true' } })
     expect(state.active?.provider).toBe(provider)
     const reportProvider = descendants(root).find(item => item.props['data-testid'] === 'fact-check-run-provider')!
-    expect(text(reportProvider)).toBe(`本次搜索服务：${label}`)
+    expect(text(reportProvider).trim()).toBe(`本次搜索服务：${label}`)
   })
   it.each(['model', 'tavily'] as const)('历史 %s 使用已保存 provider，刷新设置或切换详情不能重标旧报告', async provider => {
     const historical = run({ provider, status: 'SUCCESS' })
@@ -203,7 +203,7 @@ describe('FactCheckPanel', () => {
     const { state, root } = mount(); await open(state)
     const label = provider === 'model' ? '模型原生联网' : 'Tavily'
     const assertSavedProvider = () => {
-      expect(text(descendants(root).find(item => item.props['data-testid'] === 'fact-check-run-provider')!)).toBe(`本次搜索服务：${label}`)
+      expect(text(descendants(root).find(item => item.props['data-testid'] === 'fact-check-run-provider')!).trim()).toBe(`本次搜索服务：${label}`)
       const historySelect = descendants(root).find(item => item.props['aria-label'] === '事实核查历史')!
       expect(descendants(historySelect).find(item => item.props.value === historical.id)!.props.label).toContain(` · ${label} · `)
       expect(text(descendants(root).find(item => item.props['data-testid'] === 'fact-check-report')!)).not.toContain(options.model_name)
@@ -439,7 +439,7 @@ describe('FactCheckPanel', () => {
     expect(descendants(root).some(item => item.props['data-testid'] === 'fact-check-quote-context')).toBe(false)
     state.selectedClaim = 0; await flush()
     const context = descendants(root).find(item => item.props['data-testid'] === 'fact-check-quote-context')!
-    expect(text(context)).toBe(`前文 ${xss}引文𠮷 后文`)
+    expect(text(context).trim()).toBe(`前文 ${xss}引文𠮷 后文`)
     expect(descendants(context).find(item => item.tag === 'mark')!.text).toBe('引文𠮷')
     for (const label of ['主体/事件：一致', '事件时间：不一致', '统计范围/单位：无法确定', '[30, 33)', '不是原始 HTML 或完整网页', 'a'.repeat(64), '并未独立验证语义', '反证轮完成不代表找到反证']) expect(text(root)).toContain(label)
     expect(descendants(root).some(item => 'innerHTML' in item.props || item.tag === 'img')).toBe(false)
@@ -470,7 +470,7 @@ describe('FactCheckPanel', () => {
     expect(text(root)).toContain('此报告未记录结构化口径检查，不能视为检查通过')
     expect(text(root)).toContain('此报告未记录正文指纹或引文上下文')
     for (const page of [textPage, documentPage]) {
-      expect(page).toContain('<FactCheckPanel :record-id="recordId" :source-text="sourceText" @started="router.replace({ query: { ...route.query, review: String($event) } })" />')
+      expect(page.replace(/\s+/g, ' ')).toContain('<FactCheckPanel\n        :record-id="recordId"\n        :source-text="sourceText"\n        @started="router.replace({ query: { ...route.query, review: String($event) } })"\n      />'.replace(/\s+/g, ' '))
     }
   })
 })
