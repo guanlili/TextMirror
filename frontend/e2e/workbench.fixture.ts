@@ -1,9 +1,11 @@
 import { test as base, expect, type Page, type Route } from '@playwright/test'
 import { Buffer } from 'node:buffer'
+import type { DomainPromptsConfig, LLMConfigItem, LLMProviderOption } from '../src/api/admin'
 import type { ReviewResponse, SaveReviewPayload } from '../src/api/review'
 import type { ProofreadCoverage } from '../src/api/proofread'
 import type { ReviewIssue } from '../src/utils/review'
 
+export const authTokens = { access: 'browser-test-not-a-real-token', refresh: 'browser-test-not-a-real-refresh-token' }
 export const source = '首段😀：方案已经完膳。第二段：工做安排保持不变。'
 export const corrected = source.replace('完膳', '完善')
 export const exportedBytes = Buffer.from('Mock export transport fixture; DOCX generation is covered by backend tests.')
@@ -38,6 +40,7 @@ function appliedText(text: string, issues: ReviewIssue[]): string {
 
 interface ApiCall { method: string; path: string; body: unknown }
 export interface Scenario {
+  admin: boolean
   review: ReviewResponse
   uploadStatus: number
   saveStatus: number
@@ -49,8 +52,9 @@ export interface Scenario {
 
 export const test = base.extend<{ scenario: Scenario }>({
   scenario: [async ({ context, baseURL }, use) => {
-    const scenario: Scenario = { review: sample(), uploadStatus: 200, saveStatus: 200,
+    const scenario: Scenario = { admin: false, review: sample(), uploadStatus: 200, saveStatus: 200,
       exportStatus: 200, stream: 'complete', cancelled: false, calls: [] }
+    let domainPrompts: DomainPromptsConfig = { general: '', official: '', legal: '' }
     const unexpected: string[] = []
     const pageErrors: string[] = []
     const monitor = (page: Page) => {
@@ -63,9 +67,11 @@ export const test = base.extend<{ scenario: Scenario }>({
     }
     context.pages().forEach(monitor)
     context.on('page', monitor)
-    await context.addInitScript(origin => {
-      if (window.location.origin === origin) localStorage.setItem('access_token', 'browser-test-not-a-real-token')
-    }, new URL(baseURL!).origin)
+    await context.addInitScript(({ origin, tokens }) => {
+      if (window.location.origin !== origin) return
+      localStorage.setItem('access_token', tokens.access)
+      localStorage.setItem('refresh_token', tokens.refresh)
+    }, { origin: new URL(baseURL!).origin, tokens: authTokens })
     const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, json: body })
     await context.route('**/*', async route => {
       const request = route.request()
@@ -88,9 +94,35 @@ export const test = base.extend<{ scenario: Scenario }>({
         guest_mode_enabled: 'on', quick_login_enabled: 'off',
       })
       if (method === 'GET' && path === '/auth/me') return json(route, {
-        id: 1, employee_id: 'browser-test', name: '回归测试', role_code: 'user',
-        permissions: ['proofread:text', 'proofread:document'], daily_quota: 100,
+        id: 1, employee_id: 'browser-test', username: '回归测试', role_code: scenario.admin ? 'super_admin' : 'user',
+        permissions: scenario.admin ? ['admin:access', 'admin:settings:edit', 'admin:llm:edit']
+          : ['proofread:text', 'proofread:document'], daily_quota: 100,
       })
+      if (method === 'GET' && path === '/auth/feishu/config') return json(route, {
+        app_id: '', redirect_uri: '', enabled: false,
+      })
+      if (scenario.admin) {
+        if (method === 'GET' && path === '/admin/system-config/domain-prompts') return json(route, domainPrompts)
+        if (method === 'PUT' && path === '/admin/system-config/domain-prompts') {
+          expect(request.headers().authorization).toBe(`Bearer ${authTokens.access}`)
+          domainPrompts = body as DomainPromptsConfig
+          return json(route, domainPrompts)
+        }
+        if (method === 'GET' && path === '/admin/system-config/domain-prompts/defaults') return json(route, {
+          general: '检查文字与语法。', official: '检查公文措辞。', legal: '检查法律术语。',
+        } satisfies DomainPromptsConfig)
+        if (method === 'GET' && path === '/admin/llm-config/providers') return json(route, [{
+          code: 'qwen', name: '阿里百炼 (通义千问)', default_base: 'https://model.invalid/v1',
+          default_model: 'qwen-test', models: ['qwen-test'],
+        }] satisfies LLMProviderOption[])
+        if (method === 'GET' && path === '/admin/llm-config') {
+          const config: LLMConfigItem = { id: 1, name: '生产模型', provider: 'qwen',
+            api_base: 'https://model.invalid/v1', api_key: '', api_key_masked: '未配置', model: 'qwen-test',
+            temperature: 0.3, timeout: 60, max_retries: 0, is_active: true, is_enabled: true }
+          return json(route, [config, { ...config, id: 2, name: '停用模型', model: 'archived-test',
+            is_active: false, is_enabled: false }])
+        }
+      }
       if (method === 'GET' && path === '/polish/models') return json(route, { models: [] })
       if (method === 'GET' && path === '/history/usage') return json(route, { used_today: 0, daily_quota: 100 })
       if (method === 'POST' && path === '/document/upload') {

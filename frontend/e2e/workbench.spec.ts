@@ -1,7 +1,16 @@
 import { readFile } from 'node:fs/promises'
 import { Buffer } from 'node:buffer'
 import type { Locator, Page } from '@playwright/test'
-import { test, expect, source, corrected, exportedBytes, sample } from './workbench.fixture'
+import { test, expect, authTokens, source, corrected, exportedBytes, sample } from './workbench.fixture'
+
+async function readTokens(page: Page) {
+  return page.evaluate(() => ({ access: localStorage.getItem('access_token'), refresh: localStorage.getItem('refresh_token') }))
+}
+async function loggedOut(page: Page) {
+  await expect(page).toHaveURL(/\/login$/)
+  await expect(page.locator('.login-page')).toBeVisible()
+  await expect.poll(() => readTokens(page)).toEqual({ access: null, refresh: null })
+}
 
 async function upload(page: Page) {
   await page.goto('/proofread/document')
@@ -156,4 +165,107 @@ test('万字文章与300条问题的渲染、单处修改、撤销性能基准',
   expect(metrics.initial_render_ms).toBeLessThan(10_000)
   expect(metrics.accept_ms).toBeLessThan(3_000)
   expect(metrics.undo_ms).toBeLessThan(3_000)
+})
+
+test('管理员取消退出保留未保存规则和令牌，保存后再次退出须确认离开', async ({ page, scenario }) => {
+  scenario.admin = true
+  const path = '/admin/system-config/domain-prompts'
+  const saves = () => scenario.calls.filter(call => call.method === 'PUT' && call.path === path)
+  await page.goto('/admin/domain-rules')
+  await expect(page.locator('.account-button')).toContainText('回归测试')
+  const editor = page.getByRole('textbox', { name: '自定义审校规则' })
+  const save = page.getByRole('button', { name: '保存并生效', exact: true })
+  const draft = '检查专有术语，保留经人工确认的例外。'
+  await editor.fill(draft)
+  await expect(save).toBeEnabled()
+  expect(await readTokens(page)).toEqual(authTokens)
+
+  await page.locator('.account-button').click()
+  await page.getByRole('menuitem', { name: '退出登录', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '离开规则编辑', exact: true })
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('尚有未保存的规则，离开后将丢失修改。')
+  await expect(page).toHaveURL(/\/admin\/domain-rules$/)
+  expect(await readTokens(page)).toEqual(authTokens)
+  expect(saves()).toHaveLength(0)
+  await dialog.getByRole('button', { name: '继续编辑', exact: true }).click()
+  await expect(dialog).not.toBeVisible()
+  await expect(page).toHaveURL(/\/admin\/domain-rules$/)
+  await expect(editor).toHaveValue(draft)
+  expect(await readTokens(page)).toEqual(authTokens)
+
+  await save.click()
+  await expect(page.getByText('规则已保存，后续审校使用新规则', { exact: true })).toBeVisible()
+  await expect(save).toBeDisabled()
+  expect(saves()).toEqual([{ method: 'PUT', path, body: { general: draft, official: '', legal: '' } }])
+  expect(await readTokens(page)).toEqual(authTokens)
+
+  await editor.fill(`${draft}\n再次修改，确认离开时不保存。`)
+  await expect(save).toBeEnabled()
+  await page.locator('.account-button').click()
+  await page.getByRole('menuitem', { name: '退出登录', exact: true }).click()
+  await expect(dialog).toBeVisible()
+  expect(await readTokens(page)).toEqual(authTokens)
+  await dialog.getByRole('button', { name: '离开', exact: true }).click()
+  await loggedOut(page)
+  expect(saves()).toHaveLength(1)
+})
+
+test('管理员模型搜索支持供应商显示名、内部代码、模型与名称，并保留状态筛选', async ({ page, scenario }) => {
+  scenario.admin = true
+  await page.goto('/admin/llm')
+  const cards = page.locator('.config-card')
+  const names = cards.locator('.name-text')
+  const query = page.getByRole('textbox', { name: '搜索模型服务' })
+  const status = page.getByRole('combobox', { name: '模型服务状态' })
+  const empty = page.getByText('没有匹配的模型服务', { exact: true })
+  await expect(names).toHaveText(['生产模型', '停用模型'])
+  await expect(cards.first().getByText('阿里百炼 (通义千问)', { exact: true })).toBeVisible()
+
+  for (const keyword of ['阿里百炼', '通义千问', 'qwen']) {
+    await query.fill(keyword)
+    await expect(names).toHaveText(['生产模型', '停用模型'])
+  }
+  for (const keyword of ['qwen-test', '生产模型']) {
+    await query.fill(keyword)
+    await expect(names).toHaveText(['生产模型'])
+  }
+  await query.fill('不存在的模型服务')
+  await expect(cards).toHaveCount(0)
+  await expect(empty).toBeVisible()
+  await query.clear()
+  await expect(names).toHaveText(['生产模型', '停用模型'])
+  await expect(empty).not.toBeVisible()
+
+  await status.click()
+  await page.getByRole('option', { name: '已停用', exact: true }).click()
+  await expect(names).toHaveText(['停用模型'])
+  await query.fill('阿里百炼')
+  await expect(names).toHaveText(['停用模型'])
+  await query.fill('qwen-test')
+  await expect(cards).toHaveCount(0)
+  await expect(empty).toBeVisible()
+  await status.click()
+  await page.getByRole('option', { name: '已启用', exact: true }).click()
+  await expect(names).toHaveText(['生产模型'])
+  await query.clear()
+  await expect(names).toHaveText(['生产模型'])
+  await status.click()
+  await page.getByRole('option', { name: '全部服务', exact: true }).click()
+  await expect(names).toHaveText(['生产模型', '停用模型'])
+
+  expect(scenario.calls.map(call => `${call.method} ${call.path}`).sort()).toEqual([
+    'GET /admin/llm-config', 'GET /admin/llm-config/providers', 'GET /auth/me', 'GET /site/info',
+  ])
+})
+
+test('普通用户从文档审校工作区退出后清除双令牌和退出查询参数', async ({ page, scenario }) => {
+  await page.goto('/proofread/document?review=7')
+  await ready(page)
+  await expect(page.locator('.user-info')).toContainText('回归测试')
+  expect(await readTokens(page)).toEqual(authTokens)
+  await page.locator('.user-info').click()
+  await page.getByRole('menuitem', { name: '退出登录', exact: true }).click()
+  await loggedOut(page)
+  expect(scenario.calls.every(call => call.method === 'GET')).toBe(true)
 })
