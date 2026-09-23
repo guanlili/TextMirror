@@ -33,6 +33,8 @@ dist/
 # ---- Node.js ----
 frontend/node_modules/
 frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
 
 # ---- Docker 构建产物 ----
 docker-images/*.tar
