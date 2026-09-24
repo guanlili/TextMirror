@@ -201,3 +201,34 @@ async def test_failed_upload_leaves_no_partial_file(client):
     with pytest.raises(UploadRejected):
         await _store(b"garbage-not-pdf", "a.pdf")
     assert not os.path.exists(os.path.join(settings.UPLOAD_DIR, FILE_ID))
+
+
+def test_upload_cache_char_cap_evicts_large_entries():
+    """进程内文本缓存的字符总量上限：单条超限不入缓存，累计超限按 LRU 淘汰。"""
+    import app.api.v1.document as doc
+
+    saved_cache = dict(doc._uploaded_files_cache)
+    saved_chars = doc._upload_cache_chars
+    doc._uploaded_files_cache.clear()
+    doc._upload_cache_chars = 0
+    try:
+        cap = doc._UPLOAD_CACHE_MAX_CHARS
+        # 单条超上限：不入缓存
+        doc._cache_put("huge", {"text": "x" * (cap + 1)})
+        assert doc._cache_get("huge") is None
+        assert doc._upload_cache_chars == 0
+
+        # 两条各占 60% → 累计 120% 超限，最早的被淘汰
+        doc._cache_put("a", {"text": "y" * int(cap * 0.6)})
+        doc._cache_put("b", {"text": "z" * int(cap * 0.6)})
+        assert doc._cache_get("a") is None
+        assert doc._cache_get("b") is not None
+        assert doc._upload_cache_chars <= cap
+
+        # invalidate 归还配额
+        doc.invalidate_document_cache("b")
+        assert doc._upload_cache_chars == 0
+    finally:
+        doc._uploaded_files_cache.clear()
+        doc._uploaded_files_cache.update(saved_cache)
+        doc._upload_cache_chars = saved_chars

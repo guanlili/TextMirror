@@ -6,6 +6,9 @@
 
 ## [Unreleased]
 
+### 修复与安全
+- 飞书登录/SSO 链路日志手机号脱敏（前3后4保留）；上传文本进程内缓存加字符总量上限（单条超限不入缓存走 DB 回源，累计超限 LRU 淘汰），防大文档撑爆单 worker 内存。([#126](https://github.com/guanlili/TextMirror/pull/126))
+
 ### 修复与性能
 - webhook 投递前增加 SSRF 复检（防设置后 DNS 重绑定指向内网；DNS 抖动仍走既有 Celery 重试不误杀），设置侧域名解析移入线程池不再阻塞事件循环。([#125](https://github.com/guanlili/TextMirror/pull/125))
 - 事实核查设置层密钥判断改为解密后校验，SECRET_KEY 轮换后不再误报「已配置」；协作审校三处吞异常补日志。([#125](https://github.com/guanlili/TextMirror/pull/125))
