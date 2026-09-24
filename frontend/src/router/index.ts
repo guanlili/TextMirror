@@ -194,7 +194,7 @@ router.beforeEach(async (to) => {
 
   // 显式退出要先通过离开守卫，再由发起方清除凭证。
   if (to.name === 'Login' && token) {
-    const hasFeishuParams = to.query.code || to.query.feishu_token
+    const hasFeishuParams = to.query.code || to.hash.includes('feishu_token')
     if (!hasFeishuParams && to.query.logout !== '1') return { path: '/' }
   }
 
