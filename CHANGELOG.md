@@ -6,6 +6,11 @@
 
 ## [Unreleased]
 
+### 修复与性能
+- webhook 投递前增加 SSRF 复检（防设置后 DNS 重绑定指向内网；DNS 抖动仍走既有 Celery 重试不误杀），设置侧域名解析移入线程池不再阻塞事件循环。([#125](https://github.com/guanlili/TextMirror/pull/125))
+- 事实核查设置层密钥判断改为解密后校验，SECRET_KEY 轮换后不再误报「已配置」；协作审校三处吞异常补日志。([#125](https://github.com/guanlili/TextMirror/pull/125))
+- 后台文档列表 defer 大字段、密钥列表日用量改 Redis pipeline 批量、今日用量统计改可索引日期范围、LLM 重试加指数退避。([#125](https://github.com/guanlili/TextMirror/pull/125))
+
 ### 修复与安全
 - 管理端用户更新接口的角色/启用状态变更收归超级管理员专属，堵住普通管理员自我提权与停用超管的路径；系统设置默认密码不再明文回传（掩码 `******`，掩码提交视为不修改）。([#124](https://github.com/guanlili/TextMirror/pull/124))
 - 飞书 SSO token 改经 URL fragment 传递并由前端读后擦除，不再进入服务端/代理访问日志；下线管理后台飞书配置死表单（运行时始终由环境变量驱动，写入 Redis 的配置无消费方）。([#124](https://github.com/guanlili/TextMirror/pull/124))

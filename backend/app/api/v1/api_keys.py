@@ -2,6 +2,7 @@
 TextMirror API 密钥自助管理
 创建/列表/吊销，仅支持 JWT 登录态（API 密钥本身不能管理密钥，防止泄漏后自我复制）
 """
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import List
 from uuid import uuid4
@@ -15,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.rate_limit import get_api_key_daily_usage
+from app.core.rate_limit import get_api_keys_daily_usage
 from app.core.security import generate_api_key
 from app.models.api_key import ApiKey
 from app.models.proofread import ProofreadRecord
@@ -155,8 +156,9 @@ async def list_api_keys(
         logger.warning(f"读取回调投递状态失败（不影响列表）: {e}")
 
     items = []
+    used_today_map = await get_api_keys_daily_usage(keys)
     for k in keys:
-        used_today = await get_api_key_daily_usage(k)
+        used_today = used_today_map.get(k.id)
         items.append(ApiKeyItem(
             id=k.id,
             name=k.name,
@@ -231,7 +233,8 @@ async def set_api_key_webhook(
 
     url = body.url.strip()
     try:
-        validate_webhook_url(url, allow_private=settings.DEBUG)
+        # getaddrinfo 是同步阻塞调用，挪到线程池避免卡事件循环
+        await asyncio.to_thread(validate_webhook_url, url, allow_private=settings.DEBUG)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
