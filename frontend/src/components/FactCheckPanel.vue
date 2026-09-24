@@ -528,12 +528,19 @@ function showError(cause: unknown, kind: string) {
 }
 function acceptRun(run: FactCheckRun, expectedId?: number) {
   if (run.record_id !== props.recordId || (expectedId !== undefined && run.id !== expectedId)) throw new Error('返回的核查任务与当前记录不匹配，请重新读取。')
+  // 任务或状态发生变化说明仍在推进，重置轮询退避；长时间无变化才逐步放缓
+  const previous = active.value
+  if (!previous || previous.id !== run.id || previous.status !== run.status) pollCount = 0
   active.value = run
   history.value = [run, ...history.value.filter(item => item.id !== run.id)].sort((a, b) => b.id - a.id).slice(0, 20)
 }
+let pollCount = 0
 function schedulePoll() {
   if (!alive || !expanded.value || !isRunning(active.value) || error.value || authExpired.value) return
-  timer = setTimeout(() => { timer = null; void refreshRun() }, 1800)
+  // 指数退避：1.8s 起步、1.5 倍递增、封顶 15s——联网核查常为数分钟，固定 1.8s 会产生上百次无效请求
+  const interval = Math.min(1800 * 1.5 ** pollCount, 15000)
+  pollCount += 1
+  timer = setTimeout(() => { timer = null; void refreshRun() }, interval)
 }
 async function loadPanel() {
   if (!alive || !expanded.value || !user.isLoggedIn || props.recordId === null) return

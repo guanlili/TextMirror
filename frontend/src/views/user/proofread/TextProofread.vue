@@ -85,7 +85,7 @@
           >
             返回编辑
           </el-button>
-          <span class="text-count">{{ Array.from(inputText).length.toLocaleString() }}{{ collaborationMode ? ' / 8,000' : ' / 100,000' }} 字<small>{{ inputText.trim() ? '⌘ / Ctrl + Enter 开始' : '输入文本后即可开始' }}</small></span>
+          <span class="text-count">{{ charCount.toLocaleString() }}{{ collaborationMode ? ' / 8,000' : ' / 100,000' }} 字<small>{{ inputText.trim() ? '⌘ / Ctrl + Enter 开始' : '输入文本后即可开始' }}</small></span>
         </div>
       </el-card>
       <!-- 校对设置 -->
@@ -257,7 +257,7 @@
       class="result-section"
     >
       <div class="review-heading">
-        <div><span class="review-eyebrow">审校结果</span><h2>逐条确认，让内容更准确</h2><p>共 {{ issues.length }} 项建议 · 已接受 {{ issues.filter(i => i._accepted).length }} 项 · 已忽略 {{ issues.filter(i => i._ignored).length }} 项</p></div>
+        <div><span class="review-eyebrow">审校结果</span><h2>逐条确认，让内容更准确</h2><p>共 {{ issues.length }} 项建议 · 已接受 {{ acceptedCount }} 项 · 已忽略 {{ ignoredCount }} 项</p></div>
       </div>
       <details class="review-tools">
         <summary>草稿与版本管理{{ hasUnsavedChanges ? ' · 有未保存的修改' : '' }}</summary>
@@ -458,8 +458,8 @@
               <!-- 汇总问题列表：共识在前，独有按模型数×严重度排序 -->
               <div class="compare-issues">
                 <div
-                  v-for="(item, i) in summaryIssues"
-                  :key="i"
+                  v-for="item in summaryIssues"
+                  :key="issueKey(item.issue)"
                   class="compare-issue-item"
                   :class="{ 'is-consensus': item.isConsensus, 'is-accepted': item.issue._accepted, 'is-ignored': item.issue._ignored }"
                 >
@@ -625,13 +625,13 @@
                     effect="plain"
                     size="small"
                   >
-                    独有 {{ summaryIssues.filter(item => item.modelCount === 1 && item.modelIds.includes(r.config_id)).length }} 个
+                    独有 {{ uniqueCountOf(r.config_id) }} 个
                   </el-tag>
                 </div>
                 <div class="compare-issues">
                   <div
-                    v-for="(issue, i) in r.issues"
-                    :key="i"
+                    v-for="issue in r.issues"
+                    :key="issueKey(issue)"
                     class="compare-issue-item"
                     :class="{ 'is-consensus': isConsensusIssue(issue), 'is-accepted': issue._accepted, 'is-ignored': issue._ignored }"
                   >
@@ -894,139 +894,34 @@
               </div>
             </template>
             <div class="issues-list">
+              <IssueCard
+                v-for="issue in visibleIssues"
+                :key="issueKey(issue)"
+                :issue="issue"
+                :number="getGlobalIndex(issue) + 1"
+                :active="activeIssueIndex === getGlobalIndex(issue)"
+                :context="issueContext(issue)"
+                :provenance="collaboration ? issueProvenance(issue) : ''"
+                :feedback-disabled="recordId === null"
+                @activate="activeIssueIndex = getGlobalIndex(issue)"
+                @deactivate="activeIssueIndex = -1"
+                @accept="acceptIssue(issue)"
+                @delete="deleteIssue(issue)"
+                @accept-matching="acceptMatching(issue)"
+                @ignore="ignoreIssue(issue)"
+                @undo="undoIssue(issue)"
+                @feedback="qualityFeedback?.open(issue)"
+              />
               <div
-                v-for="(issue, index) in filteredIssues"
-                :key="index"
-                class="issue-item"
-                :class="{
-                  'is-accepted': issue._accepted,
-                  'is-ignored': issue._ignored,
-                  'is-active': activeIssueIndex === getGlobalIndex(issue),
-                }"
-                tabindex="0"
-                @focus="activeIssueIndex = getGlobalIndex(issue)"
-                @click="activeIssueIndex = getGlobalIndex(issue)"
-                @mouseenter="activeIssueIndex = getGlobalIndex(issue)"
-                @mouseleave="activeIssueIndex = -1"
+                v-if="filteredIssues.length > visibleCount"
+                class="issues-more"
               >
-                <div class="issue-header">
-                  <span class="issue-number">#{{ getGlobalIndex(issue) + 1 }}</span>
-                  <el-tag
-                    :type="severityColor(issue.severity)"
-                    size="small"
-                    effect="dark"
-                  >
-                    {{ typeLabel(issue.type) }}
-                  </el-tag>
-                  <el-tag
-                    :type="severityTagType(issue.severity)"
-                    size="small"
-                    effect="plain"
-                  >
-                    {{ severityLabel(issue.severity) }}
-                  </el-tag>
-                </div>
-                <div class="issue-body">
-                  <div class="issue-context">
-                    {{ issueContext(issue) }}
-                  </div>
-                  <div class="issue-diff">
-                    <span
-                      class="text text-del"
-                      :title="issue.original"
-                    >{{ issue.original }}</span>
-                    <el-icon class="arrow-icon">
-                      <Right />
-                    </el-icon>
-                    <span
-                      class="text text-add"
-                      :title="issue.suggestion"
-                    >{{ issue.suggestion }}</span>
-                  </div>
-                  <div
-                    v-if="issue.explanation"
-                    class="issue-explanation"
-                  >
-                    <el-icon><InfoFilled /></el-icon>
-                    <span>{{ issue.explanation }}</span>
-                  </div>
-                  <p
-                    v-if="collaboration"
-                    class="collaboration-note"
-                    data-testid="collaboration-provenance"
-                  >
-                    {{ issueProvenance(issue) }}
-                  </p>
-                </div>
-                <div
-                  v-if="!issue._accepted && !issue._ignored"
-                  class="issue-actions"
+                <el-button
+                  size="small"
+                  @click="visibleCount += ISSUES_PAGE_SIZE"
                 >
-                  <el-button
-                    v-if="issue.suggestion"
-                    type="primary"
-                    size="small"
-                    @click="acceptIssue(issue)"
-                  >
-                    <el-icon><Check /></el-icon>仅修改此处
-                  </el-button>
-                  <el-button
-                    v-else-if="issue.type === 'sensitive' && issue.original"
-                    type="warning"
-                    size="small"
-                    @click="deleteIssue(issue)"
-                  >
-                    <el-icon><Delete /></el-icon>删除该词
-                  </el-button>
-                  <el-button
-                    v-if="issue.suggestion || issue.type === 'sensitive'"
-                    size="small"
-                    @click="acceptMatching(issue)"
-                  >
-                    全文同类
-                  </el-button>
-                  <el-button
-                    size="small"
-                    @click="ignoreIssue(issue)"
-                  >
-                    <el-icon><Close /></el-icon>忽略
-                  </el-button>
-                </div>
-                <div
-                  v-else
-                  class="issue-status"
-                >
-                  <el-tag
-                    v-if="issue._accepted"
-                    type="success"
-                    size="small"
-                  >
-                    已接受
-                  </el-tag>
-                  <el-tag
-                    v-if="issue._ignored"
-                    type="info"
-                    size="small"
-                  >
-                    已忽略
-                  </el-tag>
-                  <el-button
-                    v-if="issue._ignored"
-                    text
-                    size="small"
-                    :disabled="recordId === null"
-                    @click="qualityFeedback?.open(issue)"
-                  >
-                    补充原因（可选）
-                  </el-button>
-                  <el-button
-                    text
-                    size="small"
-                    @click="undoIssue(issue)"
-                  >
-                    撤销
-                  </el-button>
-                </div>
+                  加载更多（剩余 {{ filteredIssues.length - visibleCount }} 项）
+                </el-button>
               </div>
               <el-empty
                 v-if="filteredIssues.length === 0"
@@ -1043,7 +938,8 @@
 <script setup lang="ts">
 import ProfessionalRules from '@/components/ProfessionalRules.vue'
 import ProofreadEntry from '@/components/ProofreadEntry.vue'
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import IssueCard from '@/components/IssueCard.vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { textProofreadApi, proofreadCompareApi, type ProofreadCompareResponse, type ProofreadCoverage, type ProofreadIssue } from '@/api/proofread'
@@ -1080,6 +976,7 @@ const {
   activeIssueIndex,
   recordId,
   filteredIssues,
+  acceptedCount,
   getGlobalIndex,
   sourceText,
   patches,
@@ -1094,6 +991,18 @@ const {
   undoIssue,
   handleAcceptAll,
 } = useProofreadReview()
+
+const charCount = computed(() => Array.from(inputText.value).length)
+const ignoredCount = computed(() => issues.value.filter(issue => issue._ignored).length)
+// sourceText 的字符数组缓存：issueContext 每条问题都要按位取上下文，避免每次渲染全量 Array.from
+const sourceChars = computed(() => Array.from(sourceText.value))
+
+// 问题列表渐进渲染：首批 100 条，「加载更多」递增——数百问题的长文不再一次性渲染全量卡片；
+// 组件化后 hover/接受只重渲染单张卡片，不再触发整页 diff
+const ISSUES_PAGE_SIZE = 100
+const visibleCount = ref(ISSUES_PAGE_SIZE)
+const visibleIssues = computed(() => filteredIssues.value.slice(0, visibleCount.value))
+watch([filterType, issues], () => { visibleCount.value = ISSUES_PAGE_SIZE })
 
 const route = useRoute()
 const router = useRouter()
@@ -1168,13 +1077,11 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', handleBeforeUnl
 
 function issueContext(issue: ReviewIssue) {
   if (issue.start == null || issue.start < 0) return '无法精确定位，请人工核对'
-  const chars = Array.from(sourceText.value)
+  const chars = sourceChars.value
   return `第 ${issue.start + 1} 字：${chars.slice(Math.max(0, issue.start - 12), Math.min(chars.length, (issue.end ?? issue.start) + 12)).join('')}`
 }
 
 const issueKey = reviewIssueKey
-
-const severityTagType = severityColor
 
 // 初始化：历史审阅或协作任务刷新恢复；不把协作原文写入浏览器存储。
 let pageAlive = true
@@ -1434,8 +1341,25 @@ function comparePendingCountOf(r: { issues: ReviewIssue[] }): number {
   return r.issues.filter(i => !i._accepted && !i._ignored).length
 }
 
+// 共识/独有判定预构建索引：模板 v-for 内 O(1) 查询，替代逐条全表扫描
+const consensusKeySet = computed(() => new Set(
+  summaryIssues.value.filter(item => item.isConsensus).map(item => issueKey(item.issue))
+))
+const uniqueCountByModel = computed(() => {
+  const map = new Map<number, number>()
+  for (const item of summaryIssues.value) {
+    if (item.modelCount !== 1) continue
+    const id = item.modelIds[0]
+    map.set(id, (map.get(id) || 0) + 1)
+  }
+  return map
+})
+function uniqueCountOf(configId: number): number {
+  return uniqueCountByModel.value.get(configId) || 0
+}
+
 function isConsensusIssue(issue: ReviewIssue) {
-  return summaryIssues.value.some(item => issueKey(item.issue) === issueKey(issue) && item.isConsensus)
+  return consensusKeySet.value.has(issueKey(issue))
 }
 
 // 领域标签
@@ -1810,133 +1734,7 @@ async function goBack() {
   }
 }
 
-.issues-list {
-  .issue-item {
-    padding: 14px 14px 12px;
-    border: 1px solid #e5e7eb;
-    border-radius: 10px;
-    margin-bottom: 12px;
-    background: var(--surface);
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    cursor: pointer;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-
-    &:hover {
-      box-shadow: 0 4px 16px rgba(99, 102, 241, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
-      border-color: #c7d2fe;
-      transform: translateY(-1px);
-    }
-
-    &.is-active {
-      border-color: #fbbf24;
-      box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.12), 0 4px 12px rgba(251, 191, 36, 0.15);
-      background: linear-gradient(135deg, #fffbeb 0%, #ffffff 100%);
-    }
-
-    &.is-accepted {
-      opacity: 0.65;
-      background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);
-      border-color: #bbf7d0;
-    }
-
-    &.is-ignored {
-      opacity: 0.5;
-      background: var(--surface-soft);
-      border-color: #e5e7eb;
-    }
-  }
-
-  .issue-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 10px;
-
-    .issue-number {
-      font-size: 11px;
-      font-weight: 600;
-      color: #6b7280;
-      min-width: 28px;
-      background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
-      padding: 3px 7px;
-      border-radius: 6px;
-      letter-spacing: 0.02em;
-    }
-  }
-
-  .issue-body {
-    font-size: 14px;
-    line-height: 1.6;
-
-    // 原文 → 建议 单行高亮对比
-    .issue-diff {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-      padding: 12px 14px;
-      background: linear-gradient(135deg, #fef2f2 0%, #fafafa 50%, #f0fdf4 100%);
-      border-radius: 8px;
-      margin-bottom: 10px;
-      border: 1px solid #f3f4f6;
-
-      .text {
-        font-size: 15px;
-        font-weight: 600;
-        max-width: 100%;
-        word-break: break-all;
-        line-height: 1.5;
-      }
-
-      .text-del {
-        color: #dc2626;
-        text-decoration: line-through;
-        text-decoration-thickness: 2px;
-        text-decoration-color: #fca5a5;
-      }
-
-      .text-add {
-        color: #059669;
-      }
-
-      .arrow-icon {
-        font-size: 20px;
-        color: #f59e0b;
-        flex-shrink: 0;
-        font-weight: bold;
-      }
-    }
-
-    .issue-explanation {
-      display: flex;
-      align-items: flex-start;
-      gap: 6px;
-      color: #6b7280;
-      font-size: 13px;
-      padding: 6px 8px;
-      background: #f9fafb;
-      border-radius: 6px;
-      border-left: 2px solid #e5e7eb;
-
-      .el-icon {
-        margin-top: 2px;
-        color: #9ca3af;
-        flex-shrink: 0;
-      }
-    }
-  }
-
-  .issue-actions, .issue-status {
-    margin-top: 10px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-
-    .el-button .el-icon {
-      margin-right: 4px;
-    }
-  }
-}
+.issues-more { display: flex; justify-content: center; padding: 4px 0 8px; }
 
 /* ===== 移动端响应式 ===== */
 @media (max-width: 768px) {
@@ -2133,7 +1931,7 @@ async function goBack() {
 .advanced-toggle { text-align: left; border: 0; background: none; padding: 12px 0 0; border-top: 1px solid var(--color-border); color: var(--color-primary); cursor: pointer; font-size: 12px; order: 2; }.advanced-row { order: 3; }.proofread-settings > .setting-row:has(.el-select) { order: 4; }.settings-note { order: 5; display: flex; gap: 8px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.8; padding-top: 6px; }.settings-note .el-icon { flex-shrink: 0; margin-top: 4px; }
 .review-heading { margin: 4px 0 24px; }.review-eyebrow { font-size: 12px; color: var(--color-primary); }.review-heading h2 { font-size: 24px; font-weight: 600; margin: 10px 0; }.review-heading p { color: var(--color-text-secondary); font-size: 13px; }
 .review-tools { border: 1px solid var(--color-border); background: var(--surface); border-radius: 8px; margin-bottom: 10px; }.review-tools summary { cursor: pointer; padding: 13px 16px; font-size: 13px; color: var(--color-text-secondary); }.review-tools[open] { padding-bottom: 14px; }
-.result-toolbar { box-shadow: none; border: 1px solid var(--color-border); margin-top: 16px; flex-wrap: wrap; }.result-columns { grid-template-columns: minmax(0, 1.35fr) minmax(340px, 1fr); height: max(600px, calc(100vh - 230px)); }.column-card { box-shadow: none; }.issue-item { scroll-margin-top: 20px; }.issue-item:focus-visible { outline: 2px solid var(--color-primary); }
+.result-toolbar { box-shadow: none; border: 1px solid var(--color-border); margin-top: 16px; flex-wrap: wrap; }.result-columns { grid-template-columns: minmax(0, 1.35fr) minmax(340px, 1fr); height: max(600px, calc(100vh - 230px)); }.column-card { box-shadow: none; }
 @media(max-width:1150px) { .input-section { grid-template-columns: minmax(0, 1fr) 270px; gap: 16px; }.result-columns { grid-template-columns: 1fr; height: auto; }.result-columns .column-card { max-height: 650px; } }
 @media(max-width:700px) { .input-section { grid-template-columns: 1fr; }.proofread-settings { padding: 8px 0; }.scenario-list { grid-template-columns: 1fr 1fr; }.editor-wrapper :deep(.el-textarea__inner) { min-height: 280px !important; padding: 20px; }.action-bar { padding: 14px; }.action-bar :deep(.el-button--large) { min-width: 110px; }.result-toolbar .toolbar-info { flex-wrap: wrap; }.review-heading h2 { font-size: 21px; } }
 
