@@ -353,13 +353,6 @@ export interface BasicSettingsConfig {
   maintenance_mode: boolean
 }
 
-export interface FeishuSettingsConfig {
-  enabled: boolean
-  app_id: string
-  app_secret: string
-  redirect_uri: string
-}
-
 export interface SecuritySettingsConfig {
   default_password: string
 }
@@ -376,14 +369,6 @@ export function getBasicSettingsApi(): Promise<BasicSettingsConfig> {
 
 export function updateBasicSettingsApi(data: BasicSettingsConfig): Promise<BasicSettingsConfig> {
   return request.put('/admin/system-config/basic', data)
-}
-
-export function getFeishuSettingsApi(): Promise<FeishuSettingsConfig> {
-  return request.get('/admin/system-config/feishu')
-}
-
-export function updateFeishuSettingsApi(data: FeishuSettingsConfig): Promise<FeishuSettingsConfig> {
-  return request.put('/admin/system-config/feishu', data)
 }
 
 export function getSecuritySettingsApi(): Promise<SecuritySettingsConfig> {

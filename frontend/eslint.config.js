@@ -29,6 +29,8 @@ export default [
         File: "readonly",
         AbortController: "readonly",
         crypto: "readonly",
+        URLSearchParams: "readonly",
+        history: "readonly",
       },
       parserOptions: {
         parser: tseslint.parser,
@@ -51,6 +53,6 @@ export default [
     },
   },
   {
-    ignores: ["dist/", "node_modules/", "test-results/", "playwright-report/", "**/*.d.ts"],
+    ignores: ["dist/", "coverage/", "node_modules/", "test-results/", "playwright-report/", "**/*.d.ts"],
   },
 ];

@@ -20,7 +20,6 @@ router = APIRouter(prefix="/system-config", tags=["系统配置管理"])
 
 # Redis 键前缀
 BASIC_SETTINGS_KEY = "system:config:basic"
-FEISHU_SETTINGS_KEY = "system:config:feishu"
 SECURITY_SETTINGS_KEY = "system:config:security"
 DOMAIN_PROMPTS_KEY = "system:config:domain_prompts"
 
@@ -77,75 +76,26 @@ async def update_basic_settings(
 
 
 # ========== 飞书配置 ==========
-class FeishuSettingsConfig(BaseModel):
-    """飞书对接配置"""
-    enabled: bool = False
-    app_id: str = ""
-    app_secret: str = ""
-    redirect_uri: str = ""
-
-
-@router.get("/feishu", response_model=FeishuSettingsConfig, summary='获取飞书配置')
-async def get_feishu_settings(
-    _user=Depends(require_permission("admin:settings:edit")),
-):
-    """获取飞书配置"""
-    redis = await get_redis()
-    data = await redis.hgetall(FEISHU_SETTINGS_KEY)
-
-    if not data:
-        return FeishuSettingsConfig()
-
-    return FeishuSettingsConfig(
-        enabled=data.get("enabled") == "1",
-        app_id=data.get("app_id", ""),
-        app_secret=decrypt_secret(data.get("app_secret", "")),
-        redirect_uri=data.get("redirect_uri", ""),
-    )
-
-
-@router.put("/feishu", response_model=FeishuSettingsConfig, summary='更新飞书配置')
-async def update_feishu_settings(
-    config: FeishuSettingsConfig,
-    _user=Depends(require_permission("admin:settings:edit")),
-):
-    """更新飞书配置"""
-    redis = await get_redis()
-    await redis.hset(
-        FEISHU_SETTINGS_KEY,
-        mapping={
-            "enabled": "1" if config.enabled else "0",
-            "app_id": config.app_id,
-            "app_secret": encrypt_secret(config.app_secret),
-            "redirect_uri": config.redirect_uri,
-        }
-    )
-    logger.info(f"飞书配置已更新（app_id={config.app_id}）")
-    return config
+# 飞书登录运行时配置由环境变量驱动（FEISHU_ENABLED/FEISHU_APP_ID/FEISHU_APP_SECRET/FEISHU_REDIRECT_URI），
+# 此前后台的飞书配置表单写入 Redis 后无任何消费方（死配置），已连同端点一并移除。
 
 
 # ========== 安全设置 ==========
+# 掩码哨兵：GET 只回掩码，PUT 收到掩码表示「不修改」
+PASSWORD_MASK = "******"
+
+
 class SecuritySettingsConfig(BaseModel):
     """用户安全设置"""
-    default_password: str = "admin123"
+    default_password: str = PASSWORD_MASK
 
 
 @router.get("/security", response_model=SecuritySettingsConfig, summary='获取安全设置')
 async def get_security_settings(
     _user=Depends(require_permission("admin:settings:edit")),
 ):
-    """获取安全设置"""
-    redis = await get_redis()
-    data = await redis.hgetall(SECURITY_SETTINGS_KEY)
-
-    if not data:
-        # 返回配置文件中的默认密码
-        return SecuritySettingsConfig(default_password=settings.DEFAULT_USER_PASSWORD)
-
-    stored = data.get("default_password")
-    return SecuritySettingsConfig(
-        default_password=decrypt_secret(stored) if stored else settings.DEFAULT_USER_PASSWORD,
-    )
+    """获取安全设置（默认密码只回掩码，不回明文）"""
+    return SecuritySettingsConfig(default_password=PASSWORD_MASK)
 
 
 @router.put("/security", response_model=SecuritySettingsConfig, summary='更新安全设置')
@@ -153,7 +103,10 @@ async def update_security_settings(
     config: SecuritySettingsConfig,
     _user=Depends(require_permission("admin:settings:edit")),
 ):
-    """更新安全设置"""
+    """更新安全设置（default_password 传掩码 ****** 表示保持不变）"""
+    if config.default_password == PASSWORD_MASK:
+        return config
+
     redis = await get_redis()
     await redis.hset(
         SECURITY_SETTINGS_KEY,
@@ -161,7 +114,7 @@ async def update_security_settings(
     )
 
     logger.info("用户安全设置已更新")
-    return config
+    return SecuritySettingsConfig(default_password=PASSWORD_MASK)
 
 
 async def get_current_default_password() -> str:

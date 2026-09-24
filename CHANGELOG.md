@@ -11,6 +11,14 @@
 - 事实核查设置层密钥判断改为解密后校验，SECRET_KEY 轮换后不再误报「已配置」；协作审校三处吞异常补日志。([#125](https://github.com/guanlili/TextMirror/pull/125))
 - 后台文档列表 defer 大字段、密钥列表日用量改 Redis pipeline 批量、今日用量统计改可索引日期范围、LLM 重试加指数退避。([#125](https://github.com/guanlili/TextMirror/pull/125))
 
+### 修复与安全
+- 管理端用户更新接口的角色/启用状态变更收归超级管理员专属，堵住普通管理员自我提权与停用超管的路径；系统设置默认密码不再明文回传（掩码 `******`，掩码提交视为不修改）。([#124](https://github.com/guanlili/TextMirror/pull/124))
+- 飞书 SSO token 改经 URL fragment 传递并由前端读后擦除，不再进入服务端/代理访问日志；下线管理后台飞书配置死表单（运行时始终由环境变量驱动，写入 Redis 的配置无消费方）。([#124](https://github.com/guanlili/TextMirror/pull/124))
+- 润色流式接口异常信息脱敏，原始异常仅记日志，对齐对比路径既有范式。([#124](https://github.com/guanlili/TextMirror/pull/124))
+
+### 工程化
+- coverage 生成物移出 git 并补 .gitignore/eslint ignores；eslint globals 白名单补 `URLSearchParams`/`history`。([#124](https://github.com/guanlili/TextMirror/pull/124))
+
 ## [2026-09-22]
 
 ### 修复
