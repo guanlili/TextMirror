@@ -180,6 +180,106 @@ async def test_stream_without_usage_is_unknown(captured):
         await provider.close()
 
 
+class _MockSSEStream(httpx.AsyncByteStream):
+    def __init__(self, chunks, error=None):
+        self.chunks = chunks
+        self.error = error
+
+    async def __aiter__(self):
+        for chunk in self.chunks:
+            yield ("data: " + json.dumps(chunk) + "\n\n").encode()
+        if self.error is not None:
+            raise self.error
+        yield b"data: [DONE]\n\n"
+
+
+def _stream_chunk(content, finish=None):
+    return {"choices": [{"delta": {"content": content}, "finish_reason": finish}]}
+
+
+@pytest.mark.parametrize("error_type", [httpx.ReadTimeout, httpx.ReadError, RuntimeError])
+@pytest.mark.parametrize("verified_endpoint", [False, True])
+async def test_stream_error_after_content_never_retries(captured, monkeypatch, error_type, verified_endpoint):
+    requests = []
+    sleep = AsyncMock()
+    monkeypatch.setattr("app.services.llm.openai_compat.asyncio.sleep", sleep)
+
+    def handler(request):
+        requests.append(request)
+        if len(requests) == 1:
+            stream = _MockSSEStream([_stream_chunk("ABC")], error_type("stream interrupted"))
+        else:
+            stream = _MockSSEStream([_stream_chunk("ABCDEF", "stop")])
+        return httpx.Response(200, stream=stream)
+
+    provider = provider_with(handler, retries=3)
+    if not verified_endpoint:
+        provider._verified_endpoint = None
+    received = []
+    try:
+        with pytest.raises(RuntimeError, match=r"流式 API 调用失败.*stream interrupted"):
+            async for part in provider.chat_stream([]):
+                received.append(part)
+        assert received == ["ABC"]
+        assert [request.url.path for request in requests] == ["/v1/chat/completions"]
+        sleep.assert_not_awaited()
+        assert [event["outcome"] for event in captured] == ["error"]
+    finally:
+        await provider.close()
+
+
+@pytest.mark.parametrize("empty_frames", [False, True])
+async def test_stream_timeout_before_content_retries(captured, monkeypatch, empty_frames):
+    requests = []
+    sleep = AsyncMock()
+    monkeypatch.setattr("app.services.llm.openai_compat.asyncio.sleep", sleep)
+
+    def handler(request):
+        requests.append(request)
+        if len(requests) == 1:
+            chunks = [
+                {"choices": [{"delta": {"role": "assistant"}}]},
+                _stream_chunk(""),
+                {"choices": [], "usage": {"total_tokens": 2}},
+            ] if empty_frames else []
+            stream = _MockSSEStream(chunks, httpx.ReadTimeout("no content yet"))
+        else:
+            stream = _MockSSEStream([_stream_chunk("ABC"), _stream_chunk("DEF", "stop")])
+        return httpx.Response(200, stream=stream)
+
+    provider = provider_with(handler, retries=3)
+    provider._verified_endpoint = None
+    try:
+        assert [part async for part in provider.chat_stream([])] == ["ABC", "DEF"]
+        assert [request.url.path for request in requests] == ["/v1/chat/completions"] * 2
+        sleep.assert_awaited_once()
+        assert 1 <= sleep.await_args.args[0] <= 1.5
+        assert [event["outcome"] for event in captured] == ["error", "success"]
+    finally:
+        await provider.close()
+
+
+async def test_stream_normal_chunks_do_not_retry(captured, monkeypatch):
+    requests = []
+    sleep = AsyncMock()
+    monkeypatch.setattr("app.services.llm.openai_compat.asyncio.sleep", sleep)
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, stream=_MockSSEStream([
+            _stream_chunk(""), _stream_chunk("ABC"), _stream_chunk("DEF", "stop"),
+        ]))
+
+    provider = provider_with(handler, retries=3)
+    try:
+        assert [part async for part in provider.chat_stream([])] == ["ABC", "DEF"]
+        assert len(requests) == 1
+        sleep.assert_not_awaited()
+        assert [event["outcome"] for event in captured] == ["success"]
+    finally:
+        await provider.close()
+
+
 async def test_cancellation_is_metered_and_propagates(captured):
     provider = SimpleNamespace(model="model", config_id=None)
     with pytest.raises(asyncio.CancelledError):

@@ -181,19 +181,16 @@ async def clean_cache(
     """清理 Redis 缓存（保留配置项）"""
     redis = await get_redis()
 
-    # 使用 scan_iter 替代 keys("*")，避免阻塞 Redis；decode_responses=True 下键已是 str
-    cache_keys = [
-        k async for k in redis.scan_iter(match="*")
-        if not k.startswith("system:")
-    ]
+    # Redis 还存放配置、额度和幂等凭据，只删除可重新计算的分片缓存。
+    cache_keys = [k async for k in redis.scan_iter(match="textmirror:chunk_cache:*")]
 
     if cache_keys:
-        await redis.delete(*cache_keys)
-        logger.info(f"Redis 缓存已清理: {len(cache_keys)} 个键")
+        deleted = await redis.delete(*cache_keys)
+        logger.info(f"Redis 缓存已清理: {deleted} 个键")
         return MaintenanceResult(
             success=True,
-            message=f"已清理 {len(cache_keys)} 个缓存项",
-            deleted_count=len(cache_keys),
+            message=f"已清理 {deleted} 个缓存项",
+            deleted_count=deleted,
         )
 
     return MaintenanceResult(success=True, message="无缓存需要清理")

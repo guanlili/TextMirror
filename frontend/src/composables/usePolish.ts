@@ -312,6 +312,8 @@ export function usePolish() {
     } catch (e: unknown) {
       if ((e as Error)?.name === 'AbortError') {
         streamAborted.value = true
+        // 主动停止或卸载不是流式失败，交由调用方结束操作，禁止同步回退。
+        throw e
       } else {
         // 未收到任何增量则整体失败（回退同步接口）；部分已到则保留已有内容
         if (!gotAny) {
@@ -345,8 +347,12 @@ export function usePolish() {
         originalText.value = inputText.value
         if (!streamAborted.value) ElMessage.success('润色完成')
       }
-    } catch {
-      // 错误已在拦截器中处理
+    } catch (e: unknown) {
+      // 取消后保留部分结果对应的原文，仍可重新生成；不提示成功或回退。
+      if ((e as Error)?.name === 'AbortError' && versions.value.length > 0) {
+        originalText.value = inputText.value
+      }
+      // 其他错误已在拦截器中处理
     } finally {
       loading.value = false
     }

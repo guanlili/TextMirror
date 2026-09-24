@@ -21,7 +21,12 @@ import app.models.user  # noqa
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.file_security import build_download_url, safe_upload_path, sanitize_filename
-from app.core.task_quota import REFUND_TASK_QUOTA_LUA, document_quota_key, refund_document_quota_sync
+from app.core.task_quota import (
+    REFUND_TASK_QUOTA_LUA,
+    document_api_key_quota_key,
+    document_quota_key,
+    refund_document_quota_sync,
+)
 
 _run_async_state = threading.local()
 _DOCUMENT_TIME_BUDGET_S = 240
@@ -71,17 +76,16 @@ def _get_sync_redis():
     )
 
 
-def _refund_key_daily_quota(api_key_id: int, task_id: str) -> bool:
+def _refund_key_daily_quota(api_key_id: int, task_id: str, quota_key: str | None) -> bool:
     try:
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-
-        today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
         with _get_sync_redis() as redis:
-            return bool(redis.eval(
-                REFUND_TASK_QUOTA_LUA, 2, f"textmirror:apikey_daily:{api_key_id}:{today}",
-                f"textmirror:document_key_refund:{task_id}",
-            ))
+            marker = f"textmirror:document_key_refund:{task_id}"
+            if quota_key is None:
+                redis.set(marker, "1", nx=True, ex=172800)
+            else:
+                redis.eval(REFUND_TASK_QUOTA_LUA, 2, quota_key, marker)
+            # 投递端可能已退款，但后台失败通知仍需独立发送一次。
+            return bool(redis.set(f"textmirror:document_failure_notified:{task_id}", "1", nx=True, ex=172800))
     except Exception as e:
         logger.warning(f"[退款] 密钥日配额退还失败 key_id={api_key_id}: {e}")
         return False
@@ -197,6 +201,7 @@ class ProofreadDocumentTask(celery_app.Task):
         refund_task_id = None
         quota_key = None
         api_key_id = None
+        api_key_quota_key = None
         refund_key = False
         failure = None
 
@@ -221,6 +226,7 @@ class ProofreadDocumentTask(celery_app.Task):
                     db_task.finished_at = datetime.now(timezone.utc)
                 refund_task_id, quota_key = db_task.task_id, document_quota_key(db_task)
                 api_key_id = db_task.owner_api_key_id
+                api_key_quota_key = document_api_key_quota_key(db_task)
                 refund_key = db_task.status != "CANCELLED" and db_task.error_code != "INVALID_CONFIG"
                 failure = {"error_code": db_task.error_code or "PROOFREAD_FAILED",
                            "message": db_task.message or "校对任务最终失败"}
@@ -236,7 +242,7 @@ class ProofreadDocumentTask(celery_app.Task):
 
         if refund_key and api_key_id:
             try:
-                if _refund_key_daily_quota(api_key_id, refund_task_id):
+                if _refund_key_daily_quota(api_key_id, refund_task_id, api_key_quota_key):
                     from app.services.webhook import build_event, dispatch_webhook
 
                     dispatch_webhook(api_key_id, build_event("document.failed", refund_task_id, failure))

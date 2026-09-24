@@ -39,6 +39,36 @@ def document_quota_key(task) -> str | None:
     return key
 
 
+def document_api_key_quota_key(task) -> str | None:
+    """密钥退款只接受与任务归属匹配的原日凭据，旧任务不猜测扣费日期。"""
+    params = task.params_json or {}
+    if task.owner_kind != "api_key" or not task.owner_api_key_id:
+        return None
+    if "api_key_quota_key" not in params:
+        logger.warning("文档任务缺少密钥预扣凭据，跳过退款 task={}", task.task_id)
+        return None
+    key = params["api_key_quota_key"]
+    if key is None:
+        return None
+    if not isinstance(key, str) or not re.fullmatch(
+        rf"textmirror:apikey_daily:{task.owner_api_key_id}:[0-9]{{8}}", key,
+    ):
+        logger.warning("文档任务密钥预扣凭据不匹配，跳过退款 task={}", task.task_id)
+        return None
+    return key
+
+
+async def refund_document_api_key_quota(task_id: str, quota_key: str | None) -> None:
+    if not quota_key:
+        return
+    try:
+        await get_redis().eval(
+            REFUND_TASK_QUOTA_LUA, 2, quota_key, f"textmirror:document_key_refund:{task_id}",
+        )
+    except Exception as exc:
+        logger.warning("文档密钥额度退还失败 task={} error={}", task_id, type(exc).__name__)
+
+
 async def refund_document_quota(task_id: str, quota_key: str | None) -> None:
     if not quota_key:
         return

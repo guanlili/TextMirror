@@ -1,5 +1,6 @@
 """普通文档退款闭环：SQLite + 共享 fakeredis，禁用 broker/模型/真实 Redis。"""
 import asyncio
+import json
 import threading
 import uuid
 from contextlib import asynccontextmanager
@@ -17,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.v1 import document as document_api
+from app.api.v1 import open_documents as open_documents_api
 from app.api.v1 import tasks as tasks_api
 from app.celery_app import celery_app
 from app.core import rate_limit, task_quota
@@ -55,6 +57,7 @@ class RefundRedis:
         self.backend = backend
         self.lock = threading.Lock()
         self.eval = Mock(side_effect=self.evaluate)
+        self.set = Mock(side_effect=backend.set)
 
     def __enter__(self):
         return self
@@ -643,10 +646,11 @@ async def test_api_key_failure_commits_before_refund_and_refunds_and_notifies_on
     client, state, monkeypatch, redis_down_first,
 ):
     task = await submit(client, state)
-    await update_task(task, status="RETRYING", owner_kind="api_key", owner_api_key_id=state.api_key.id,
-                      error_code="PROOFREAD_RETRYABLE", started_at=datetime.now(timezone.utc))
-    user_key = task.params_json["quota_key"]
     key_quota = rate_limit._api_key_daily_redis_key(state.api_key)
+    await update_task(task, status="RETRYING", owner_kind="api_key", owner_api_key_id=state.api_key.id,
+                      error_code="PROOFREAD_RETRYABLE", started_at=datetime.now(timezone.utc),
+                      params_json={**task.params_json, "api_key_quota_key": key_quota})
+    user_key = task.params_json["quota_key"]
     state.redis.incr(user_key)
     state.redis.set(key_quota, 2, ex=172800)
     user_marker = f"textmirror:document_refund:{task.task_id}"
@@ -687,7 +691,7 @@ async def test_api_key_failure_commits_before_refund_and_refunds_and_notifies_on
                 state.webhook.assert_not_called()
     assert locked_reads == [True, True, True]
     assert outcomes == ([False, True, False] if redis_down_first else [True, False, False])
-    assert key_refund.call_args_list == [call(state.api_key.id, task.task_id)] * 3
+    assert key_refund.call_args_list == [call(state.api_key.id, task.task_id, key_quota)] * 3
     assert len(snapshots) == 6
     fresh = await load_task(task.task_id)
     assert fresh.status == "FAILURE" and fresh.error_code == "TIMEOUT" and fresh.finished_at is not None
@@ -908,6 +912,70 @@ async def test_dispatch_acknowledgement_loss_does_not_refund_claimed_task(client
     state.refund.eval.assert_not_called()
 
 
+@pytest.mark.parametrize("terminal_status", ["SUCCESS", "FAILURE", "CANCELLED"])
+async def test_task_stream_observes_committed_updates_and_releases_sessions(client, state, monkeypatch, terminal_status):
+    task = await submit(client, state)
+    active_sessions = 0
+
+    @asynccontextmanager
+    async def tracked_session():
+        nonlocal active_sessions
+        active_sessions += 1
+        try:
+            async with async_session_factory() as session:
+                yield session
+        finally:
+            active_sessions -= 1
+
+    async def wait_without_connection(_seconds):
+        assert active_sessions == 0
+
+    monkeypatch.setattr(tasks_api, "async_session_factory", tracked_session)
+    monkeypatch.setattr(tasks_api, "asyncio", SimpleNamespace(sleep=wait_without_connection))
+    response = await tasks_api.stream_task_status(
+        task.task_id, http_request=SimpleNamespace(is_disconnected=AsyncMock(return_value=False)),
+        db=AsyncMock(), current_user=state.owner,
+    )
+    stream = response.body_iterator
+    try:
+        pending = json.loads((await anext(stream)).removeprefix("data: "))
+        assert pending["status"] == "PENDING"
+        assert active_sessions == 0
+
+        await update_task(task, status="PROGRESS", progress=50)
+        progress = json.loads((await anext(stream)).removeprefix("data: "))
+        assert progress["status"] == "PROGRESS" and progress["progress"] == 50
+        assert active_sessions == 0
+
+        await update_task(task, status=terminal_status, progress=100, result_json=RESULT)
+        terminal = json.loads((await anext(stream)).removeprefix("data: "))
+        assert terminal["status"] == terminal_status
+        assert active_sessions == 0
+        if terminal_status == "SUCCESS":
+            assert terminal["result"] == RESULT
+        with pytest.raises(StopAsyncIteration):
+            await anext(stream)
+    finally:
+        await stream.aclose()
+    assert active_sessions == 0
+
+
+async def test_task_stream_disconnect_does_not_query_or_refund_again(client, state, monkeypatch):
+    task = await submit(client, state)
+    request = SimpleNamespace(is_disconnected=AsyncMock(return_value=False))
+    response = await tasks_api.stream_task_status(task.task_id, http_request=request, db=AsyncMock(), current_user=state.owner)
+    stream = response.body_iterator
+    assert json.loads((await anext(stream)).removeprefix("data: "))["status"] == "PENDING"
+    request.is_disconnected.return_value = True
+    factory = Mock(side_effect=AssertionError("Disconnected stream must not open a session"))
+    monkeypatch.setattr(tasks_api, "async_session_factory", factory)
+    monkeypatch.setattr(tasks_api, "asyncio", SimpleNamespace(sleep=AsyncMock()))
+    with pytest.raises(StopAsyncIteration):
+        await anext(stream)
+    factory.assert_not_called()
+    state.refund.eval.assert_not_called()
+
+
 @pytest.mark.parametrize("retry_by", ["cancel", "status", "stream", "worker", "failure"])
 async def test_transient_refund_failure_can_be_retried_safely(client, state, retry_by):
     task = await submit(client, state)
@@ -957,6 +1025,8 @@ async def test_open_document_records_user_receipt_without_expanding_cancel_auth(
     assert response.status_code == 202, response.text
     task = await load_task(response.json()["job_id"])
     assert task.params_json["quota_key"] == rate_limit._daily_key("user_daily", str(state.owner.id))
+    assert task.params_json["api_key_quota_key"] == (
+        rate_limit._api_key_daily_redis_key(state.api_key) if auth_kind == "api_key" else None)
     state.redis.incr(task.params_json["quota_key"])
     if auth_kind == "api_key":
         # 密钥本身和归属用户 JWT 均不获得 Web 取消接口授权。
@@ -970,6 +1040,180 @@ async def test_open_document_records_user_receipt_without_expanding_cancel_auth(
     if auth_kind == "api_key":
         assert state.redis.get(rate_limit._api_key_daily_redis_key(state.api_key)) == "1"
     state.key_refund.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["key_limit", "database", "integrity", "dispatch"])
+async def test_open_document_submission_failure_refunds_original_day(client, state, monkeypatch, failure):
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    clock = SimpleNamespace(day="20000101")
+    monkeypatch.setattr(rate_limit, "_daily_key", lambda prefix, subject: f"textmirror:{prefix}:{subject}:{clock.day}")
+    old = (rate_limit._daily_key("user_daily", str(state.owner.id)), rate_limit._api_key_daily_redis_key(state.api_key))
+    new = tuple(key.replace("20000101", "20000102") for key in old)
+    for key, count in zip((*old, *new), (2, 3, 4, 5)):
+        state.redis.set(key, count, ex=172800)
+
+    if failure == "key_limit":
+        charge = rate_limit.charge_api_key_daily
+
+        async def reject(api_key, weight=1):
+            clock.day = "20000102"
+            api_key.daily_quota = 0
+            return await charge(api_key, weight)
+
+        monkeypatch.setattr(open_documents_api, "charge_api_key_daily", reject)
+    elif failure in ("database", "integrity"):
+        flush = AsyncSession.flush
+
+        async def fail_save(session, *args, **kwargs):
+            if any(isinstance(item, ProofreadTask) for item in session.new):
+                clock.day = "20000102"
+                if failure == "integrity":
+                    raise IntegrityError("INSERT", {}, RuntimeError("duplicate"))
+                raise RuntimeError("database unavailable")
+            return await flush(session, *args, **kwargs)
+
+        monkeypatch.setattr(AsyncSession, "flush", fail_save)
+    else:
+        def fail_dispatch(*args, **kwargs):
+            clock.day = "20000102"
+            raise ConnectionError("broker unavailable")
+        state.dispatch.side_effect = fail_dispatch
+    response = await client.post("/api/v1/open/documents", headers=state.key_headers,
+                                 files={"file": ("open.txt", "测试文本".encode(), "text/plain")})
+    assert response.status_code == {"key_limit": 429, "database": 500, "integrity": 500, "dispatch": 503}[failure]
+    assert clock.day == "20000102"
+    assert state.redis.mget(*old, *new) == ["2", "3", "4", "5"]
+    state.engine.assert_not_awaited()
+
+
+@pytest.mark.parametrize("delivered_status", ["STARTED", "SUCCESS", "FAILURE"])
+async def test_open_dispatch_ack_loss_preserves_claimed_task_charges(client, state, monkeypatch, delivered_status):
+    clock = SimpleNamespace(day="20000101")
+    monkeypatch.setattr(rate_limit, "_daily_key", lambda prefix, subject: f"textmirror:{prefix}:{subject}:{clock.day}")
+    monkeypatch.setattr(worker, "_refund_key_daily_quota", _REAL_KEY_REFUND)
+    old = (rate_limit._daily_key("user_daily", str(state.owner.id)), rate_limit._api_key_daily_redis_key(state.api_key))
+    new = tuple(key.replace("20000101", "20000102") for key in old)
+    for key, count in zip((*old, *new), (2, 3, 4, 5)):
+        state.redis.set(key, count, ex=172800)
+
+    def delivered(*, args, task_id):
+        clock.day = "20000102"
+        with Session(worker._get_sync_engine()) as db:
+            db.execute(update(ProofreadTask).where(ProofreadTask.id == args[0]).values(
+                status="STARTED" if delivered_status == "FAILURE" else delivered_status))
+            db.commit()
+            task = db.get(ProofreadTask, args[0])
+        if delivered_status == "FAILURE":
+            fail(task)
+        raise ConnectionError("ack lost")
+
+    state.dispatch.side_effect = delivered
+    response = await client.post("/api/v1/open/documents", headers=state.key_headers,
+                                 files={"file": ("open.txt", "测试文本".encode(), "text/plain")})
+    assert response.status_code == 503
+    assert state.redis.mget(*old, *new) == (["2", "3", "4", "5"] if delivered_status == "FAILURE" else ["3", "4", "4", "5"])
+    assert state.webhook.call_count == int(delivered_status == "FAILURE")
+
+
+async def test_open_dispatch_replay_and_worker_failure_share_both_refund_markers(client, state, monkeypatch):
+    clock = SimpleNamespace(day="20000101")
+    monkeypatch.setattr(rate_limit, "_daily_key", lambda prefix, subject: f"textmirror:{prefix}:{subject}:{clock.day}")
+    monkeypatch.setattr(worker, "_refund_key_daily_quota", _REAL_KEY_REFUND)
+    headers = {**state.key_headers, "Idempotency-Key": "open-dispatch-replay"}
+    state.dispatch.side_effect = ConnectionError("broker unavailable")
+    response = await client.post("/api/v1/open/documents", headers=headers,
+                                 files={"file": ("open.txt", "测试文本".encode(), "text/plain")})
+    assert response.status_code == 503
+    async with async_session_factory() as db:
+        task = await db.scalar(select(ProofreadTask).where(ProofreadTask.owner_user_id == state.owner.id))
+    old = (task.params_json["quota_key"], task.params_json["api_key_quota_key"])
+    assert state.redis.mget(*old) == ["0", "0"]
+    for key in old:
+        state.redis.incr(key)
+    clock.day = "20000102"
+    new = tuple(key.replace("20000101", "20000102") for key in old)
+    state.redis.mset(dict(zip(new, (4, 5))))
+    state.dispatch.side_effect = None
+    response = await client.post("/api/v1/open/documents", headers=headers,
+                                 files={"file": ("open.txt", "测试文本".encode(), "text/plain")})
+    assert response.status_code == 202
+    assert response.json()["job_id"] == task.task_id
+    await update_task(task, status="RETRYING", error_code="PROOFREAD_RETRYABLE")
+    fail(task)
+    fail(task)
+    assert state.redis.mget(*old, *new) == ["1", "1", "4", "5"]
+    assert state.redis.get(f"textmirror:document_refund:{task.task_id}") == "1"
+    assert state.redis.get(f"textmirror:document_key_refund:{task.task_id}") == "1"
+    assert state.webhook.call_count == 1
+
+
+@pytest.mark.parametrize("receipt_state", ["charged", "none", "expired"])
+async def test_open_document_worker_failure_refunds_original_api_key_day(client, state, monkeypatch, receipt_state):
+    old_user = f"textmirror:user_daily:{state.owner.id}:20000101"
+    old_api = f"textmirror:apikey_daily:{state.api_key.id}:20000101"
+    new_user = rate_limit._daily_key("user_daily", str(state.owner.id))
+    new_api = rate_limit._api_key_daily_redis_key(state.api_key)
+    for key, count in ((old_user, 2), (old_api, 3), (new_user, 4), (new_api, 5)):
+        state.redis.set(key, count, ex=172800)
+    with monkeypatch.context() as charge_day:
+        charge_day.setattr(rate_limit, "_daily_key", lambda prefix, subject: f"textmirror:{prefix}:{subject}:20000101")
+        if receipt_state == "none":
+            charge_day.setattr(redis_module.redis_client, "incrby", AsyncMock(side_effect=ConnectionError("down")))
+        response = await client.post("/api/v1/open/documents", headers=state.key_headers,
+                                     files={"file": ("open.txt", "测试文本".encode(), "text/plain")})
+    assert response.status_code == 202, response.text
+    task = await load_task(response.json()["job_id"])
+    assert task.params_json["api_key_quota_key"] == (None if receipt_state == "none" else old_api)
+    assert task.params_json["quota_key"] == (None if receipt_state == "none" else old_user)
+    if receipt_state == "expired":
+        state.redis.delete(old_user, old_api)
+    monkeypatch.setattr(worker, "_refund_key_daily_quota", _REAL_KEY_REFUND)
+    await update_task(task, status="RETRYING", error_code="PROOFREAD_RETRYABLE")
+    fail(task)
+    fail(task)
+    assert (await load_task(task.task_id)).status == "FAILURE"
+    assert state.redis.mget(old_user, old_api) == ([None, None] if receipt_state == "expired" else ["2", "3"])
+    assert state.redis.mget(new_user, new_api) == ["4", "5"]
+    marker = f"textmirror:document_key_refund:{task.task_id}"
+    assert state.redis.get(marker) == "1"
+    assert state.webhook.call_count == 1
+    if receipt_state == "none":
+        state.refund.eval.assert_not_called()
+
+
+@pytest.mark.parametrize("receipt", ["missing", None, "wrong_owner", "wrong_prefix", "short_date", "suffix", 123])
+async def test_worker_invalid_api_key_receipt_does_not_guess_day(client, state, monkeypatch, receipt):
+    task = await submit(client, state)
+    old_key = f"textmirror:apikey_daily:{state.api_key.id}:20000101"
+    today_key = rate_limit._api_key_daily_redis_key(state.api_key)
+    params = {"quota_key": None}
+    if receipt != "missing":
+        params["api_key_quota_key"] = {
+            "wrong_owner": f"textmirror:apikey_daily:{state.api_key.id + 1}:20000101",
+            "wrong_prefix": f"textmirror:user_daily:{state.api_key.id}:20000101",
+            "short_date": f"textmirror:apikey_daily:{state.api_key.id}:2000011",
+            "suffix": old_key + ":extra",
+        }.get(receipt, receipt)
+    state.redis.set(old_key, 2)
+    state.redis.set(today_key, 4)
+    await update_task(task, status="RETRYING", owner_kind="api_key", owner_api_key_id=state.api_key.id,
+                      params_json=params, created_at=datetime(2000, 1, 1, tzinfo=timezone.utc))
+    monkeypatch.setattr(worker, "_refund_key_daily_quota", _REAL_KEY_REFUND)
+    fail(task)
+    fail(task)
+    assert state.redis.mget(old_key, today_key) == ["2", "4"]
+    state.refund.eval.assert_not_called()
+    assert state.webhook.call_count == 1
+
+
+async def test_worker_none_receipt_only_marks_failure_once(client, state):
+    marker = "textmirror:document_key_refund:task-no-charge"
+    assert _REAL_KEY_REFUND(1, "task-no-charge", None) is True
+    assert _REAL_KEY_REFUND(1, "task-no-charge", None) is False
+    state.refund.eval.assert_not_called()
+    assert state.redis.get(marker) == "1"
+    assert 172790 <= state.redis.ttl(marker) <= 172800
 
 
 @pytest.mark.parametrize("rejected", [False, True])

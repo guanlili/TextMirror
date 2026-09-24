@@ -256,6 +256,7 @@ class OpenAICompatProvider(BaseLLMProvider):
         )
 
         last_error: Optional[Exception] = None
+        content_yielded = False
         for attempt in range(1, self.max_retries + 1):
             for endpoint in endpoints:
                 try:
@@ -299,6 +300,7 @@ class OpenAICompatProvider(BaseLLMProvider):
                                 finish_reason = choice["finish_reason"]
                             content = (choice.get("delta") or {}).get("content")
                             if content:
+                                content_yielded = True
                                 yield content
                         event["outcome"] = "success" if finish_reason == "stop" else "incomplete"
                         return
@@ -324,6 +326,12 @@ class OpenAICompatProvider(BaseLLMProvider):
                     last_error = e
                     logger.error(f"[{self.provider_name}] 流式 API 异常 (第{attempt}次): {e}")
                     break
+
+            # 已交付的文本无法撤回，重试会拼接重复内容；在 except 外抛出，避免被再次捕获。
+            if content_yielded:
+                raise RuntimeError(
+                    f"[{self.provider_name}] 流式 API 调用失败: {last_error}"
+                ) from last_error
 
             # 重试前指数退避（与 chat() 同策略）
             if attempt < self.max_retries:

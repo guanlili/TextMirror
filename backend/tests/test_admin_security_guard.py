@@ -184,3 +184,58 @@ async def test_security_settings_mask_put_keeps_existing(client, super_admin):
         headers=headers,
     )
     assert await get_current_default_password() == "NewSecret456!"
+
+
+@pytest.mark.parametrize("cache_count", [0, 2])
+async def test_clean_cache_preserves_configuration_and_business_state(client, users_admin, cache_count):
+    from app.core.redis import get_redis
+    from app.services.site_config import get_site_config
+
+    headers = await _headers(client, users_admin)
+    redis = get_redis()
+    preserved = {
+        "site:config:platform_name": "自定义站点",
+        "site:config:quick_login_enabled": "off",
+        "site:config:guest_mode_enabled": "off",
+        "textmirror:user_daily:1:20260924": "8",
+        "textmirror:apikey_daily:1:20260924": "5",
+        "textmirror:guest:ip:127.0.0.1:20260924": "2",
+        "textmirror:login_lock:test": "1",
+        "textmirror:open:idempotency:test": "saved-response",
+        "textmirror:quality_eval_lock:test": "lock-token",
+        "textmirror:chunk_cache_other:test": "business-state",
+        "unknown:business:state": "preserve",
+    }
+    await redis.mset(preserved)
+    await redis.hset("system:config:basic", mapping={"maintenance_mode": "1"})
+    cache_keys = [f"textmirror:chunk_cache:test-{index}:1:standard" for index in range(cache_count)]
+    for key in cache_keys:
+        await redis.hset(key, mapping={"0": "cached-result"})
+
+    response = await client.post("/api/v1/admin/system-config/maintenance/clean-cache", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["deleted_count"] == cache_count
+    assert await redis.mget(list(preserved)) == list(preserved.values())
+    assert await redis.hgetall("system:config:basic") == {"maintenance_mode": "1"}
+    assert [key async for key in redis.scan_iter(match="textmirror:chunk_cache:*")] == []
+    config = await get_site_config()
+    assert config["platform_name"] == "自定义站点"
+    assert config["quick_login_enabled"] == config["guest_mode_enabled"] == "off"
+    assert (await client.post("/api/v1/auth/quick-login?account=admin")).status_code == 403
+
+    repeated = await client.post("/api/v1/admin/system-config/maintenance/clean-cache", headers=headers)
+    assert repeated.status_code == 200
+    assert repeated.json()["deleted_count"] == 0
+
+
+async def test_clean_cache_requires_settings_permission(client, target_user):
+    from app.core.redis import get_redis
+
+    key = "textmirror:chunk_cache:protected:1:standard"
+    await get_redis().set(key, "cached-result")
+    response = await client.post(
+        "/api/v1/admin/system-config/maintenance/clean-cache",
+        headers=await _headers(client, target_user),
+    )
+    assert response.status_code == 403
+    assert await get_redis().get(key) == "cached-result"

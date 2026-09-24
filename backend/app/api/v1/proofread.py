@@ -151,6 +151,7 @@ async def text_proofread(
     支持游客使用（受限流限制）和登录用户使用
     """
     # 游客限流检查
+    quota_key = None
     if current_user is None:
         await reject_guest_if_disabled(http_request)
         from app.services.guest_policy import get_guest_policy
@@ -161,7 +162,7 @@ async def text_proofread(
             raise BadRequestError(code="GUEST_TEXT_TOO_LONG", message=f"游客模式文本长度不能超过{max_text_length}字，请登录后使用")
         await check_guest_rate_limit(http_request, daily_limit=guest_policy["daily_limit"])
     else:
-        await charge_user_daily_quota(current_user)
+        quota_key = await charge_user_daily_quota(current_user)
 
     timer = AuditTimer()
     timer.start()
@@ -185,7 +186,7 @@ async def text_proofread(
             status="failed", error_message=str(e), duration_ms=timer.elapsed_ms(),
         )
         # 没拿到结果不消耗额度
-        await refund_user_daily_quota(current_user)
+        await refund_user_daily_quota(quota_key)
         # 指定的模型配置无效：明确告知（通常是配置被删除/停用）
         invalid_config = isinstance(e, InvalidModelConfigError)
         detail = str(e) if invalid_config else "校对服务暂时不可用，请稍后重试"
@@ -200,7 +201,7 @@ async def text_proofread(
             input_text=request.text, extra_params=audit_extra,
             status="failed", error_message=str(e), duration_ms=timer.elapsed_ms(),
         )
-        await refund_user_daily_quota(current_user)
+        await refund_user_daily_quota(quota_key)
         raise AppException(500, "PROOFREAD_UNEXPECTED_ERROR", "校对过程发生错误，请稍后重试")
 
     # 保存校对记录（已登录用户）
@@ -305,8 +306,7 @@ async def text_proofread_compare(
         raise BadRequestError(code="INSUFFICIENT_MODELS", message="所选模型配置不足 2 个有效项（已停用的配置不可用）")
 
     # 对比一次消耗 N 倍额度（N=有效模型数，重复/无效 config_id 不重复计量）：原子预扣
-    if current_user is not None:
-        await charge_user_daily_quota(current_user, len(configs))
+    quota_key = await charge_user_daily_quota(current_user, len(configs))
 
     timer = AuditTimer()
     timer.start()
@@ -322,14 +322,14 @@ async def text_proofread_compare(
         )
     except Exception:
         # 整体异常（模型加载等前置失败）：全额退还预扣
-        await refund_user_daily_quota(current_user, len(configs))
+        await refund_user_daily_quota(quota_key, len(configs))
         raise
     items = [ModelProofreadResult(**i) for i in raw_items]
 
     # 失败模型不消耗额度（与密钥日配额按成功数结算同口径）
     failed = sum(1 for i in items if not i.success)
     if failed > 0:
-        await refund_user_daily_quota(current_user, failed)
+        await refund_user_daily_quota(quota_key, failed)
 
     # 落带权重的对比记录：配额从「只预检不消耗」改为真正计量（与开放 API 同口径）。
     # 游客不落（游客配额走 IP 限流）；全部失败不落（零消耗）；

@@ -108,15 +108,20 @@ async def test_open_polish_invalid_style_422(client):
 
 async def test_open_polish_service_error_refunds_and_503(client):
     _, plaintext, key = await _create_user_with_key()
+    from app.api.v1.open_polish import refund_api_key_daily_usage
     from app.core import redis as redis_module
     from app.core.rate_limit import _api_key_daily_redis_key
 
-    with patch("app.api.v1.open_polish.polish_text", side_effect=RuntimeError("no active model")):
+    quota_key = _api_key_daily_redis_key(key)
+    with patch("app.api.v1.open_polish.polish_text", side_effect=RuntimeError("no active model")), patch(
+        "app.api.v1.open_polish.refund_api_key_daily_usage", wraps=refund_api_key_daily_usage,
+    ) as refund:
         resp = await client.post(
             "/api/v1/open/polish",
             json={"text": "这段文字需要更加正式的表达方式来呈现。"},
             headers={"Authorization": f"Bearer {plaintext}"},
         )
+    refund.assert_awaited_once_with(quota_key)
     assert resp.status_code == 503
     assert resp.json()["detail"]["code"] == "MODEL_UNAVAILABLE"
 

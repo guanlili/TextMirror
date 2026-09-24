@@ -95,7 +95,7 @@ async def open_polish(
         return JSONResponse(content=cached)
 
     # 计费顺序与审校端点一致：RPM → 用户配额预扣 → 密钥日配额预扣
-    await _open_billing(user, api_key)
+    user_quota_key, api_key_quota_key = await _open_billing(user, api_key)
 
     timer = AuditTimer()
     timer.start()
@@ -114,8 +114,8 @@ async def open_polish(
             status="failed", error_message=str(e), duration_ms=timer.elapsed_ms(),
         )
         if api_key is not None:
-            await refund_api_key_daily_usage(api_key)
-        await refund_user_daily_quota(user)
+            await refund_api_key_daily_usage(api_key_quota_key)
+        await refund_user_daily_quota(user_quota_key)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "MODEL_UNAVAILABLE", "message": "润色服务暂时不可用，请稍后重试"},
@@ -129,8 +129,8 @@ async def open_polish(
             status="failed", error_message=str(e), duration_ms=timer.elapsed_ms(),
         )
         if api_key is not None:
-            await refund_api_key_daily_usage(api_key)
-        await refund_user_daily_quota(user)
+            await refund_api_key_daily_usage(api_key_quota_key)
+        await refund_user_daily_quota(user_quota_key)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"code": "INTERNAL_ERROR", "message": "润色过程发生错误，请稍后重试"},
@@ -205,7 +205,7 @@ async def open_polish_stream(
     user, api_key = auth
 
     # 限流/配额/扣额在流开始前完成（流式响应无法回传 HTTP 错误码）
-    await _open_billing(user, api_key)
+    user_quota_key, api_key_quota_key = await _open_billing(user, api_key)
 
     # 结束鉴权依赖遗留的读事务再开流：db 与鉴权依赖是同一缓存会话，
     # 流结束才随请求关闭，SQLite 下挂着读锁会让流内落库 database is locked（PG 无此问题）
@@ -245,8 +245,8 @@ async def open_polish_stream(
         try:
             if fatal and not versions:
                 if api_key is not None:
-                    await refund_api_key_daily_usage(api_key)
-                await refund_user_daily_quota(user)
+                    await refund_api_key_daily_usage(api_key_quota_key)
+                await refund_user_daily_quota(user_quota_key)
             if versions:
                 # 流式收尾在响应流内执行，用独立会话落库（请求会话此刻仍被流持有）
                 async with async_session_factory() as db:

@@ -85,5 +85,34 @@ jobs:
         with:
           context: ./frontend
           push: false
+          load: true
+          tags: textmirror-frontend:e2e
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install browser test dependencies
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Start frontend for browser tests
+        run: |
+          docker run --detach --name textmirror-e2e --publish 127.0.0.1:3022:3022 textmirror-frontend:e2e
+          curl --fail --retry 10 --retry-delay 1 --retry-all-errors --connect-timeout 2 --max-time 5 http://127.0.0.1:3022/health
+      - name: Browser regression tests (mocked APIs)
+        working-directory: frontend
+        run: npm run test:e2e
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-results
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
+          if-no-files-found: ignore

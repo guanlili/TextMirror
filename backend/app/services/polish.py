@@ -397,6 +397,8 @@ async def polish_text(text: str, style: str = "formal") -> Dict[str, Any]:
 
         response = await provider.chat(messages, temperature=0.7, max_tokens=max_tokens)
         content = _clean_version_content(response.content)
+        if not content:
+            raise RuntimeError("润色结果为空，请稍后重试")
 
         logger.info(
             f"[润色] {version_info['label']}完成 "
@@ -435,6 +437,10 @@ async def polish_text(text: str, style: str = "formal") -> Dict[str, Any]:
                 # 汇总 token 用量
                 for key in total_usage:
                     total_usage[key] += r["usage"].get(key, 0)
+
+        if all(isinstance(r, Exception) for r in results):
+            # 全失败不返回成功结果；供应商异常详情仅留在服务端日志。
+            raise RuntimeError("润色生成失败，请稍后重试")
 
         # 润色产出扫描敏感词/禁词：改写不应引入违禁内容（仅提示不阻断）
         try:

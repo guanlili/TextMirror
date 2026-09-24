@@ -30,7 +30,7 @@ from app.core.rate_limit import (
     refund_user_daily_quota,
 )
 from app.core.security import hash_scoped_idempotency_key
-from app.core.task_quota import refund_document_quota
+from app.core.task_quota import refund_document_api_key_quota, refund_document_quota
 from app.models.api_key import ApiKey
 from app.models.uploaded_document import UploadedDocument
 from app.models.user import User
@@ -183,11 +183,12 @@ async def open_submit_document(
         # ---- 配额（用户输入校验完成后才计费）：用户配额预扣 → 密钥日配额预扣。
         # 密钥配额拒绝时退还用户预扣（本次未获服务不消耗用户额度）----
         quota_key = await _charge_user_quota_contract(user)
+        api_key_quota_key = None
         if api_key is not None:
             try:
-                await charge_api_key_daily(api_key)
+                api_key_quota_key = await charge_api_key_daily(api_key)
             except HTTPException:
-                await refund_user_daily_quota(user)
+                await refund_user_daily_quota(quota_key)
                 raise
     except HTTPException:
         remove_upload_silently(file_path)
@@ -226,6 +227,7 @@ async def open_submit_document(
             "config_id": config_id,
             "check_types": parsed_check_types,
             "quota_key": quota_key,
+            "api_key_quota_key": api_key_quota_key,
         },
     )
     db.add_all([doc_record, db_task])
@@ -236,8 +238,8 @@ async def open_submit_document(
     except IntegrityError:
         await db.rollback()
         if api_key is not None:
-            await refund_api_key_daily_usage(api_key)
-        await refund_user_daily_quota(user)
+            await refund_api_key_daily_usage(api_key_quota_key)
+        await refund_user_daily_quota(quota_key)
         remove_upload_silently(file_path)
         if scoped_idempotency_key:
             existing = (await db.execute(
@@ -254,8 +256,8 @@ async def open_submit_document(
         await db.rollback()
         logger.error(f"[OpenAPI] 上传/任务记录保存失败: {e}")
         if api_key is not None:
-            await refund_api_key_daily_usage(api_key)
-        await refund_user_daily_quota(user)
+            await refund_api_key_daily_usage(api_key_quota_key)
+        await refund_user_daily_quota(quota_key)
         remove_upload_silently(file_path)
         raise HTTPException(
             status_code=500,
@@ -276,10 +278,9 @@ async def open_submit_document(
             .values(status="FAILURE", error_code="DISPATCH_FAILED", message="任务投递失败，请重试")
         )
         await db.commit()
-        if api_key is not None:
-            await refund_api_key_daily_usage(api_key)
-        # 仅取消了尚未执行的投递才退用户预扣；与 worker 共用任务标记。
+        # 仅取消了尚未执行的投递才退款；与 worker 共用任务标记。
         if failed.rowcount:
+            await refund_document_api_key_quota(task_uuid, api_key_quota_key)
             await refund_document_quota(task_uuid, quota_key)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

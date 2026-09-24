@@ -4,6 +4,7 @@ import type { DomainPromptsConfig, LLMConfigItem, LLMProviderOption } from '../s
 import type { ReviewResponse, SaveReviewPayload } from '../src/api/review'
 import type { ProofreadCoverage } from '../src/api/proofread'
 import type { ReviewIssue } from '../src/utils/review'
+import type { FactCheckOptions, FactCheckRun } from '../src/api/factCheck'
 
 export const authTokens = { access: 'browser-test-not-a-real-token', refresh: 'browser-test-not-a-real-refresh-token' }
 export const source = '首段😀：方案已经完膳。第二段：工做安排保持不变。'
@@ -38,9 +39,56 @@ function appliedText(text: string, issues: ReviewIssue[]): string {
   return chars.join('')
 }
 
+export function factRun(id = 41): FactCheckRun {
+  return { id, record_id: null, title: `模拟核查 ${id}`, source_kind: 'text', file_id: null, parent_run_id: null,
+    stage: 'complete', depth: 'standard', confirm_claims: false, max_claims: 10, mode: 'web', provider: 'model',
+    status: 'SUCCESS', progress: 100, message: '模拟核查已完成', error_code: null, source_hash: 'mock-source-hash',
+    created_at: '2026-06-01T00:00:00Z', finished_at: '2026-06-01T00:01:00Z', source_ids: [],
+    result: { claims: [{ id: 'C1', original: source, start: 0, end: Array.from(source).length, statement: source,
+      verdict: 'insufficient', reason: '仅为浏览器回归数据', suggestion: null, evidence: [], checked: true }],
+    coverage: { extracted: 1, checked: 1, unverified: 0, status: 'complete', reason: '' },
+    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, search_queries: 0, pages_fetched: 0 },
+    checked_at: '2026-06-01T00:01:00Z' } }
+}
+
+// Hold exactly one matching request, including non-abortable mutations, until the test settles it.
+export async function holdApi(page: Page, path: string, method = 'POST') {
+  let capture!: (route: Route) => void
+  let release!: () => void
+  const started = new Promise<Route>(resolve => { capture = resolve })
+  const released = new Promise<void>(resolve => { release = resolve })
+  let captured = false, pending: Route | undefined
+  const pattern = `**/api/v1${path}`
+  const handler = async (route: Route) => {
+    if (captured || route.request().method() !== method) return route.fallback()
+    captured = true; pending = route; capture(route)
+    await released
+  }
+  await page.route(pattern, handler)
+  return {
+    started,
+    async respond(json: unknown, status = 200, aborted = false) {
+      const route = await started
+      const finished = aborted ? Promise.resolve() : page.waitForEvent('requestfinished', request => request === route.request())
+      await route.fulfill({ status, json })
+      pending = undefined; release()
+      await finished
+      // Wait for response handlers and Vue's DOM update before asserting a state stayed unchanged.
+      await page.evaluate(() => new Promise<void>(resolve => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))))
+    },
+    async dispose() {
+      release()
+      if (page.isClosed()) return
+      if (pending) await pending.abort('aborted')
+      await page.unroute(pattern, handler)
+    },
+  }
+}
+
 interface ApiCall { method: string; path: string; body: unknown }
 export interface Scenario {
   admin: boolean
+  factCheck: boolean
   review: ReviewResponse
   uploadStatus: number
   saveStatus: number
@@ -52,7 +100,7 @@ export interface Scenario {
 
 export const test = base.extend<{ scenario: Scenario }>({
   scenario: [async ({ context, baseURL }, use) => {
-    const scenario: Scenario = { admin: false, review: sample(), uploadStatus: 200, saveStatus: 200,
+    const scenario: Scenario = { admin: false, factCheck: false, review: sample(), uploadStatus: 200, saveStatus: 200,
       exportStatus: 200, stream: 'complete', cancelled: false, calls: [] }
     let domainPrompts: DomainPromptsConfig = { general: '', official: '', legal: '' }
     const unexpected: string[] = []
@@ -96,11 +144,25 @@ export const test = base.extend<{ scenario: Scenario }>({
       if (method === 'GET' && path === '/auth/me') return json(route, {
         id: 1, employee_id: 'browser-test', username: '回归测试', role_code: scenario.admin ? 'super_admin' : 'user',
         permissions: scenario.admin ? ['admin:access', 'admin:settings:edit', 'admin:llm:edit']
-          : ['proofread:text', 'proofread:document'], daily_quota: 100,
+          : ['proofread:text', 'proofread:document', ...(scenario.factCheck ? ['fact-check:run', 'fact-check:review', 'fact-check:export'] : [])], daily_quota: 100,
       })
       if (method === 'GET' && path === '/auth/feishu/config') return json(route, {
         app_id: '', redirect_uri: '', enabled: false,
       })
+      if (scenario.factCheck) {
+        if (method === 'GET' && path === '/fact-check/options') return json(route, {
+          available: true, unavailable_reason: '', provider: 'model', model_name: '离线模拟模型',
+          max_claims: 10, max_text_chars: 20000, daily_limit: 20, retention_days: 90, sources: [],
+        } satisfies FactCheckOptions)
+        if (method === 'GET' && path === '/fact-check/history') return json(route, { items: [factRun()], total: 1 })
+        if (method === 'POST' && path === '/fact-check/runs') return json(route, factRun(42))
+        const detail = /^\/fact-check\/runs\/(\d+)(\/source|\/reviews)?$/.exec(path)
+        if (method === 'GET' && detail) {
+          if (detail[2] === '/source') return json(route, { text: source, source_hash: 'mock-source-hash' })
+          if (detail[2] === '/reviews') return json(route, [])
+          return json(route, factRun(Number(detail[1])))
+        }
+      }
       if (scenario.admin) {
         if (method === 'GET' && path === '/admin/system-config/domain-prompts') return json(route, domainPrompts)
         if (method === 'PUT' && path === '/admin/system-config/domain-prompts') {
@@ -124,6 +186,9 @@ export const test = base.extend<{ scenario: Scenario }>({
         }
       }
       if (method === 'GET' && path === '/polish/models') return json(route, { models: [] })
+      if (method === 'GET' && path === '/polish/styles') return json(route, {
+        styles: [{ key: 'formal', name: '正式规范', description: '标准公文语体' }],
+      })
       if (method === 'GET' && path === '/history/usage') return json(route, { used_today: 0, daily_quota: 100 })
       if (method === 'POST' && path === '/document/upload') {
         expect(request.postDataBuffer()?.toString()).toContain('浏览器回归.txt')

@@ -51,31 +51,16 @@ def _patch_refund_for_fakeredis(monkeypatch):
     from app.core import rate_limit as rate_limit_module
     from app.core.redis import get_redis
 
-    async def _async_refund(api_key_obj, weight: int = 1) -> None:
-        if weight <= 0:
+    async def _async_refund(quota_key: str | None, weight: int = 1) -> None:
+        if weight <= 0 or quota_key is None:
             return
-        try:
-            redis = get_redis()
-            new = await redis.decrby(rate_limit_module._api_key_daily_redis_key(api_key_obj), weight)
-            if new < 0:
-                await redis.set(rate_limit_module._api_key_daily_redis_key(api_key_obj), 0)
-        except Exception as e:
-            rate_limit_module.logger.error(f"退还密钥日配额 Redis 异常: {e}")
-
-    async def _async_refund_user(user_obj, weight: int = 1) -> None:
-        if weight <= 0 or user_obj is None:
-            return
-        try:
-            redis = get_redis()
-            key = rate_limit_module._daily_key("user_daily", str(user_obj.id))
-            new = await redis.decrby(key, weight)
-            if new < 0:
-                await redis.set(key, 0)
-        except Exception as e:
-            rate_limit_module.logger.error(f"退还用户日配额 Redis 异常: {e}")
+        redis = get_redis()
+        count = int(await redis.get(quota_key) or 0)
+        if count > 0:
+            await redis.decrby(quota_key, min(count, weight))
 
     monkeypatch.setattr(rate_limit_module, "refund_api_key_daily_usage", _async_refund)
-    monkeypatch.setattr(rate_limit_module, "refund_user_daily_quota", _async_refund_user)
+    monkeypatch.setattr(rate_limit_module, "refund_user_daily_quota", _async_refund)
     # 多数 API 模块用 `from ... import refund_...` 直接绑定函数名，必须同时 patch 各命名空间
     from app.api.v1 import document as document_module
     from app.api.v1 import open as open_module
@@ -90,7 +75,7 @@ def _patch_refund_for_fakeredis(monkeypatch):
         proofread_module, polish_module, document_module,
     ):
         monkeypatch.setattr(mod, "refund_api_key_daily_usage", _async_refund, raising=False)
-        monkeypatch.setattr(mod, "refund_user_daily_quota", _async_refund_user, raising=False)
+        monkeypatch.setattr(mod, "refund_user_daily_quota", _async_refund, raising=False)
 
 
 @pytest.fixture(autouse=True)

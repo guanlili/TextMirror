@@ -691,9 +691,11 @@ function searchHistory() { page.value = 1; void loadHistory() }
 async function load() {
   const token = ++epoch
   controller?.abort(); controller = new AbortController(); clearTimeout(timer)
-  loading.value = true; error.value = ''
+  // busy belongs to the previous epoch; its finally must not affect this load.
+  busy.value = ''; loading.value = true; error.value = ''
   try {
     if (!user.userInfo) await user.fetchUserInfo()
+    if (!alive || token !== epoch) return
     if (!user.hasPermission('fact-check:run')) { await router.replace('/403'); return }
     if (route.params.id) {
       const id = Number(route.params.id)
@@ -714,7 +716,13 @@ async function upload(event: globalThis.Event) {
   const file = (event.target as globalThis.HTMLInputElement).files?.[0]
   if (!file) return
   const token = epoch; busy.value = 'upload'; error.value = ''; fileId.value = ''; text.value = ''
-  try { const result = await uploadDocumentApi(file, controller?.signal); if (alive && token === epoch) { fileId.value = result.file_id; filename.value = result.filename; const textRes = await fetchExtractedTextApi(result.file_id); if (alive && token === epoch) { text.value = textRes.extracted_text } } }
+  try {
+    const result = await uploadDocumentApi(file, controller?.signal)
+    if (!alive || token !== epoch) return
+    const textRes = await fetchExtractedTextApi(result.file_id)
+    if (!alive || token !== epoch) return
+    fileId.value = result.file_id; filename.value = result.filename; text.value = textRes.extracted_text
+  }
   catch (cause) { if (alive && token === epoch) showError(cause) }
   finally { if (alive && token === epoch) busy.value = '' }
 }
@@ -724,41 +732,44 @@ async function create(confirm: boolean) {
   busy.value = 'create'; error.value = ''; const token = epoch
   try { const result = await createFactCheckRunApi(pendingCreate.value); if (alive && token === epoch) { pendingCreate.value = null; await router.push(`/fact-check/${result.id}`) } }
   catch (cause) { if (alive && token === epoch) { showError(cause); const status = (cause as { response?: { status: number } }).response?.status; if (status && status >= 400 && status < 500 && status !== 408) pendingCreate.value = null } }
-  finally { busy.value = '' }
+  finally { if (alive && token === epoch) busy.value = '' }
 }
-async function action(kind: string, work: (id: number) => Promise<void>) {
+async function action(kind: string, work: (id: number, isCurrent: () => boolean) => Promise<void>) {
   if (!run.value || busy.value) return
   const id = run.value.id, token = epoch; busy.value = kind; error.value = ''; clearTimeout(timer)
-  try { await work(id) } catch (cause) { if (alive && token === epoch) showError(cause) }
-  finally { if (alive) { busy.value = ''; if (token === epoch) schedulePoll() } }
+  const isCurrent = () => alive && token === epoch && Number(route.params.id) === id
+  try { await work(id, isCurrent) } catch (cause) { if (isCurrent()) showError(cause) }
+  finally { if (alive && token === epoch) { busy.value = ''; schedulePoll() } }
 }
 async function execute() {
   if (!selectionValid.value) return
   const claims = chosenIds.value.map(id => ({ id, statement: statements.value[id].trim() })), hash = JSON.stringify(claims)
   if (hash !== executeHash) { executeHash = hash; executeId = createFactCheckId() }
-  await action('execute', async id => { const result = await executeFactCheckApi(id, { claims, request_id: executeId }); if (Number(route.params.id) === id) acceptRun(result) })
+  await action('execute', async (id, isCurrent) => { const result = await executeFactCheckApi(id, { claims, request_id: executeId }); if (isCurrent()) acceptRun(result) })
 }
-async function cancel() { await action('cancel', async id => { const result = await cancelFactCheckRunApi(id); if (Number(route.params.id) === id) acceptRun(result) }) }
+async function cancel() { await action('cancel', async (id, isCurrent) => { const result = await cancelFactCheckRunApi(id); if (isCurrent()) acceptRun(result) }) }
 async function deepen() {
   if (!activeClaim.value || !deepConsent.value) return
   const urls = supplemental.value.split('\n').map(value => value.trim()).filter(Boolean)
   if (urls.length > 3 || urls.some(value => !safeUrl(value))) { error.value = '最多填写3个有效 HTTP(S) 证据链接'; return }
   const claimId = activeClaim.value.id, hash = JSON.stringify([run.value?.id, claimId, urls])
   if (hash !== deepHash) { deepHash = hash; deepId = createFactCheckId() }
-  await action('deepen', async id => { const result = await deepenFactCheckApi(id, { claim_id: claimId, supplemental_urls: urls, request_id: deepId, allow_external_search: true }); if (Number(route.params.id) === id) await router.push(`/fact-check/${result.id}`) })
+  await action('deepen', async (id, isCurrent) => { const result = await deepenFactCheckApi(id, { claim_id: claimId, supplemental_urls: urls, request_id: deepId, allow_external_search: true }); if (isCurrent()) await router.push(`/fact-check/${result.id}`) })
 }
 async function saveReview() {
   if (!activeClaim.value) return
   const data = { claim_id: activeClaim.value.id, decision: decision.value, note: note.value.trim() }, hash = JSON.stringify([run.value?.id, data])
   if (hash !== reviewHash) { reviewHash = hash; reviewId = createFactCheckId() }
-  await action('review', async id => { const result = await addFactCheckReviewApi(id, { ...data, request_id: reviewId }); if (Number(route.params.id) === id) { reviews.value = [...reviews.value.filter(item => item.id !== result.id), result]; note.value = '' } })
+  await action('review', async (id, isCurrent) => { const result = await addFactCheckReviewApi(id, { ...data, request_id: reviewId }); if (isCurrent()) { reviews.value = [...reviews.value.filter(item => item.id !== result.id), result]; note.value = '' } })
 }
 async function download(format: 'html' | 'json') {
-  await action('export', async id => { const blob = await exportFactCheckApi(id, format); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `fact-check-${id}.${format}`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000) })
+  await action('export', async (id, isCurrent) => { const blob = await exportFactCheckApi(id, format); if (!isCurrent()) return; const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `fact-check-${id}.${format}`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000) })
 }
 async function clearRun() {
+  const token = epoch
   try { await ElMessageBox.confirm('清理本次原文、证据快照和复核意见？保留请求计数，已生成的其他版本不受影响。此操作无法撤销。', '清理核查材料', { type: 'warning', confirmButtonText: '确认清理', cancelButtonText: '保留' }) } catch { return }
-  await action('delete', async id => { await deleteFactCheckApi(id); if (Number(route.params.id) === id) await load() })
+  if (!alive || token !== epoch) return
+  await action('delete', async (id, isCurrent) => { await deleteFactCheckApi(id); if (isCurrent()) await load() })
 }
 watch(() => route.fullPath, () => { run.value = null; selectedId.value = ''; verdictFilter.value = ''; consented.value = false; deepConsent.value = false; note.value = ''; supplemental.value = ''; executeHash = ''; reviewHash = ''; deepHash = ''; pendingCreate.value = null; void load() }, { immediate: true })
 onBeforeUnmount(() => { alive = false; epoch++; controller?.abort(); clearTimeout(timer) })
