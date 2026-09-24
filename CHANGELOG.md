@@ -6,7 +6,9 @@
 
 ## [Unreleased]
 
-暂无待发布条目。以下为已合并里程碑，不代表具体环境已部署或完成验收。
+### 性能与重构
+- 提取共享 `IssueCard` 组件，消除文本/文档两个审校页约 300 行重复的问题卡片模板与样式；问题列表改渐进渲染（首批 100 条 +「加载更多」），长文数百问题不再一次性渲染全量。([#127](https://github.com/guanlili/TextMirror/pull/127))
+- 审校页模板计算下沉（共识判定 O(n²)→O(1)、字数/计数改 computed、上下文复用字符数组缓存）、问题列表 `:key` 改用稳定键、事实核查轮询改指数退避、vite manualChunks 改包路径前缀精确匹配。([#127](https://github.com/guanlili/TextMirror/pull/127))
 
 ## [2026-09-22]
 
