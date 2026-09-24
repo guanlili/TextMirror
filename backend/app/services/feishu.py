@@ -32,6 +32,16 @@ _DNS_CACHE_TTL = 600       # 缓存有效期10分钟
 _DNS_RESOLVE_TIMEOUT = 3   # DNS解析超时3秒
 
 
+def mask_mobile(mobile: Optional[str]) -> str:
+    """手机号日志脱敏：保留前3后4，中间掩码；空/过短原样降级为占位。"""
+    if not mobile:
+        return ""
+    digits = str(mobile)
+    if len(digits) < 7:
+        return "***"
+    return f"{digits[:3]}****{digits[-4:]}"
+
+
 def _resolve_dns(hostname: str) -> Optional[str]:
     """
     带超时+缓存的DNS解析
@@ -372,7 +382,7 @@ class FeishuService:
                 logger.info(
                     f"[飞书] 获取用户信息成功: name={user_info.get('name')}, "
                     f"employee_no='{user_info.get('employee_no', '')}', "
-                    f"mobile={user_info.get('mobile')}, "
+                    f"mobile={mask_mobile(user_info.get('mobile'))}, "
                     f"open_id={user_info.get('open_id')}"
                 )
                 return user_info
