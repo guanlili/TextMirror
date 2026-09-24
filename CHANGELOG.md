@@ -6,7 +6,10 @@
 
 ## [Unreleased]
 
-暂无待发布条目。以下为已合并里程碑，不代表具体环境已部署或完成验收。
+### 修复与性能
+- webhook 投递前增加 SSRF 复检（防设置后 DNS 重绑定指向内网；DNS 抖动仍走既有 Celery 重试不误杀），设置侧域名解析移入线程池不再阻塞事件循环。([#125](https://github.com/guanlili/TextMirror/pull/125))
+- 事实核查设置层密钥判断改为解密后校验，SECRET_KEY 轮换后不再误报「已配置」；协作审校三处吞异常补日志。([#125](https://github.com/guanlili/TextMirror/pull/125))
+- 后台文档列表 defer 大字段、密钥列表日用量改 Redis pipeline 批量、今日用量统计改可索引日期范围、LLM 重试加指数退避。([#125](https://github.com/guanlili/TextMirror/pull/125))
 
 ## [2026-09-22]
 
