@@ -38,10 +38,13 @@ export default defineConfig({
         // element-plus 变动少独立成 chunk——发版只重下业务 chunk，缓存命中率高
         manualChunks(id: string) {
           if (!id.includes('/node_modules/')) return undefined
-          if (id.includes('echarts') || id.includes('zrender')) return 'echarts'
-          if (id.includes('marked') || id.includes('dompurify')) return 'markdown'
-          if (id.includes('element-plus') || id.includes('@element-plus')) return 'element-plus'
-          if (id.includes('vue') || id.includes('pinia') || id.includes('@vue/')) return 'vue-vendor'
+          // 按包路径前缀精确匹配，避免裸子串误吞（如 @vueuse 落进 vue-vendor、路径含 marked 的无关包）
+          const pkg = id.split('/node_modules/').pop() || ''
+          if (pkg.startsWith('echarts/') || pkg.startsWith('zrender/')) return 'echarts'
+          if (pkg.startsWith('marked/') || pkg.startsWith('dompurify/')) return 'markdown'
+          if (pkg.startsWith('element-plus/') || pkg.startsWith('@element-plus/')) return 'element-plus'
+          if (pkg.startsWith('vue/') || pkg.startsWith('@vue/') || pkg.startsWith('vue-router/')
+            || pkg.startsWith('vue-demi/') || pkg.startsWith('pinia/')) return 'vue-vendor'
           return undefined
         },
       },

@@ -351,14 +351,17 @@
           </template>
           <div class="issues-list">
             <div
-              v-for="(issue, index) in filteredIssues"
-              :key="index"
+              v-for="issue in filteredIssues"
+              :key="reviewIssueKey(issue)"
               class="issue-item"
               :class="{
                 'is-accepted': issue._accepted,
                 'is-ignored': issue._ignored,
                 'is-active': activeIssueIndex === getGlobalIndex(issue),
               }"
+              tabindex="0"
+              @focus="activeIssueIndex = getGlobalIndex(issue)"
+              @click="activeIssueIndex = getGlobalIndex(issue)"
               @mouseenter="activeIssueIndex = getGlobalIndex(issue)"
               @mouseleave="activeIssueIndex = -1"
             >
@@ -490,7 +493,7 @@ import ProfessionalRules from '@/components/ProfessionalRules.vue'
 import ProofreadEntry from '@/components/ProofreadEntry.vue'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox, type UploadFile } from 'element-plus'
+import { ElMessage, ElMessageBox, type UploadFile, type UploadInstance } from 'element-plus'
 import { uploadDocumentApi, fetchExtractedTextApi, exportRevisedTextApi, exportReportApi, type DocumentProofreadResponse } from '@/api/document'
 import { asyncDocumentProofreadApi, streamTaskStatus, cancelTaskApi, type TaskStatus } from '@/api/tasks'
 import { getAvailableModelsCached, type AvailableModel } from '@/api/polish'
@@ -505,7 +508,7 @@ import {
   type ReviewRestorePayload,
 } from '@/api/review'
 import { severityColor, severityLabel, typeLabel } from '@/utils/proofread'
-import { reviewStateFingerprint } from '@/utils/review'
+import { reviewStateFingerprint, reviewIssueKey } from '@/utils/review'
 import { formatSize } from '@/utils/format'
 import { useProofreadReview, type ReviewIssue } from '@/composables/useProofreadReview'
 import ReviewPreview from '@/components/ReviewPreview.vue'
@@ -535,7 +538,7 @@ const processingInfo = ref('')
 const accessToken = ref('')
 const currentTaskId = ref('')
 const abortController = ref<AbortController | null>(null)
-const uploadRef = ref()
+const uploadRef = ref<UploadInstance>()
 let activeRunId = 0
 
 // 校对模型选择（默认当前活跃模型）

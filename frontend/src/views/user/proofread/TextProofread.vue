@@ -85,7 +85,7 @@
           >
             返回编辑
           </el-button>
-          <span class="text-count">{{ Array.from(inputText).length.toLocaleString() }}{{ collaborationMode ? ' / 8,000' : ' / 100,000' }} 字<small>{{ inputText.trim() ? '⌘ / Ctrl + Enter 开始' : '输入文本后即可开始' }}</small></span>
+          <span class="text-count">{{ charCount.toLocaleString() }}{{ collaborationMode ? ' / 8,000' : ' / 100,000' }} 字<small>{{ inputText.trim() ? '⌘ / Ctrl + Enter 开始' : '输入文本后即可开始' }}</small></span>
         </div>
       </el-card>
       <!-- 校对设置 -->
@@ -257,7 +257,7 @@
       class="result-section"
     >
       <div class="review-heading">
-        <div><span class="review-eyebrow">审校结果</span><h2>逐条确认，让内容更准确</h2><p>共 {{ issues.length }} 项建议 · 已接受 {{ issues.filter(i => i._accepted).length }} 项 · 已忽略 {{ issues.filter(i => i._ignored).length }} 项</p></div>
+        <div><span class="review-eyebrow">审校结果</span><h2>逐条确认，让内容更准确</h2><p>共 {{ issues.length }} 项建议 · 已接受 {{ acceptedCount }} 项 · 已忽略 {{ ignoredCount }} 项</p></div>
       </div>
       <details class="review-tools">
         <summary>草稿与版本管理{{ hasUnsavedChanges ? ' · 有未保存的修改' : '' }}</summary>
@@ -458,8 +458,8 @@
               <!-- 汇总问题列表：共识在前，独有按模型数×严重度排序 -->
               <div class="compare-issues">
                 <div
-                  v-for="(item, i) in summaryIssues"
-                  :key="i"
+                  v-for="item in summaryIssues"
+                  :key="issueKey(item.issue)"
                   class="compare-issue-item"
                   :class="{ 'is-consensus': item.isConsensus, 'is-accepted': item.issue._accepted, 'is-ignored': item.issue._ignored }"
                 >
@@ -625,13 +625,13 @@
                     effect="plain"
                     size="small"
                   >
-                    独有 {{ summaryIssues.filter(item => item.modelCount === 1 && item.modelIds.includes(r.config_id)).length }} 个
+                    独有 {{ uniqueCountOf(r.config_id) }} 个
                   </el-tag>
                 </div>
                 <div class="compare-issues">
                   <div
-                    v-for="(issue, i) in r.issues"
-                    :key="i"
+                    v-for="issue in r.issues"
+                    :key="issueKey(issue)"
                     class="compare-issue-item"
                     :class="{ 'is-consensus': isConsensusIssue(issue), 'is-accepted': issue._accepted, 'is-ignored': issue._ignored }"
                   >
@@ -895,8 +895,8 @@
             </template>
             <div class="issues-list">
               <div
-                v-for="(issue, index) in filteredIssues"
-                :key="index"
+                v-for="issue in filteredIssues"
+                :key="issueKey(issue)"
                 class="issue-item"
                 :class="{
                   'is-accepted': issue._accepted,
@@ -1080,6 +1080,7 @@ const {
   activeIssueIndex,
   recordId,
   filteredIssues,
+  acceptedCount,
   getGlobalIndex,
   sourceText,
   patches,
@@ -1094,6 +1095,11 @@ const {
   undoIssue,
   handleAcceptAll,
 } = useProofreadReview()
+
+const charCount = computed(() => Array.from(inputText.value).length)
+const ignoredCount = computed(() => issues.value.filter(issue => issue._ignored).length)
+// sourceText 的字符数组缓存：issueContext 每条问题都要按位取上下文，避免每次渲染全量 Array.from
+const sourceChars = computed(() => Array.from(sourceText.value))
 
 const route = useRoute()
 const router = useRouter()
@@ -1168,7 +1174,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', handleBeforeUnl
 
 function issueContext(issue: ReviewIssue) {
   if (issue.start == null || issue.start < 0) return '无法精确定位，请人工核对'
-  const chars = Array.from(sourceText.value)
+  const chars = sourceChars.value
   return `第 ${issue.start + 1} 字：${chars.slice(Math.max(0, issue.start - 12), Math.min(chars.length, (issue.end ?? issue.start) + 12)).join('')}`
 }
 
@@ -1434,8 +1440,25 @@ function comparePendingCountOf(r: { issues: ReviewIssue[] }): number {
   return r.issues.filter(i => !i._accepted && !i._ignored).length
 }
 
+// 共识/独有判定预构建索引：模板 v-for 内 O(1) 查询，替代逐条全表扫描
+const consensusKeySet = computed(() => new Set(
+  summaryIssues.value.filter(item => item.isConsensus).map(item => issueKey(item.issue))
+))
+const uniqueCountByModel = computed(() => {
+  const map = new Map<number, number>()
+  for (const item of summaryIssues.value) {
+    if (item.modelCount !== 1) continue
+    const id = item.modelIds[0]
+    map.set(id, (map.get(id) || 0) + 1)
+  }
+  return map
+})
+function uniqueCountOf(configId: number): number {
+  return uniqueCountByModel.value.get(configId) || 0
+}
+
 function isConsensusIssue(issue: ReviewIssue) {
-  return summaryIssues.value.some(item => issueKey(item.issue) === issueKey(issue) && item.isConsensus)
+  return consensusKeySet.value.has(issueKey(issue))
 }
 
 // 领域标签
