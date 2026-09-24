@@ -90,8 +90,7 @@ async def text_polish(
     # 校验风格参数（非法请求不消耗额度）
     _require_style(request.style)
 
-    if current_user is not None:
-        await charge_user_daily_quota(current_user)
+    quota_key = await charge_user_daily_quota(current_user)
 
     timer = AuditTimer()
     timer.start()
@@ -111,7 +110,7 @@ async def text_polish(
             status="failed", error_message=str(e),
             duration_ms=timer.elapsed_ms(),
         )
-        await refund_user_daily_quota(current_user)
+        await refund_user_daily_quota(quota_key)
         raise ServiceUnavailableError(code="POLISH_SERVICE_ERROR", message="润色服务暂时不可用，请稍后重试")
     except Exception as e:
         import traceback
@@ -123,7 +122,7 @@ async def text_polish(
             status="failed", error_message=str(e),
             duration_ms=timer.elapsed_ms(),
         )
-        await refund_user_daily_quota(current_user)
+        await refund_user_daily_quota(quota_key)
         raise HTTPException(status_code=500, detail="润色过程发生错误，请稍后重试")
 
     # 构建响应
@@ -195,8 +194,7 @@ async def text_polish_stream(
 
     style_config = _require_style(request.style)
 
-    if current_user is not None:
-        await charge_user_daily_quota(current_user)
+    quota_key = await charge_user_daily_quota(current_user)
 
     timer = AuditTimer()
     timer.start()
@@ -228,7 +226,7 @@ async def text_polish_stream(
             # 零产出（含客户端断连）：退还预扣额度（用户没拿到任何版本）
             if current_user is not None and not versions:
                 try:
-                    await refund_user_daily_quota(current_user)
+                    await refund_user_daily_quota(quota_key)
                 except Exception as e:
                     logger.warning(f"润色流式退还额度失败: {e}")
 
@@ -409,8 +407,7 @@ async def text_polish_compare(
     style_config = _require_style(request.style)
     configs = await _load_compare_configs(request.config_ids)
     # 对比一次消耗 N 倍额度（N=有效模型数）：原子预扣
-    if current_user is not None:
-        await charge_user_daily_quota(current_user, len(configs))
+    quota_key = await charge_user_daily_quota(current_user, len(configs))
     messages, max_tokens = _build_compare_messages(request.style, request.text)
 
     import time as _time
@@ -451,7 +448,7 @@ async def text_polish_compare(
     # 失败模型不消耗额度（与密钥日配额按成功数结算同口径）
     failed = sum(1 for i in items if not i.success)
     if failed > 0 and current_user is not None:
-        await refund_user_daily_quota(current_user, failed)
+        await refund_user_daily_quota(quota_key, failed)
 
     await _save_compare_record(
         user_id=current_user.id if current_user else None,
@@ -491,8 +488,7 @@ async def text_polish_compare_stream(
     style_config = _require_style(request.style)
     configs = await _load_compare_configs(request.config_ids)
     # 对比一次消耗 N 倍额度（N=有效模型数）：原子预扣
-    if current_user is not None:
-        await charge_user_daily_quota(current_user, len(configs))
+    quota_key = await charge_user_daily_quota(current_user, len(configs))
     messages, max_tokens = _build_compare_messages(request.style, request.text)
 
     import asyncio as _asyncio
@@ -596,7 +592,7 @@ async def text_polish_compare_stream(
             if current_user is not None:
                 successes = sum(1 for cid in configs if contents.get(cid))
                 try:
-                    await refund_user_daily_quota(current_user, max(0, len(configs) - successes))
+                    await refund_user_daily_quota(quota_key, max(0, len(configs) - successes))
                 except Exception as e:
                     logger.warning(f"对比流式退还额度失败: {e}")
 

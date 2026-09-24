@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { Buffer } from 'node:buffer'
 import type { Locator, Page } from '@playwright/test'
-import { test, expect, authTokens, source, corrected, exportedBytes, sample } from './workbench.fixture'
+import { test, expect, authTokens, source, corrected, exportedBytes, sample, factRun, holdApi } from './workbench.fixture'
 
 async function readTokens(page: Page) {
   return page.evaluate(() => ({ access: localStorage.getItem('access_token'), refresh: localStorage.getItem('refresh_token') }))
@@ -164,8 +164,16 @@ test('万字文章与300条问题的渲染、单处修改、撤销性能基准',
   const start = performance.now()
   await page.goto('/proofread/document?review=7')
   await ready(page)
-  await expect(page.locator('.issue-item')).toHaveCount(300)
+  await expect(page.locator('.issue-item')).toHaveCount(100)
   metrics.initial_render_ms = performance.now() - start
+  const loadMore = page.getByRole('button', { name: /加载更多/ })
+  await expect(loadMore).toContainText('剩余 200 项')
+  await loadMore.click()
+  await expect(page.locator('.issue-item')).toHaveCount(200)
+  await expect(loadMore).toContainText('剩余 100 项')
+  await loadMore.click()
+  await expect(page.locator('.issue-item')).toHaveCount(300)
+  await expect(loadMore).toHaveCount(0)
   await expect(preview(page)).toHaveText(scenario.review.original_text)
   const item = page.locator('.issue-item').first()
   metrics.accept_ms = await measureUpdate(item.getByRole('button', { name: '仅修改此处' }),
@@ -270,6 +278,51 @@ test('管理员模型搜索支持供应商显示名、内部代码、模型与�
   ])
 })
 
+test('润色首段输出前离开页面，不发起同步回退请求', async ({ page, scenario }) => {
+  let releaseStream!: () => void
+  let notifyStarted!: () => void
+  const released = new Promise<void>(resolve => { releaseStream = resolve })
+  const started = new Promise<void>(resolve => { notifyStarted = resolve })
+  await page.route('**/api/v1/polish/text/stream', async route => {
+    notifyStarted()
+    await released
+    await route.abort('aborted')
+  })
+  try {
+    await page.goto('/polish')
+    await page.getByPlaceholder('请在此粘贴或输入需要润色的文本内容（10-5000字）...').fill(source)
+    await page.getByRole('button', { name: '一键润色', exact: true }).click()
+    await started
+    const cancelled = page.waitForEvent('requestfailed', request => request.url().endsWith('/polish/text/stream'))
+    await page.getByRole('menuitem', { name: '新建审校', exact: true }).click()
+    await expect(page).toHaveURL(/\/proofread\/text$/)
+    await cancelled
+    expect(scenario.calls.filter(call => call.path === '/polish/text')).toEqual([])
+  } finally {
+    releaseStream()
+  }
+})
+
+
+test('润色正常流式生成三个版本，不调用同步回退', async ({ page, scenario }) => {
+  const versions = ['light', 'standard', 'deep'].map(level => ({ level, content: `已生成${level}版本正文。` }))
+  await page.route('**/api/v1/polish/text/stream', route => route.fulfill({
+    contentType: 'text/event-stream',
+    body: [
+      { event: 'meta', style: 'formal', style_name: '正式规范' },
+      ...versions.flatMap(version => [{ event: 'delta', ...version }, { event: 'done', ...version }]),
+      { event: 'end' },
+    ].map(event => `data: ${JSON.stringify(event)}\n\n`).join(''),
+  }))
+  await page.goto('/polish')
+  await page.getByPlaceholder('请在此粘贴或输入需要润色的文本内容（10-5000字）...').fill(source)
+  await page.getByRole('button', { name: '一键润色', exact: true }).click()
+  for (const version of versions) await expect(page.getByText(version.content, { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '一键润色', exact: true })).toBeEnabled()
+  expect(scenario.calls.filter(call => call.path === '/polish/text')).toEqual([])
+})
+
+
 test('普通用户从文档审校工作区退出后清除双令牌和退出查询参数', async ({ page, scenario }) => {
   await page.goto('/proofread/document?review=7')
   await ready(page)
@@ -280,3 +333,222 @@ test('普通用户从文档审校工作区退出后清除双令牌和退出查�
   await loggedOut(page)
   expect(scenario.calls.every(call => call.method === 'GET')).toBe(true)
 })
+
+const factInput = (page: Page) => page.getByRole('textbox', { name: '待核查文本', exact: true })
+const factSubmit = (page: Page) => page.getByRole('button', { name: /^(开始事实核查|重试提交（同一请求）)$/ })
+const factError = (page: Page) => page.getByTestId('fact-workbench').getByRole('alert')
+
+async function factText(page: Page, text: string) {
+  const radio = page.getByRole('radio', { name: '粘贴文本', exact: true })
+  await page.locator('label').filter({ has: radio }).click()
+  await expect(radio).toBeChecked()
+  await expect(factInput(page)).toBeEnabled()
+  await factInput(page).fill(text)
+  const consent = page.getByRole('checkbox', { name: '同意材料外发', exact: true })
+  await page.locator('label').filter({ has: consent }).click()
+  await expect(consent).toBeChecked()
+  await expect(factSubmit(page)).toBeEnabled()
+}
+async function factUpload(page: Page) {
+  const radio = page.getByRole('radio', { name: '上传文档', exact: true })
+  await page.locator('label').filter({ has: radio }).click()
+  await expect(radio).toBeChecked()
+  await page.locator('#fact-file').setInputFiles({ name: '浏览器回归.txt', mimeType: 'text/plain', buffer: Buffer.from(source) })
+}
+async function factHistory(page: Page) {
+  // SPA navigation reuses the workbench instance; page.goto would hide the epoch regression.
+  await page.locator('.history-item').filter({ hasText: '模拟核查 41' }).click()
+  await expect(page).toHaveURL(/\/fact-check\/41$/)
+  await expect(page.getByRole('heading', { name: '模拟核查 41', exact: true })).toBeVisible()
+  for (const name of ['刷新状态', '导出 JSON', '清理材料与证据', '保存复核意见']) {
+    await expect(page.getByRole('button', { name, exact: true })).toBeEnabled()
+  }
+}
+
+// These cases only use the fixture's allowlisted APIs; no search or LLM is contacted.
+test('事实核查：上传并提取文本后可提交文档任务', async ({ page, scenario }) => {
+  scenario.factCheck = true
+  await page.goto('/fact-check')
+  await factUpload(page)
+  await expect(page.getByText(`浏览器回归.txt · 已提取 ${Array.from(source).length} 字符`, { exact: true })).toBeVisible()
+  await expect(page.locator('#fact-file')).toBeEnabled()
+  const consent = page.getByRole('checkbox', { name: '同意材料外发', exact: true })
+  await page.locator('label').filter({ has: consent }).click()
+  await expect(consent).toBeChecked()
+  await expect(factSubmit(page)).toBeEnabled()
+  await factSubmit(page).click()
+  await expect(page).toHaveURL(/\/fact-check\/42$/)
+  await expect(page.getByRole('button', { name: '刷新状态', exact: true })).toBeEnabled()
+  const creates = scenario.calls.filter(call => call.method === 'POST' && call.path === '/fact-check/runs')
+  expect(creates).toHaveLength(1)
+  expect(creates[0].body).toMatchObject({ file_id: 'browser-file', allow_external_search: true, confirm_claims: false })
+  expect(scenario.calls.some(call => call.path === '/document/browser-file/extracted-text')).toBe(true)
+  expect(scenario.calls.some(call => call.path === '/document/proofread/async')).toBe(false)
+})
+
+for (const phase of ['upload', 'extract'] as const) {
+  test(`事实核查：${phase}失败后恢复操作且不提交未提取的文档`, async ({ page, scenario }) => {
+    scenario.factCheck = true
+    const failed = await holdApi(page, phase === 'upload' ? '/document/upload' : '/document/browser-file/extracted-text', phase === 'upload' ? 'POST' : 'GET')
+    try {
+      await page.goto('/fact-check')
+      await factUpload(page)
+      await failed.started
+      await expect(page.locator('#fact-file')).toBeDisabled()
+      await failed.respond({ detail: '材料处理失败' }, 503)
+      await expect(factError(page)).toContainText('材料处理失败')
+      await expect(page.locator('#fact-file')).toBeEnabled()
+      const consent = page.getByRole('checkbox', { name: '同意材料外发', exact: true })
+      await page.locator('label').filter({ has: consent }).click()
+      await expect(consent).toBeChecked()
+      await expect(factSubmit(page)).toBeDisabled()
+      expect(scenario.calls.some(call => call.method === 'POST' && call.path === '/fact-check/runs')).toBe(false)
+      await page.locator('label').filter({ has: consent }).click()
+      await factText(page, '改用文本输入，重新提交需要核查的材料。')
+      await factSubmit(page).click()
+      await expect(page).toHaveURL(/\/fact-check\/42$/)
+      await expect(page.getByRole('button', { name: '刷新状态', exact: true })).toBeEnabled()
+    } finally {
+      await failed.dispose()
+    }
+  })
+
+  for (const outcome of ['resolve', 'reject'] as const) {
+    test(`事实核查：${phase}挂起时切历史→详情→新建，旧请求${outcome}不影响新提交`, async ({ page, scenario }) => {
+      scenario.factCheck = true
+      const path = phase === 'upload' ? '/document/upload' : '/document/browser-file/extracted-text'
+      const old = await holdApi(page, path, phase === 'upload' ? 'POST' : 'GET')
+      const current = await holdApi(page, '/fact-check/runs')
+      try {
+        await page.goto('/fact-check')
+        await factUpload(page)
+        const oldRoute = await old.started
+        await expect(page.locator('#fact-file')).toBeDisabled()
+        await expect(factSubmit(page)).toBeDisabled()
+        const aborted = phase === 'upload' ? page.waitForEvent('requestfailed', request => request === oldRoute.request()) : Promise.resolve()
+        await factHistory(page)
+        await aborted
+        await page.getByRole('button', { name: '新建核查', exact: true }).click()
+        const fresh = '这是新页面独立输入的事实，不能被旧文档提取结果替换。'
+        await factText(page, fresh)
+        await factSubmit(page).click()
+        await current.started
+        await expect(factInput(page)).toBeDisabled()
+
+        const response = phase === 'upload' ? { file_id: 'stale-file', filename: '旧文档.txt' }
+          : { file_id: 'browser-file', extracted_text: '过期提取结果', extracted_html: '' }
+        await old.respond(outcome === 'resolve' ? response : { detail: '旧请求模拟失败' }, outcome === 'resolve' ? 200 : 503, phase === 'upload')
+        await expect(page).toHaveURL(/\/fact-check$/)
+        await expect(factInput(page)).toHaveValue(fresh)
+        await expect(factInput(page)).toBeDisabled()
+        await expect(factSubmit(page)).toBeDisabled()
+        await expect(factError(page)).toHaveCount(0)
+        expect((await current.started).request().postDataJSON()).toMatchObject({ text: fresh })
+        expect(scenario.calls.some(call => call.path === '/document/stale-file/extracted-text')).toBe(false)
+
+        await current.respond(factRun(42))
+        await expect(page).toHaveURL(/\/fact-check\/42$/)
+        await expect(page.getByRole('button', { name: '刷新状态', exact: true })).toBeEnabled()
+      } finally {
+        await old.dispose()
+        await current.dispose()
+      }
+    })
+  }
+}
+
+for (const outcome of ['resolve', 'reject'] as const) {
+  test(`事实核查：旧创建请求${outcome}不导航、不清除新创建的busy或重试编号`, async ({ page, scenario }) => {
+    scenario.factCheck = true
+    const old = await holdApi(page, '/fact-check/runs')
+    let current: Awaited<ReturnType<typeof holdApi>> | undefined
+    try {
+      await page.goto('/fact-check')
+      await factText(page, '旧页面提交材料。')
+      await factSubmit(page).click()
+      const oldRequest = (await old.started).request().postDataJSON()
+      await factHistory(page)
+      await page.getByRole('button', { name: '新建核查', exact: true }).click()
+      const fresh = '新页面提交材料，必须保留其请求编号。'
+      await factText(page, fresh)
+      current = await holdApi(page, '/fact-check/runs')
+      await factSubmit(page).click()
+      const currentRequest = (await current.started).request().postDataJSON()
+      expect(currentRequest.request_id).not.toBe(oldRequest.request_id)
+      await old.respond(outcome === 'resolve' ? factRun(99) : { detail: '旧创建失败' }, outcome === 'resolve' ? 200 : 409)
+      await expect(page).toHaveURL(/\/fact-check$/)
+      await expect(factInput(page)).toHaveValue(fresh)
+      await expect(factInput(page)).toBeDisabled()
+      const retry = page.getByRole('button', { name: '重试提交（同一请求）', exact: true })
+      await expect(retry).toBeDisabled()
+      await expect(factError(page)).toHaveCount(0)
+
+      await current.respond({ detail: '新请求结果未知' }, 503)
+      await expect(retry).toBeEnabled()
+      const retryRequest = await holdApi(page, '/fact-check/runs')
+      try {
+        await retry.click()
+        expect((await retryRequest.started).request().postDataJSON()).toEqual(currentRequest)
+        await retryRequest.respond(factRun(42))
+        await expect(page).toHaveURL(/\/fact-check\/42$/)
+        await expect(page.getByRole('button', { name: '刷新状态', exact: true })).toBeEnabled()
+      } finally {
+        await retryRequest.dispose()
+      }
+    } finally {
+      await old.dispose()
+      await current?.dispose()
+    }
+  })
+}
+
+for (const kind of ['reviews', 'deepen'] as const) {
+  for (const outcome of ['resolve', 'reject'] as const) {
+    test(`事实核查：返回同一任务后旧${kind}请求${outcome}不得覆盖数据、导航或新操作busy`, async ({ page, scenario }) => {
+      scenario.factCheck = true
+      const old = await holdApi(page, `/fact-check/runs/41/${kind}`)
+      let current: Awaited<ReturnType<typeof holdApi>> | undefined
+      try {
+        await page.goto('/fact-check')
+        await factHistory(page)
+        const editor = page.getByRole('textbox', { name: '复核说明', exact: true })
+        const save = page.getByRole('button', { name: '保存复核意见', exact: true })
+        if (kind === 'reviews') {
+          await editor.fill('旧页面复核')
+          await save.click()
+        } else {
+          const consent = page.getByRole('checkbox', { name: '确认可再次对外检索', exact: true })
+          await page.locator('label').filter({ has: consent }).click()
+          await expect(consent).toBeChecked()
+          await page.getByRole('button', { name: '发起单条深查', exact: true }).click()
+        }
+        await old.started
+        await expect(page.getByRole('button', { name: '刷新状态', exact: true })).toBeDisabled()
+        await page.getByRole('button', { name: '新建核查', exact: true }).click()
+        await factHistory(page)
+        await editor.fill('新页面尚未完成的复核')
+        current = await holdApi(page, '/fact-check/runs/41/reviews')
+        await save.click()
+        const payload = (await current.started).request().postDataJSON()
+        const review = { id: 1, run_id: 41, user_id: 1, claim_id: 'C1', decision: 'agree', note: '旧页面复核', request_id: 'old-review', created_at: '2026-06-01T00:02:00Z' }
+        await old.respond(outcome === 'resolve' ? (kind === 'reviews' ? review : factRun(99)) : { detail: '旧操作失败' }, outcome === 'resolve' ? 200 : 503)
+        await expect(page).toHaveURL(/\/fact-check\/41$/)
+        await expect(editor).toHaveValue('新页面尚未完成的复核')
+        await expect(editor).toBeDisabled()
+        await expect(save).toBeDisabled()
+        await expect(page.getByRole('button', { name: '刷新状态', exact: true })).toBeDisabled()
+        await expect(page.locator('.review-entry')).toHaveCount(0)
+        await expect(factError(page)).toHaveCount(0)
+
+        await current.respond({ ...review, ...payload, id: 2 })
+        await expect(save).toBeEnabled()
+        await expect(editor).toHaveValue('')
+        await expect(page.locator('.review-entry')).toHaveCount(1)
+        await expect(page.locator('.review-entry')).toContainText('新页面尚未完成的复核')
+      } finally {
+        await old.dispose()
+        await current?.dispose()
+      }
+    })
+  }
+}

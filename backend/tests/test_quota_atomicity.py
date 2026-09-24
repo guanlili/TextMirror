@@ -7,13 +7,22 @@
 """
 import asyncio
 import uuid as _uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi import HTTPException, Request
 
+from app.core import rate_limit
 from app.core import redis as redis_module
 from app.core.database import async_session_factory
 from app.core.rate_limit import _daily_key, check_guest_rate_limit
+from app.core.rate_limit import (
+    refund_api_key_daily_usage as real_refund_api_key_daily_usage,
+)
+from app.core.rate_limit import (
+    refund_user_daily_quota as real_refund_user_daily_quota,
+)
 from app.core.security import hash_password
 from app.models.llm_config import LLMConfig
 from app.models.role import Role
@@ -242,3 +251,161 @@ async def test_guest_mode_disabled_rejects_document_proofread(client):
 
         resp = await client.post("/api/v1/document/proofread/async", json={"file_id": file_id})
         assert resp.status_code == 403
+
+
+@pytest.mark.parametrize("kind", ["user", "apikey"])
+async def test_refund_uses_charge_receipt_after_midnight(client, monkeypatch, kind):
+    subject = SimpleNamespace(id=71, daily_quota=20)
+    day = ["20260924"]
+    monkeypatch.setattr(rate_limit, "_daily_key", lambda prefix, ident: f"textmirror:{prefix}:{ident}:{day[0]}")
+    prefix = "user_daily" if kind == "user" else "apikey_daily"
+    old_key = f"textmirror:{prefix}:71:20260924"
+    new_key = f"textmirror:{prefix}:71:20260925"
+    redis = redis_module.redis_client
+    await redis.set(old_key, 3, ex=172800)
+    await redis.set(new_key, 9, ex=172800)
+    charge = rate_limit.charge_user_daily_quota if kind == "user" else rate_limit.charge_api_key_daily
+    refund = real_refund_user_daily_quota if kind == "user" else real_refund_api_key_daily_usage
+    receipt = await charge(subject, 2)
+    assert receipt == old_key
+    day[0] = "20260925"
+
+    async def eval_refund(script, numkeys, key, weight):
+        assert script == rate_limit._REFUND_DAILY_LUA
+        assert numkeys == 1
+        count = int(await redis.get(key) or 0)
+        if count:
+            return await redis.decrby(key, min(count, weight))
+        return 0
+
+    evaluate = AsyncMock(side_effect=eval_refund)
+    monkeypatch.setattr(redis, "eval", evaluate)
+    await refund(receipt, 2)
+    evaluate.assert_awaited_once_with(rate_limit._REFUND_DAILY_LUA, 1, old_key, 2)
+    assert int(await redis.get(old_key)) == 3
+    assert int(await redis.get(new_key)) == 9
+
+    await redis.delete(old_key)
+    await refund(receipt)
+    assert await redis.get(old_key) is None
+    assert int(await redis.get(new_key)) == 9
+    evaluate.reset_mock()
+    await refund(None)
+    await refund(receipt, 0)
+    evaluate.assert_not_awaited()
+
+
+@pytest.mark.parametrize("kind", ["user", "apikey"])
+@pytest.mark.parametrize("quota", [0, 10])
+async def test_charge_retains_receipt_and_limit_when_ttl_fails(client, monkeypatch, kind, quota):
+    subject = SimpleNamespace(id=72, daily_quota=quota)
+    charge = rate_limit.charge_user_daily_quota if kind == "user" else rate_limit.charge_api_key_daily
+    prefix = "user_daily" if kind == "user" else "apikey_daily"
+    key = _daily_key(prefix, "72")
+    redis = redis_module.redis_client
+    monkeypatch.setattr(redis, "ttl", AsyncMock(side_effect=RuntimeError("TTL unavailable")))
+    if quota:
+        assert await charge(subject) == key
+        assert int(await redis.get(key)) == 1
+    else:
+        with pytest.raises(HTTPException) as raised:
+            await charge(subject)
+        assert raised.value.status_code == 429
+        assert int(await redis.get(key)) == 0
+
+
+@pytest.mark.parametrize("endpoint,service,payload", [
+    ("/proofread/text", "app.api.v1.proofread.proofread_text", {"text": "测试跨日审校退款"}),
+    ("/polish/text", "app.api.v1.polish.polish_text", {"text": "这是一段用于测试跨日退款的润色原文。", "style": "formal"}),
+])
+async def test_web_failure_refunds_original_day(client, monkeypatch, endpoint, service, payload):
+    user = await _create_user(daily_quota=10)
+    headers = await _login(client, user)
+    day = ["20260924"]
+    monkeypatch.setattr(rate_limit, "_daily_key", lambda prefix, ident: f"textmirror:{prefix}:{ident}:{day[0]}")
+    old_key = f"textmirror:user_daily:{user.id}:20260924"
+    new_key = f"textmirror:user_daily:{user.id}:20260925"
+    await redis_module.redis_client.set(old_key, 2, ex=172800)
+    await redis_module.redis_client.set(new_key, 4, ex=172800)
+
+    async def fail_after_midnight(**kwargs):
+        day[0] = "20260925"
+        raise RuntimeError("Model unavailable")
+
+    with patch(service, side_effect=fail_after_midnight):
+        response = await client.post(f"/api/v1{endpoint}", json=payload, headers=headers)
+    assert response.status_code == 503, response.text
+    assert int(await redis_module.redis_client.get(old_key)) == 2
+    assert int(await redis_module.redis_client.get(new_key)) == 4
+
+
+async def test_web_polish_stream_refunds_original_day(client, monkeypatch):
+    user = await _create_user(daily_quota=10)
+    headers = await _login(client, user)
+    day = ["20260924"]
+    monkeypatch.setattr(rate_limit, "_daily_key", lambda prefix, ident: f"textmirror:{prefix}:{ident}:{day[0]}")
+    old_key = f"textmirror:user_daily:{user.id}:20260924"
+    new_key = f"textmirror:user_daily:{user.id}:20260925"
+    await redis_module.redis_client.set(old_key, 2, ex=172800)
+    await redis_module.redis_client.set(new_key, 4, ex=172800)
+
+    async def fail_after_midnight(**kwargs):
+        yield {"event": "meta", "style": "formal", "style_name": "正式规范"}
+        day[0] = "20260925"
+        raise RuntimeError("Model unavailable")
+
+    monkeypatch.setattr("app.api.v1.polish.polish_text_stream", fail_after_midnight)
+    response = await client.post(
+        "/api/v1/polish/text/stream",
+        json={"text": "这是一段用于测试跨日退款的润色原文。", "style": "formal"},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    assert '"event": "fatal"' in response.text
+    assert int(await redis_module.redis_client.get(old_key)) == 2
+    assert int(await redis_module.redis_client.get(new_key)) == 4
+
+
+@pytest.mark.parametrize("endpoint", ["/proofread/compare", "/polish/compare", "/polish/compare/stream"])
+async def test_web_compare_partial_refund_uses_original_day(client, monkeypatch, endpoint):
+    user = await _create_user(daily_quota=10)
+    headers = await _login(client, user)
+    configs = await _create_two_configs()
+    day = ["20260924"]
+    monkeypatch.setattr(rate_limit, "_daily_key", lambda prefix, ident: f"textmirror:{prefix}:{ident}:{day[0]}")
+    old_key = f"textmirror:user_daily:{user.id}:20260924"
+    new_key = f"textmirror:user_daily:{user.id}:20260925"
+    await redis_module.redis_client.set(old_key, 2, ex=172800)
+    await redis_module.redis_client.set(new_key, 4, ex=172800)
+
+    async def compare(**kwargs):
+        day[0] = "20260925"
+        return _compare_items(configs, [True, False])
+
+    def build_provider(config):
+        async def chat(*args, **kwargs):
+            day[0] = "20260925"
+            if config.id == configs[1].id:
+                raise RuntimeError("Model unavailable")
+            return SimpleNamespace(content="测试润色正文", model=config.model)
+
+        async def stream(*args, **kwargs):
+            result = await chat()
+            yield result.content
+
+        return SimpleNamespace(chat=chat, chat_stream=stream, close=AsyncMock())
+
+    monkeypatch.setattr("app.services.model_compare.run_proofread_compare", compare)
+    monkeypatch.setattr("app.api.v1.polish._build_compare_provider", build_provider)
+    payload = {"text": "这是一段用于测试跨日对比退款的原文。", "config_ids": [c.id for c in configs]}
+    if endpoint.startswith("/polish"):
+        payload["style"] = "formal"
+    response = await client.post(f"/api/v1{endpoint}", json=payload, headers=headers)
+    assert response.status_code == 200, response.text
+    if endpoint.endswith("/stream"):
+        assert '"event": "done"' in response.text
+        assert '"event": "error"' in response.text
+    else:
+        assert [item["success"] for item in response.json()["results"]] == [True, False]
+    assert int(await redis_module.redis_client.get(old_key)) == 3
+    assert int(await redis_module.redis_client.get(new_key)) == 4

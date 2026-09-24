@@ -81,7 +81,7 @@ async def open_proofread(
         return JSONResponse(content=cached)
 
     # 计费顺序：RPM → 用户配额预扣 → 密钥日配额预扣（密钥拒绝时自动退还用户预扣）
-    await _open_billing(user, api_key)
+    user_quota_key, api_key_quota_key = await _open_billing(user, api_key)
 
     timer = AuditTimer()
     timer.start()
@@ -109,15 +109,15 @@ async def open_proofread(
         if isinstance(e, InvalidModelConfigError):
             # 用户指定了无效 config_id：用户错误，不退还密钥额度
             # （用户配额口径是「无结果不消耗」，预扣照退）
-            await refund_user_daily_quota(user)
+            await refund_user_daily_quota(user_quota_key)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={"code": "INVALID_CONFIG", "message": str(e)},
             )
         # 服务端故障（如未配置活跃模型）：退还密钥日配额与用户配额
-        await refund_user_daily_quota(user)
+        await refund_user_daily_quota(user_quota_key)
         if api_key is not None:
-            await refund_api_key_daily_usage(api_key)
+            await refund_api_key_daily_usage(api_key_quota_key)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "MODEL_UNAVAILABLE", "message": "审校服务暂时不可用，请稍后重试"},
@@ -131,9 +131,9 @@ async def open_proofread(
             status="failed", error_message=str(e), duration_ms=timer.elapsed_ms(),
         )
         # 服务端错误：退还密钥日配额与用户配额
-        await refund_user_daily_quota(user)
+        await refund_user_daily_quota(user_quota_key)
         if api_key is not None:
-            await refund_api_key_daily_usage(api_key)
+            await refund_api_key_daily_usage(api_key_quota_key)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"code": "INTERNAL_ERROR", "message": "审校过程发生错误，请稍后重试"},
@@ -253,7 +253,7 @@ async def open_proofread_compare(
     # 对比一次消耗 n 倍额度（n=有效模型数；重复/无效 config_id 不重复计量）
     n = len(configs)
     # 计费顺序与文本端点一致：RPM → 用户配额预扣 → 密钥日配额预扣
-    await _open_billing(user, api_key, n)
+    user_quota_key, api_key_quota_key = await _open_billing(user, api_key, n)
 
     timer = AuditTimer()
     timer.start()
@@ -273,18 +273,18 @@ async def open_proofread_compare(
         )
     except Exception:
         # 整体异常（模型加载等前置失败）：全额退还两侧预扣
-        await refund_user_daily_quota(user, n)
+        await refund_user_daily_quota(user_quota_key, n)
         if api_key is not None:
-            await refund_api_key_daily_usage(api_key, n)
+            await refund_api_key_daily_usage(api_key_quota_key, n)
         raise
     items = [OpenCompareModelResult(**i) for i in raw_items]
 
     # 部分模型失败：失败模型退还两侧额度（按成功数结算，失败的不计费）
     failed = sum(1 for i in items if not i.success)
     if failed > 0:
-        await refund_user_daily_quota(user, failed)
+        await refund_user_daily_quota(user_quota_key, failed)
         if api_key is not None:
-            await refund_api_key_daily_usage(api_key, failed)
+            await refund_api_key_daily_usage(api_key_quota_key, failed)
 
     # 落一条带权重的对比记录：用户配额按 SUM(quota_weight) 计量（此前只预检不落库，
     # 预检通过后配额实际不消耗），用量统计归属到调用密钥。权重=成功模型数，

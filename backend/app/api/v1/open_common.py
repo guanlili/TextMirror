@@ -165,19 +165,18 @@ async def _charge_user_quota_contract(user, n: int = 1) -> str | None:
         raise
 
 
-async def _open_billing(user, api_key, weight: int = 1) -> None:
-    """开放 API 统一计费顺序：RPM → 用户配额预扣 → 密钥日配额预扣（weight=本次消耗额度数）。
-
-    密钥配额拒绝时退还用户预扣——本次请求未获得服务，用户额度不应消耗。
-    """
+async def _open_billing(user, api_key, weight: int = 1) -> tuple[str | None, str | None]:
+    """按 RPM → 用户配额 → 密钥配额预扣，保留两侧原日 key 供退款。"""
     if api_key is not None:
         await check_api_key_rpm(api_key)
-    await _charge_user_quota_contract(user, weight)
+    user_quota_key = await _charge_user_quota_contract(user, weight)
+    api_key_quota_key = None
     if api_key is not None:
         try:
-            await charge_api_key_daily(api_key, weight)
+            api_key_quota_key = await charge_api_key_daily(api_key, weight)
         except HTTPException:
-            await refund_user_daily_quota(user, weight)
+            await refund_user_daily_quota(user_quota_key, weight)
             raise
+    return user_quota_key, api_key_quota_key
 
 

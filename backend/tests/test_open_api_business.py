@@ -452,7 +452,7 @@ async def test_celery_task_on_failure_refunds_once(client, db, user, api_key):
         owner_api_key_id=key_obj.id,
         status="RETRYING",
         error_code="PROOFREAD_RETRYABLE",
-        params_json={"domain": "general"},
+        params_json={"domain": "general", "api_key_quota_key": _daily_key(key_obj)},
     )
     db.add_all([doc, task])
     await db.commit()
@@ -471,7 +471,7 @@ async def test_celery_task_on_failure_refunds_once(client, db, user, api_key):
         db_task = result.scalar_one()
     assert db_task.status == "FAILURE"
     assert db_task.error_code == "PROOFREAD_RETRYABLE"
-    refund_mock.assert_called_once_with(key_obj.id, task.task_id)
+    refund_mock.assert_called_once_with(key_obj.id, task.task_id, task.params_json["api_key_quota_key"])
 
 
 async def test_celery_task_on_failure_no_refund_for_invalid_config(client, db, user, api_key):

@@ -135,17 +135,13 @@ async def charge_user_daily_quota(user, weight: int = 1) -> str | None:
         logger.error(f"用户配额 Redis 异常（本次放行，配额暂不生效）: {e}")
 
 
-async def refund_user_daily_quota(user, weight: int = 1) -> None:
-    """
-    退还用户日配额预扣（服务端失败 / 对比场景部分模型失败）：
-    用户没拿到结果的部分不消耗当日额度。
-    未配置配额（daily_quota=None）的用户从未预扣，键不存在时 Lua 直接返回 0。
-    """
-    if user is None or weight <= 0:
+async def refund_user_daily_quota(quota_key: str | None, weight: int = 1) -> None:
+    """按实际预扣 key 退款，跨日或无预扣时不触碰其他日期的计数。"""
+    if quota_key is None or weight <= 0:
         return
     try:
         redis = get_redis()
-        await redis.eval(_REFUND_DAILY_LUA, 1, _daily_key("user_daily", str(user.id)), weight)
+        await redis.eval(_REFUND_DAILY_LUA, 1, quota_key, weight)
     except Exception as e:
         logger.error(f"退还用户日配额 Redis 异常: {e}")
 
@@ -203,17 +199,19 @@ async def check_api_key_rpm(api_key) -> None:
         logger.error(f"API Key RPM 限流 Redis 异常: {e}")
 
 
-async def charge_api_key_daily(api_key, weight: int = 1) -> None:
-    """
-    密钥日配额计数与检查（自然日，无论是否配置配额都计数以供展示）。
-    weight：本次请求消耗的额度数（多模型对比 = 模型数）。
-    """
+async def charge_api_key_daily(api_key, weight: int = 1) -> str | None:
+    """密钥日配额原子预扣，返回实际扣费 key（不限额的密钥也计数）。"""
+    if weight <= 0:
+        return None
     try:
         redis = get_redis()
         daily_key = _api_key_daily_redis_key(api_key)
         daily_count = await redis.incrby(daily_key, weight)
-        if await redis.ttl(daily_key) < 0:
-            await redis.expire(daily_key, 172800)
+        try:
+            if await redis.ttl(daily_key) < 0:
+                await redis.expire(daily_key, 172800)
+        except Exception as e:
+            logger.warning(f"密钥配额 TTL 设置失败 key_id={api_key.id}: {e}")
         if api_key.daily_quota is not None and daily_count > api_key.daily_quota:
             # 被拒请求不消耗额度：抵消本次自增（退还失败不影响拒绝）
             try:
@@ -225,16 +223,17 @@ async def charge_api_key_daily(api_key, weight: int = 1) -> None:
                 f"need={weight}, quota={api_key.daily_quota}"
             )
             raise QuotaExceededError(code="KEY_QUOTA_EXCEEDED", message=f"该密钥已达每日调用上限（{api_key.daily_quota} 次/天），明天恢复或联系管理员调整")
+        return daily_key
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"API Key 限流 Redis 异常: {e}")
 
 
-async def check_api_key_rate_limit(api_key) -> None:
+async def check_api_key_rate_limit(api_key) -> str | None:
     """文本单模型场景：RPM + 日配额（1 请求 = 1 次额度）"""
     await check_api_key_rpm(api_key)
-    await charge_api_key_daily(api_key)
+    return await charge_api_key_daily(api_key)
 
 
 async def get_api_keys_daily_usage(api_keys) -> dict:
@@ -265,16 +264,13 @@ _REFUND_DAILY_LUA = (
 )
 
 
-async def refund_api_key_daily_usage(api_key, weight: int = 1) -> None:
-    """
-    退还密钥日配额计数（服务端失败 / 对比场景部分模型失败）：
-    用户没拿到结果的部分不消耗当日额度（用户配额预扣的退还走 refund_user_daily_quota）。
-    """
-    if weight <= 0:
+async def refund_api_key_daily_usage(quota_key: str | None, weight: int = 1) -> None:
+    """按实际预扣 key 退还密钥配额，不重新计算当前日期。"""
+    if quota_key is None or weight <= 0:
         return
     try:
         redis = get_redis()
-        await redis.eval(_REFUND_DAILY_LUA, 1, _api_key_daily_redis_key(api_key), weight)
+        await redis.eval(_REFUND_DAILY_LUA, 1, quota_key, weight)
     except Exception as e:
         logger.error(f"退还密钥日配额 Redis 异常: {e}")
 

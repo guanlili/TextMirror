@@ -17,7 +17,7 @@ const request: AxiosInstance = axios.create({
 
 // ---- Token 刷新状态 ----
 let isRefreshing = false
-let pendingRequests: Array<(token: string) => void> = []
+let pendingRequests: Array<{ resolve: (token: string) => void; reject: () => void }> = []
 
 async function refreshAccessToken(): Promise<string | null> {
   const refreshToken = localStorage.getItem('refresh_token')
@@ -100,11 +100,14 @@ request.interceptors.response.use(
 
           // 已有刷新请求在进行中，排队等待
           if (isRefreshing) {
-            return new Promise((resolve) => {
-              pendingRequests.push((newToken: string) => {
-                failConfig.headers.Authorization = `Bearer ${newToken}`
-                failConfig._retried = true
-                resolve(request(failConfig))
+            return new Promise((resolve, reject) => {
+              pendingRequests.push({
+                resolve: (newToken: string) => {
+                  failConfig.headers.Authorization = `Bearer ${newToken}`
+                  failConfig._retried = true
+                  resolve(request(failConfig))
+                },
+                reject: () => reject(error),
               })
             })
           }
@@ -112,23 +115,22 @@ request.interceptors.response.use(
           isRefreshing = true
           try {
             const newToken = await refreshAccessToken()
-            if (newToken) {
-              failConfig._retried = true
-              pendingRequests.forEach((cb) => cb(newToken))
-              pendingRequests = []
-
-              failConfig.headers.Authorization = `Bearer ${newToken}`
-              return request(failConfig)
-            }
-          } catch {
-            // 刷新失败，清空队列
+            if (!newToken) throw error
+            failConfig._retried = true
+            pendingRequests.forEach((pending) => pending.resolve(newToken))
             pendingRequests = []
+
+            failConfig.headers.Authorization = `Bearer ${newToken}`
+            return request(failConfig)
+          } catch {
+            // 所有等待者以各自的原始错误失败，仅刷新发起者负责退出提示。
+            pendingRequests.forEach((pending) => pending.reject())
+            pendingRequests = []
+            clearAuthAndRedirect()
+            return Promise.reject(error)
           } finally {
             isRefreshing = false
           }
-
-          clearAuthAndRedirect()
-          return Promise.reject(error)
         }
         case 403:
           ElMessage.error(data?.detail as string || '无权执行此操作')
