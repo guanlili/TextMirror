@@ -11,6 +11,20 @@
 - 审校页模板计算下沉（共识判定 O(n²)→O(1)、字数/计数改 computed、上下文复用字符数组缓存）、问题列表 `:key` 改用稳定键、事实核查轮询改指数退避、vite manualChunks 改包路径前缀精确匹配。([#127](https://github.com/guanlili/TextMirror/pull/127))
 - 润色页脚本（状态/三档流式/多模型对比/复制/生命周期）抽到 `usePolish` 组合式、Markdown 渲染抽到 `utils/markdown`，页面文件 1789→1386 行；模板与样式保持不变。([#127](https://github.com/guanlili/TextMirror/pull/127))
 
+### 修复与安全
+- 飞书登录/SSO 链路日志手机号脱敏（前3后4保留）；上传文本进程内缓存加字符总量上限（单条超限不入缓存走 DB 回源，累计超限 LRU 淘汰），防大文档撑爆单 worker 内存。([#126](https://github.com/guanlili/TextMirror/pull/126))
+- 管理端用户更新接口的角色/启用状态变更收归超级管理员专属，堵住普通管理员自我提权与停用超管的路径；系统设置默认密码不再明文回传（掩码 `******`，掩码提交视为不修改）。([#124](https://github.com/guanlili/TextMirror/pull/124))
+- 飞书 SSO token 改经 URL fragment 传递并由前端读后擦除，不再进入服务端/代理访问日志；下线管理后台飞书配置死表单（运行时始终由环境变量驱动，写入 Redis 的配置无消费方）。([#124](https://github.com/guanlili/TextMirror/pull/124))
+- 润色流式接口异常信息脱敏，原始异常仅记日志，对齐对比路径既有范式。([#124](https://github.com/guanlili/TextMirror/pull/124))
+
+### 修复与性能
+- webhook 投递前增加 SSRF 复检（防设置后 DNS 重绑定指向内网；DNS 抖动仍走既有 Celery 重试不误杀），设置侧域名解析移入线程池不再阻塞事件循环。([#125](https://github.com/guanlili/TextMirror/pull/125))
+- 事实核查设置层密钥判断改为解密后校验，SECRET_KEY 轮换后不再误报「已配置」；协作审校三处吞异常补日志。([#125](https://github.com/guanlili/TextMirror/pull/125))
+- 后台文档列表 defer 大字段、密钥列表日用量改 Redis pipeline 批量、今日用量统计改可索引日期范围、LLM 重试加指数退避。([#125](https://github.com/guanlili/TextMirror/pull/125))
+
+### 工程化
+- coverage 生成物移出 git 并补 .gitignore/eslint ignores；eslint globals 白名单补 `URLSearchParams`/`history`。([#124](https://github.com/guanlili/TextMirror/pull/124))
+
 ## [2026-09-22]
 
 ### 修复

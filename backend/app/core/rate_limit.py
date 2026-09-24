@@ -237,15 +237,20 @@ async def check_api_key_rate_limit(api_key) -> None:
     await charge_api_key_daily(api_key)
 
 
-async def get_api_key_daily_usage(api_key) -> int | None:
-    """读取密钥今日调用次数（Redis 不可用时返回 None）"""
+async def get_api_keys_daily_usage(api_keys) -> dict:
+    """批量读取多个密钥今日调用次数（pipeline 一次往返；Redis 不可用时全部 None）"""
+    if not api_keys:
+        return {}
     try:
         redis = get_redis()
-        count = await redis.get(_api_key_daily_redis_key(api_key))
-        return int(count) if count is not None else 0
+        pipe = redis.pipeline()
+        for k in api_keys:
+            pipe.get(_api_key_daily_redis_key(k))
+        counts = await pipe.execute()
+        return {k.id: (int(c) if c is not None else 0) for k, c in zip(api_keys, counts)}
     except Exception as e:
-        logger.error(f"读取密钥日用量 Redis 异常: {e}")
-        return None
+        logger.error(f"批量读取密钥日用量 Redis 异常: {e}")
+        return {k.id: None for k in api_keys}
 
 
 # 仅当计数 >0 时 DECR（下限为 0），避免键过期/多次退还制造负值

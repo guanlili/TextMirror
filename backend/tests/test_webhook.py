@@ -28,6 +28,14 @@ PASSWORD = "Passw0rd!123"
 HOOK_URL = "https://example.com/hook"
 
 
+@pytest.fixture(autouse=True)
+def _mock_public_dns():
+    """投递前 SSRF 复检会真实解析域名，统一 mock 成公网 IP 保持单测密封；
+    个别用例需要特定解析结果时在用例内再 patch 覆盖"""
+    with patch("socket.getaddrinfo", return_value=[(None, None, None, "", ("93.184.216.34", 443))]):
+        yield
+
+
 async def _create_user_with_key():
     async with async_session_factory() as session:
         role = Role(name="测试角色", code=f"r_{_uuid.uuid4().hex[:8]}")
@@ -335,6 +343,37 @@ async def test_webhook_deliver_skips_when_not_configured(client):
     event = build_event("document.completed", "job-1")
     result = webhook_deliver.apply(args=(key.id, event)).get()
     assert result == {"skipped": True, "reason": "webhook not configured"}
+
+
+async def test_webhook_deliver_rejects_dns_rebinding_to_private_ip(client):
+    """设置时是公网地址、投递时 DNS 被改指向内网（TTL 重绑定）：复检拒绝且不发起请求、不重试"""
+    user, _, key = await _create_user_with_key()
+    await _configure_webhook(key.id, "whsec_abc")
+
+    event = build_event("document.completed", "job-rebind")
+    with patch("app.core.config.settings.DEBUG", False), \
+         patch("socket.getaddrinfo", return_value=[(None, None, None, "", ("10.0.0.5", 443))]), \
+         patch("app.tasks.webhook_task.httpx.post") as mock_post:
+        result = webhook_deliver.apply(args=(key.id, event)).get()
+
+    assert result == {"skipped": True, "reason": "url rejected on delivery"}
+    mock_post.assert_not_called()
+
+
+async def test_webhook_deliver_dns_error_falls_through_to_httpx(client):
+    """投递前 DNS 解析失败不永久放弃：跳过复检继续投递，由 httpx 失败后走 Celery 重试"""
+    import socket as _socket
+
+    from celery.exceptions import Retry
+
+    user, _, key = await _create_user_with_key()
+    await _configure_webhook(key.id, "whsec_abc")
+
+    event = build_event("document.completed", "job-dns")
+    with patch("socket.getaddrinfo", side_effect=_socket.gaierror("temporary dns failure")), \
+         patch("app.tasks.webhook_task.httpx.post", side_effect=httpx.ConnectError("dns down")):
+        with pytest.raises((httpx.ConnectError, Retry)):
+            webhook_deliver.apply(args=(key.id, event)).get()
 
 
 async def test_webhook_deliver_retries_on_non_2xx(client):

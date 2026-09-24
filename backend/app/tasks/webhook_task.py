@@ -103,6 +103,20 @@ def webhook_deliver(self, api_key_id: int, event: dict):
             secret = ""
         url = key.webhook_url
 
+    # 投递时复检 SSRF：设置时校验后 DNS 可被改指向内网（TTL 重绑定），
+    # 复检把攻击窗口从「设置到投递的间隔」压缩到毫秒级。
+    # 指向内网是配置问题不重试；DNS 抖动（dns_required=False）交给 httpx 失败后走 Celery 重试。
+    from app.core.config import settings as app_settings
+    from app.services.webhook import validate_webhook_url
+    try:
+        validate_webhook_url(url, allow_private=app_settings.DEBUG, dns_required=False)
+    except ValueError as e:
+        logger.warning(f"[Webhook] 投递前地址复检失败，放弃投递 key={api_key_id} url={url}: {e}")
+        _record_delivery(api_key_id, _delivery_entry(
+            event, "failed", error=f"地址复检失败: {e}", attempt=self.request.retries + 1,
+        ))
+        return {"skipped": True, "reason": "url rejected on delivery"}
+
     signature = sign_payload(secret, body) if secret else None
     headers = {
         "Content-Type": "application/json",

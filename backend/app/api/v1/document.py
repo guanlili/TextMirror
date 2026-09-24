@@ -86,17 +86,32 @@ ALLOWED_EXTENSIONS = {".doc", ".docx", ".pdf", ".txt"}
 
 # 上传文件文本缓存：LRU 限容（entry 含全文提取文本，无淘汰会随上传量无限增长；
 # 未命中时从 uploaded_documents 表回填，容量仅影响回填频率）
+# 双重上限：条数防碎片堆积，总字符数防大文档撑爆单 worker 内存（宁次回源 DB）
 _UPLOAD_CACHE_MAX = 200
+_UPLOAD_CACHE_MAX_CHARS = 5_000_000
 _uploaded_files_cache: OrderedDict = OrderedDict()
+_upload_cache_chars = 0
 _upload_cache_lock = Lock()
 
 
+def _entry_chars(file_info: dict) -> int:
+    return len(file_info.get("text") or "")
+
+
 def _cache_put(file_id: str, file_info: dict) -> None:
+    global _upload_cache_chars
     with _upload_cache_lock:
+        old = _uploaded_files_cache.pop(file_id, None)
+        if old is not None:
+            _upload_cache_chars -= _entry_chars(old)
+        if _entry_chars(file_info) > _UPLOAD_CACHE_MAX_CHARS:
+            return  # 单条超总上限不入缓存，读取时走 DB 回填
         _uploaded_files_cache[file_id] = file_info
         _uploaded_files_cache.move_to_end(file_id)
-        while len(_uploaded_files_cache) > _UPLOAD_CACHE_MAX:
-            _uploaded_files_cache.popitem(last=False)
+        _upload_cache_chars += _entry_chars(file_info)
+        while _upload_cache_chars > _UPLOAD_CACHE_MAX_CHARS or len(_uploaded_files_cache) > _UPLOAD_CACHE_MAX:
+            _, evicted = _uploaded_files_cache.popitem(last=False)
+            _upload_cache_chars -= _entry_chars(evicted)
 
 
 def _cache_get(file_id: str) -> Optional[dict]:
@@ -109,8 +124,11 @@ def _cache_get(file_id: str) -> Optional[dict]:
 
 def invalidate_document_cache(file_id: str) -> None:
     """清除指定文档的进程内缓存（后台删除文档时调用，避免删除后仍可凭缓存校对）"""
+    global _upload_cache_chars
     with _upload_cache_lock:
-        _uploaded_files_cache.pop(file_id, None)
+        old = _uploaded_files_cache.pop(file_id, None)
+        if old is not None:
+            _upload_cache_chars -= _entry_chars(old)
 
 
 async def _check_document_ownership(file_info: dict, current_user, db: AsyncSession) -> None:

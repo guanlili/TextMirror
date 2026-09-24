@@ -163,53 +163,7 @@
       </el-form>
     </el-card>
 
-    <!-- 飞书对接配置 -->
-    <el-card style="margin-top: 16px;">
-      <template #header>
-        <span style="font-weight: 600;">飞书对接配置</span>
-      </template>
-      <el-form
-        label-width="160px"
-        style="max-width: 680px;"
-        :model="feishuSettings"
-      >
-        <el-form-item label="启用飞书登录">
-          <el-switch v-model="feishuSettings.enabled" />
-          <span style="font-size: 12px; color: #999; margin-left: 12px;">开启后登录页显示飞书扫码入口</span>
-        </el-form-item>
-        <el-form-item label="App ID">
-          <el-input
-            v-model="feishuSettings.app_id"
-            placeholder="飞书自建应用的App ID"
-          />
-        </el-form-item>
-        <el-form-item label="App Secret">
-          <el-input
-            v-model="feishuSettings.app_secret"
-            type="password"
-            show-password
-            placeholder="飞书自建应用的App Secret"
-          />
-        </el-form-item>
-        <el-form-item label="回调地址">
-          <el-input
-            v-model="feishuSettings.redirect_uri"
-            placeholder="https://your-domain.com/login"
-          />
-          <div class="form-tip">
-            飞书应用后台「安全设置」中配置的重定向URL，需与此一致
-          </div>
-        </el-form-item>
-        <el-form-item>
-          <el-button
-            type="primary"
-            @click="saveFeishuSettings"
-          >
-            保存飞书配置
-          </el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+    <!-- 飞书登录配置由环境变量驱动（FEISHU_ENABLED 等），后台不再提供表单 -->
 
     <!-- 用户安全设置 -->
     <el-card style="margin-top: 16px;">
@@ -224,10 +178,12 @@
         <el-form-item label="新用户初始密码">
           <el-input
             v-model="securitySettings.default_password"
-            placeholder="admin123"
+            type="password"
+            show-password
+            placeholder="******"
           />
           <div class="form-tip">
-            飞书首次登录自动创建用户时使用此密码，管理员重置密码时也使用此值
+            出于安全考虑不回显明文；输入新密码并保存即可修改。飞书首次登录自动创建用户、管理员重置密码时使用此值
           </div>
         </el-form-item>
         <el-form-item>
@@ -275,9 +231,8 @@ import { reactive, ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadRawFile } from 'element-plus'
 import {
-  type BasicSettingsConfig, type FeishuSettingsConfig, type SecuritySettingsConfig,
+  type BasicSettingsConfig, type SecuritySettingsConfig,
   getBasicSettingsApi, updateBasicSettingsApi,
-  getFeishuSettingsApi, updateFeishuSettingsApi,
   getSecuritySettingsApi, updateSecuritySettingsApi,
   cleanLogsApi, cleanTempFilesApi, cleanCacheApi, cleanExpiredWhitelistApi,
 } from '@/api/admin'
@@ -371,24 +326,15 @@ const settings = reactive<BasicSettingsConfig>({
   maintenance_mode: false,
 })
 
-// 飞书对接设置
-const feishuSettings = reactive<FeishuSettingsConfig>({
-  enabled: false,
-  app_id: '',
-  app_secret: '',
-  redirect_uri: '',
-})
-
-// 用户安全设置
+// 用户安全设置（default_password 为掩码 ******，保存时原样提交表示不修改）
 const securitySettings = reactive<SecuritySettingsConfig>({
   default_password: '',
 })
 
 onMounted(async () => {
-  const [siteRes, basicRes, feishuRes, securityRes] = await Promise.allSettled([
+  const [siteRes, basicRes, securityRes] = await Promise.allSettled([
     getAdminSiteConfigApi(),
     getBasicSettingsApi(),
-    getFeishuSettingsApi(),
     getSecuritySettingsApi(),
   ])
   if (siteRes.status === 'fulfilled') {
@@ -398,14 +344,11 @@ onMounted(async () => {
   if (basicRes.status === 'fulfilled') {
     Object.assign(settings, basicRes.value)
   }
-  if (feishuRes.status === 'fulfilled') {
-    Object.assign(feishuSettings, feishuRes.value)
-  }
   if (securityRes.status === 'fulfilled') {
     Object.assign(securitySettings, securityRes.value)
   }
   // 全部失败时给出提示
-  if ([siteRes, basicRes, feishuRes, securityRes].every(r => r.status === 'rejected')) {
+  if ([siteRes, basicRes, securityRes].every(r => r.status === 'rejected')) {
     ElMessage.error('配置加载失败，请刷新页面重试')
   }
 })
@@ -443,17 +386,7 @@ async function saveBasicSettings() {
   }
 }
 
-/** 保存飞书配置 */
-async function saveFeishuSettings() {
-  try {
-    await updateFeishuSettingsApi(feishuSettings)
-    ElMessage.success('飞书配置已保存')
-  } catch (e: unknown) {
-    ElMessage.error(getErrorDetail(e) || '保存失败')
-  }
-}
-
-/** 保存安全设置 */
+/** 保存安全设置（default_password 保持掩码 ****** 时后端不修改） */
 async function saveSecuritySettings() {
   try {
     await updateSecuritySettingsApi(securitySettings)

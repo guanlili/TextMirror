@@ -17,7 +17,7 @@ from app.core.database import get_db
 from app.core.security import create_access_token, create_refresh_token, hash_password
 from app.models.user import User
 from app.services.audit_log import get_client_ip, record_audit_log_sync
-from app.services.feishu import feishu_service
+from app.services.feishu import feishu_service, mask_mobile
 
 router = APIRouter(prefix="/auth/feishu", tags=["飞书认证"])
 
@@ -101,7 +101,7 @@ async def feishu_callback(
         mobile = mobile[3:]
 
     logger.info(
-        f"[飞书登录] 提取到的用户信息: name={name}, mobile={mobile}, "
+        f"[飞书登录] 提取到的用户信息: name={name}, mobile={mask_mobile(mobile)}, "
         f"employee_no='{employee_no}', open_id={open_id}, "
         f"union_id={union_id}, user_id={user_id}, avatar_url={bool(avatar_url)}"
     )
@@ -152,7 +152,7 @@ async def feishu_callback(
             id_source = "open_id/union_id前8位"
 
         logger.info(
-            f"[飞书登录] 新用户工号决策: employee_no='{employee_no}', mobile='{mobile}', "
+            f"[飞书登录] 新用户工号决策: employee_no='{employee_no}', mobile='{mask_mobile(mobile)}', "
             f"最终选择={new_employee_id} (来源: {id_source})"
         )
 
@@ -319,7 +319,7 @@ async def feishu_sso(
         mobile = mobile[3:]
 
     logger.info(
-        f"[飞书SSO] 提取到的用户信息: name={name}, mobile={mobile}, "
+        f"[飞书SSO] 提取到的用户信息: name={name}, mobile={mask_mobile(mobile)}, "
         f"employee_no='{employee_no}', open_id={open_id}, user_id={user_id}"
     )
 
@@ -355,7 +355,7 @@ async def feishu_sso(
             id_source = "open_id/union_id前8位"
 
         logger.info(
-            f"[飞书SSO] 新用户工号决策: employee_no='{employee_no}', mobile='{mobile}', "
+            f"[飞书SSO] 新用户工号决策: employee_no='{employee_no}', mobile='{mask_mobile(mobile)}', "
             f"最终选择={new_employee_id} (来源: {id_source})"
         )
 
@@ -430,6 +430,6 @@ async def feishu_sso(
         "login_success", client_ip=client_ip, user_agent=user_agent, user=user,
     )
 
-    # 重定向到前端，通过URL参数传递token
-    redirect_url = f"{frontend_login}?feishu_token={access_token}&feishu_refresh={refresh_token}"
+    # 重定向到前端，token 走 URL fragment 传递（不会进入服务端/代理访问日志），前端读取后立即擦除
+    redirect_url = f"{frontend_login}#feishu_token={access_token}&feishu_refresh={refresh_token}"
     return RedirectResponse(url=redirect_url)
