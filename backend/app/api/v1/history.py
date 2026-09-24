@@ -84,15 +84,15 @@ async def get_today_usage(
     current_user=Depends(get_current_user),
 ):
     """获取当前用户今日使用次数与配额（北京时间口径，与配额检查一致）"""
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
+    # UTC 范围比较可走 (user_id, created_at) 复合索引；to_char(AT TIME ZONE) 会使索引失效
+    from app.core.rate_limit import _shanghai_today_range
 
-    today = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
-    local_date = func.to_char(ProofreadRecord.created_at.op("AT TIME ZONE")("Asia/Shanghai"), "YYYY-MM-DD")
+    day_start, day_end = _shanghai_today_range()
     result = await db.execute(
         select(func.count()).select_from(ProofreadRecord).where(
             ProofreadRecord.user_id == current_user.id,
-            local_date == today,
+            ProofreadRecord.created_at >= day_start,
+            ProofreadRecord.created_at < day_end,
         )
     )
     used = result.scalar() or 0

@@ -335,11 +335,13 @@ function handleFeishuLogin() {
 async function handleFeishuCallback() {
   const code = route.query.code as string
 
-  // 处理SSO token直接传递的情况
-  const feishuToken = route.query.feishu_token as string
-  const feishuRefresh = route.query.feishu_refresh as string
+  // 处理SSO token直接传递的情况：token 经 URL fragment 传递（不进服务端日志），读取后立即擦除地址栏
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  const feishuToken = hashParams.get('feishu_token') || ''
+  const feishuRefresh = hashParams.get('feishu_refresh') || ''
 
   if (feishuToken && feishuRefresh) {
+    history.replaceState(null, '', window.location.pathname + window.location.search)
     // SSO方式：直接使用token
     localStorage.setItem('access_token', feishuToken)
     localStorage.setItem('refresh_token', feishuRefresh)

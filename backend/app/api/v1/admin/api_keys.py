@@ -13,7 +13,7 @@ from app.api.v1.api_keys import compute_key_status
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import require_permission
-from app.core.rate_limit import get_api_key_daily_usage
+from app.core.rate_limit import get_api_keys_daily_usage
 from app.models.api_key import ApiKey
 from app.models.user import User
 from app.schemas.api_key import ApiKeyAdminUpdateRequest
@@ -102,8 +102,9 @@ async def list_all_api_keys(
         logger.warning(f"读取回调投递状态失败（不影响列表）: {e}")
 
     items = []
+    used_today_map = await get_api_keys_daily_usage([k for k, _ in rows])
     for k, u in rows:
-        used_today = await get_api_key_daily_usage(k)
+        used_today = used_today_map.get(k.id)
         items.append({
             "id": k.id,
             "user_id": u.id,

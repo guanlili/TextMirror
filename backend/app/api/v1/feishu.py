@@ -430,6 +430,6 @@ async def feishu_sso(
         "login_success", client_ip=client_ip, user_agent=user_agent, user=user,
     )
 
-    # 重定向到前端，通过URL参数传递token
-    redirect_url = f"{frontend_login}?feishu_token={access_token}&feishu_refresh={refresh_token}"
+    # 重定向到前端，token 走 URL fragment 传递（不会进入服务端/代理访问日志），前端读取后立即擦除
+    redirect_url = f"{frontend_login}#feishu_token={access_token}&feishu_refresh={refresh_token}"
     return RedirectResponse(url=redirect_url)

@@ -8,6 +8,8 @@ import time
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 
+from loguru import logger
+
 from app.schemas.collaboration import MAX_COLLABORATION_CHARS, CollaborationReport
 from app.services import proofread
 
@@ -281,7 +283,8 @@ async def run_collaboration(
             rejected_count += rejected
             roles["rules"]["issue_count"] = len(role_findings["rules"])
             finish("rules", rules_start, "success", f"规则检查完成；发现{len(role_findings['rules'])}项，定位不明确跳过{rejected}项")
-        except Exception:
+        except Exception as e:
+            logger.error(f"[协作审校] 规则检查失败: {type(e).__name__}: {e}")
             finish("rules", rules_start, "failed", "规则检查失败，结果可能不完整")
         report["findings"] = _merge(role_findings)
         await publish(15, roles["rules"]["message"])
@@ -303,7 +306,8 @@ async def run_collaboration(
             except asyncio.CancelledError:
                 finish(role_id, start, "cancelled", "检测已取消")
                 raise
-            except Exception:
+            except Exception as e:
+                logger.error(f"[协作审校] {ROLE_NAMES[role_id]}检测失败: {type(e).__name__}: {e}")
                 finish(role_id, start, "failed", "模型调用或响应解析失败，检测结果不完整")
             finished_detectors += 1
             report["findings"] = _merge(role_findings)
@@ -360,7 +364,8 @@ async def run_collaboration(
             except asyncio.CancelledError:
                 finish("reviewer", start, "cancelled", "复核已取消")
                 raise
-            except Exception:
+            except Exception as e:
+                logger.error(f"[协作审校] 争议复核失败: {type(e).__name__}: {e}")
                 finish("reviewer", start, "failed", f"复核失败；保留原建议，{len(candidates)}项疑点未复核，需人工核对")
                 for index in selected:
                     findings[index]["review_note"] = "复核失败，未复核，需人工核对"

@@ -11,6 +11,7 @@ TextMirror 通用 OpenAI 兼容 Provider
 """
 import asyncio
 import json
+import random
 import re
 import weakref
 from typing import AsyncIterator, Dict, List, Optional
@@ -221,6 +222,10 @@ class OpenAICompatProvider(BaseLLMProvider):
                     logger.error(f"[{self.provider_name}] API 异常 (第{attempt}次): {e}")
                     break
 
+            # 重试前指数退避（1s/2s/4s...封顶8s+抖动），避免供应商抖动时瞬时连打
+            if attempt < self.max_retries:
+                await asyncio.sleep(min(2 ** (attempt - 1), 8) + random.uniform(0, 0.5))
+
         raise RuntimeError(
             f"[{self.provider_name}] API 调用失败（已重试{self.max_retries}次）: {last_error}"
         )
@@ -319,6 +324,10 @@ class OpenAICompatProvider(BaseLLMProvider):
                     last_error = e
                     logger.error(f"[{self.provider_name}] 流式 API 异常 (第{attempt}次): {e}")
                     break
+
+            # 重试前指数退避（与 chat() 同策略）
+            if attempt < self.max_retries:
+                await asyncio.sleep(min(2 ** (attempt - 1), 8) + random.uniform(0, 0.5))
 
         raise RuntimeError(
             f"[{self.provider_name}] 流式 API 调用失败（已重试{self.max_retries}次）: {last_error}"

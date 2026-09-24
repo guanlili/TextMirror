@@ -27,7 +27,7 @@ from app.core.exceptions import (
     ValidationError,
 )
 from app.core.pagination import PageParams, paginate_query
-from app.core.secret_crypto import encrypt_secret
+from app.core.secret_crypto import decrypt_secret, encrypt_secret
 from app.models.fact_check import FactCheckConfig, FactCheckReview, FactCheckRun
 from app.models.llm_config import LLMConfig
 from app.models.uploaded_document import UploadedDocument
@@ -87,6 +87,11 @@ def _model_name(model):
     return f"{model.name} ({model.model})" if model else ""
 
 
+def _key_configured(stored) -> bool:
+    """密钥可用性判断：SECRET_KEY 轮换后密文解不开视为未配置（与 proofread 同口径）"""
+    return bool(stored) and bool(decrypt_secret(stored).strip())
+
+
 def _model_search_reason(model):
     if model is None:
         return "尚未配置可用的大模型，请联系管理员"
@@ -97,7 +102,7 @@ def _native_unavailable_reason(model):
     reason = _model_search_reason(model)
     if reason:
         return f"{reason}；不会自动切换至 Tavily"
-    if not model.api_key.strip():
+    if not _key_configured(model.api_key):
         return "尚未配置当前大模型的 API 密钥，请联系管理员；不会自动切换至 Tavily"
     return ""
 
@@ -109,9 +114,9 @@ def _unavailable_reason(config, model):
         return _native_unavailable_reason(model)
     if model is None:
         return "尚未配置可用的大模型，请联系管理员"
-    if not model.api_key.strip():
+    if not _key_configured(model.api_key):
         return "尚未配置当前大模型的 API 密钥，请联系管理员"
-    if not config.api_key.strip():
+    if not _key_configured(config.api_key):
         return "尚未配置 Tavily 搜索密钥，请联系管理员；不会自动切换至模型原生联网"
     return ""
 
@@ -120,7 +125,7 @@ def _settings_response(config, model):
     reason = _model_search_reason(model)
     return FactCheckSettingsResponse(
         enabled=bool(config and config.enabled), model_config_id=config.model_config_id if config else None,
-        provider=config.search_provider if config else "model", api_key_configured=bool(config and config.api_key.strip()),
+        provider=config.search_provider if config else "model", api_key_configured=bool(config and _key_configured(config.api_key)),
         model_name=_model_name(model), model_search_supported=not reason, model_search_reason=reason,
         max_claims=config.max_claims if config else 10, sources=config.sources if config else [],
     )
@@ -473,9 +478,9 @@ async def update_settings(data: FactCheckSettingsUpdate, db: AsyncSession = Depe
             raise ValidationError(code="INVALID_PROVIDER_CONFIG", message="模型原生联网复用已有大模型配置，不能在此填写搜索密钥；如需 Tavily，请先选择 Tavily")
         if data.enabled and (reason := _native_unavailable_reason(model)):
             raise ValidationError(code="MODEL_UNAVAILABLE", message=reason)
-    elif data.enabled and not (key or (config and config.api_key.strip())):
+    elif data.enabled and not (key or (config and _key_configured(config.api_key))):
         raise ValidationError(code="TAVILY_KEY_REQUIRED", message="启用 Tavily 事实核查前请先填写 Tavily 搜索密钥；不会自动切换至模型原生联网")
-    if data.enabled and (model is None or not model.api_key.strip()):
+    if data.enabled and (model is None or not _key_configured(model.api_key)):
         raise ValidationError(code="NO_MODEL_OR_KEY", message="尚未配置可用的大模型或 API 密钥")
     if config is None:
         config = FactCheckConfig(id=1, sources=[])

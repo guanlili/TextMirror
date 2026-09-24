@@ -159,8 +159,23 @@ async def update_user(
     if user is None:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    # 更新字段
     update_data = request.model_dump(exclude_unset=True)
+
+    # role_id/is_active 为特权字段：仅超级管理员可修改
+    # （否则持 admin:users:edit 的普通管理员可自我提权，或绕过 toggle-active 的守卫停用超管）
+    if {"role_id", "is_active"} & update_data.keys():
+        actor_role_result = await db.execute(select(Role).where(Role.id == _user.role_id))
+        actor_role = actor_role_result.scalar_one_or_none()
+        if not (actor_role and actor_role.code == "super_admin"):
+            raise HTTPException(status_code=403, detail="仅超级管理员可修改用户角色或启用状态")
+
+    # 验证目标角色存在
+    if update_data.get("role_id") is not None:
+        role_result = await db.execute(select(Role).where(Role.id == update_data["role_id"]))
+        if role_result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=400, detail="指定的角色不存在")
+
+    # 更新字段
     for field, value in update_data.items():
         setattr(user, field, value)
 
