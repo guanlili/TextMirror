@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from loguru import logger
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.core.database import get_db
 from app.core.dependencies import require_permission
@@ -47,7 +48,8 @@ async def list_documents(
     total_result = await db.execute(count_query)
     total = total_result.scalar()
 
-    # 分页查询
+    # 分页查询（defer 大字段：列表只用元数据，避免每页拖回最多 20MB×N 的提取全文）
+    query = query.options(defer(UploadedDocument.extracted_text))
     query = query.order_by(desc(UploadedDocument.created_at))
     query = query.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)

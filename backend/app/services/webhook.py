@@ -18,11 +18,13 @@ from loguru import logger
 ALLOWED_SCHEMES = {"http", "https"}
 
 
-def validate_webhook_url(url: str, *, allow_private: bool = False) -> str:
+def validate_webhook_url(url: str, *, allow_private: bool = False, dns_required: bool = True) -> str:
     """
     校验回调地址：http(s) scheme + 主机可解析 + 非内网/保留地址（防 SSRF）。
 
     :param allow_private: DEBUG 本地联调时允许内网地址（生产必须 False）
+    :param dns_required: DNS 解析失败是否视为校验失败。投递前复检传 False——
+        瞬时 DNS 抖动不应永久放弃投递，交给 httpx 失败后走 Celery 重试
     :raises ValueError: 地址不合法时给出原因
     """
     parsed = urlparse(url)
@@ -35,6 +37,9 @@ def validate_webhook_url(url: str, *, allow_private: bool = False) -> str:
     try:
         addr_infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), proto=socket.IPPROTO_TCP)
     except socket.gaierror:
+        if not dns_required:
+            logger.warning(f"[Webhook] 主机 {host} 暂时无法解析，跳过本次投递前 IP 复检")
+            return url
         raise ValueError(f"回调主机 {host} 无法解析")
 
     for info in addr_infos:

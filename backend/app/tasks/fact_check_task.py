@@ -114,11 +114,9 @@ def async_fact_check(run_id: int):
                 raise FactCheckError("FACT_CHECK_DISABLED", "事实核查配置已停用，请联系管理员")
             # Global settings may disable runs or rotate keys, but cannot change their selected service.
             if search_provider == "tavily":
-                if not config.api_key.strip():
-                    raise FactCheckError("TAVILY_API_KEY_MISSING", "Tavily 搜索密钥缺失，请联系管理员；不会自动切换至模型原生联网")
                 api_key = decrypt_secret(config.api_key)
                 if not api_key.strip():
-                    raise FactCheckError("TAVILY_API_KEY_MISSING", "Tavily 搜索密钥为空，请联系管理员；不会自动切换至模型原生联网")
+                    raise FactCheckError("TAVILY_API_KEY_MISSING", "Tavily 搜索密钥缺失或无法解密，请联系管理员；不会自动切换至模型原生联网")
             elif search_provider == "model":
                 model = db.get(LLMConfig, config_id)
                 if not model or not model.is_enabled:
