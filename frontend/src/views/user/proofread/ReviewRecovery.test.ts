@@ -11,6 +11,7 @@ import textSource from './TextProofread.vue?raw'
 import documentSource from './DocumentProofread.vue?raw'
 import historySource from '../history/index.vue?raw'
 import workspaceSource from '@/components/ReviewWorkspace.vue?raw'
+import issueCardSource from '@/components/IssueCard.vue?raw'
 
 vi.mock('element-plus', () => ({
   ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -82,6 +83,7 @@ function compile(source: string, id: string): Component {
   return Object.assign(mod.exports.default, { render: mod.exports.render })
 }
 modules['@/components/ReviewWorkspace.vue'] = { default: compile(workspaceSource, 'ReviewWorkspace') }
+modules['@/components/IssueCard.vue'] = { default: compile(issueCardSource, 'IssueCard') }
 const TextPage = compile(textSource, 'TextProofread')
 const DocumentPage = compile(documentSource, 'DocumentProofread')
 const HistoryPage = compile(historySource, 'HistoryPage')
