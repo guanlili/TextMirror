@@ -90,6 +90,7 @@ declare module 'vue' {
     House: typeof import('@element-plus/icons-vue')['House']
     InfoFilled: typeof import('@element-plus/icons-vue')['InfoFilled']
     Iphone: typeof import('@element-plus/icons-vue')['Iphone']
+    IssueCard: typeof import('./components/IssueCard.vue')['default']
     Key: typeof import('@element-plus/icons-vue')['Key']
     Link: typeof import('@element-plus/icons-vue')['Link']
     Loading: typeof import('@element-plus/icons-vue')['Loading']
