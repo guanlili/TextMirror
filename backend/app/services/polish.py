@@ -503,8 +503,9 @@ async def polish_text_stream(text: str, style: str = "formal"):
                 await queues[version_key].put(("delta", delta))
             await queues[version_key].put(("done", None))
         except Exception as e:
+            # 异常原文可能含密钥片段/供应商响应体：详情记日志，推送友好提示
             logger.error(f"[润色-流式] {version_info['label']}失败: {e}")
-            await queues[version_key].put(("error", str(e)))
+            await queues[version_key].put(("error", f"「{version_info['label']}」生成失败，请稍后重试"))
 
     tasks = [asyncio.create_task(_run_version(vk)) for vk in version_keys]
 
