@@ -519,25 +519,115 @@ async def test_api_provider_failure_only_exposes_fixed_friendly_error(
     result(success=False), result(coverage={"status": "unknown"}),
 ])
 async def test_fixed_clean_error_or_partial_never_pass(monkeypatch, capsys, value):
-    clean = {"id": "clean", "dim": "零误报", "text": "正确文本", "expect": []}
+    clean = {"id": "clean", "dim": "零误报", "text": "正确文本", "expectation": "no_report", "expect": []}
     mock = AsyncMock(side_effect=value) if isinstance(value, Exception) else AsyncMock(return_value=value)
     monkeypatch.setattr(fixed_eval, "proofread_text", mock)
     monkeypatch.setattr(fixed_eval, "SAMPLES", [clean])
     monkeypatch.delenv("EVAL_CONFIG_ID", raising=False)
     case = await fixed_eval.run_sample(clean, None)
     assert case["status"] == "ERROR"
-    assert await fixed_eval.main([]) == 0
+    assert await fixed_eval.main([]) == 1
     output = capsys.readouterr().out
     assert "[PASS]" not in output and "零误报通过: 0/1" in output and SECRET_ERROR not in output
 
 
 async def test_fixed_default_complete_sample_keeps_pass(monkeypatch, capsys):
     monkeypatch.setattr(fixed_eval, "proofread_text", AsyncMock(return_value=result()))
-    monkeypatch.setattr(fixed_eval, "SAMPLES", [{"id": "clean", "dim": "零误报", "text": "正确", "expect": []}])
+    monkeypatch.setattr(fixed_eval, "SAMPLES", [
+        {"id": "clean", "dim": "零误报", "text": "正确", "expectation": "no_report", "expect": []},
+    ])
     monkeypatch.setenv("EVAL_CONFIG_ID", "7")
     assert await fixed_eval.main([]) == 0
     output = capsys.readouterr().out
     assert "[PASS]" in output and "零误报通过: 1/1" in output and "id=7" in output
+
+
+def test_fixed_dataset_classifies_every_unanchored_sample():
+    manual_ids = set()
+    for sample in fixed_eval.SAMPLES:
+        expectation = sample.get("expectation", "report")
+        assert expectation in {"report", "no_report", "manual"}, sample["id"]
+        assert bool(sample["expect"]) == (expectation == "report"), sample["id"]
+        if sample["dim"] == "零误报":
+            assert expectation == "no_report", sample["id"]
+        if expectation == "manual":
+            manual_ids.add(sample["id"])
+    assert manual_ids == {"grammar-1", "logic-2", "domain-1"}
+
+
+@pytest.mark.parametrize("sample", [
+    sample for sample in fixed_eval.SAMPLES
+    if not sample["expect"] and sample["id"] not in {"grammar-1", "logic-2", "domain-1"}
+], ids=lambda sample: sample["id"])
+@pytest.mark.parametrize("has_issue", [False, True])
+async def test_fixed_negative_probes_reject_any_issue(monkeypatch, sample, has_issue):
+    issues = [{"original": sample["text"]}] if has_issue else []
+    mock = AsyncMock(return_value=result(issues))
+    monkeypatch.setattr(fixed_eval, "proofread_text", mock)
+    case = await fixed_eval.run_sample(sample, 7)
+    assert case["status"] == ("FAIL" if has_issue else "PASS")
+    assert case["expectation"] == "no_report"
+    assert case["false_issues"] == ([sample["text"][:20]] if has_issue else [])
+    assert case["anchors_total"] == case["anchors_hit"] == 0
+    mock.assert_awaited_once_with(text=sample["text"], domain=sample["domain"], config_id=7)
+
+
+@pytest.mark.parametrize("sample", [
+    sample for sample in fixed_eval.SAMPLES if sample["id"] in {"grammar-1", "logic-2", "domain-1"}
+], ids=lambda sample: sample["id"])
+@pytest.mark.parametrize("has_issue", [False, True])
+async def test_fixed_manual_samples_cannot_automatically_pass(monkeypatch, sample, has_issue):
+    issues = [{"original": sample["text"]}] if has_issue else []
+    monkeypatch.setattr(fixed_eval, "proofread_text", AsyncMock(return_value=result(issues)))
+    case = await fixed_eval.run_sample(sample, None)
+    assert case["status"] == ("REVIEW" if has_issue else "FAIL")
+    assert case["expectation"] == "manual"
+    assert case["false_issues"] == []
+    assert case["anchors_total"] == case["anchors_hit"] == 0
+
+
+@pytest.mark.parametrize("originals,hit,missed", [
+    (["甲错词", "乙缺字"], 2, []),
+    (["甲错词"], 1, ["缺字"]),
+    (["甲"], 0, ["错词", "缺字"]),
+    ([], 0, ["错词", "缺字"]),
+])
+async def test_fixed_report_requires_all_anchors(monkeypatch, originals, hit, missed):
+    sample = {"id": "report", "dim": "错别字", "text": "甲错词，乙缺字。", "expect": ["错词", "缺字"]}
+    monkeypatch.setattr(fixed_eval, "proofread_text", AsyncMock(return_value=result([
+        {"original": original} for original in originals
+    ])))
+    case = await fixed_eval.run_sample(sample, None)
+    assert case["status"] == ("FAIL" if missed else "PASS")
+    assert case["expectation"] == "report"
+    assert case["anchors_total"] == 2 and case["anchors_hit"] == hit
+    assert case["missed"] == missed and case["false_issues"] == []
+
+
+@pytest.mark.parametrize("failure", [None, "report", "negative", "manual", "error"])
+async def test_fixed_cli_gate_and_cross_dimension_summary(monkeypatch, capsys, failure):
+    by_id = {sample["id"]: sample for sample in fixed_eval.SAMPLES}
+    samples = [by_id[id_] for id_ in ("typo-1", "mixen-1", "clean-1", "grammar-1")]
+    outputs = [
+        result([{"original": "翻天复地"}]) if failure != "report" else result(),
+        result([{"original": "Python"}]) if failure == "negative" else result(),
+        RuntimeError(SECRET_ERROR) if failure == "error" else result(),
+        result([{"original": "通过这次培训，使"}]) if failure != "manual" else result(),
+    ]
+    mock = AsyncMock(side_effect=outputs)
+    monkeypatch.setattr(fixed_eval, "proofread_text", mock)
+    monkeypatch.setattr(fixed_eval, "SAMPLES", samples)
+    monkeypatch.delenv("EVAL_CONFIG_ID", raising=False)
+    assert await fixed_eval.main([]) == (0 if failure is None else 1)
+    output = capsys.readouterr().out
+    clean_pass = 1 if failure in {"negative", "error"} else 2
+    assert f"零误报通过: {clean_pass}/2" in output
+    assert f"误报总数: {int(failure == 'negative')}" in output
+    assert f"人工待验收: {int(failure != 'manual')}" in output
+    assert f"评测错误: {int(failure == 'error')}" in output
+    assert ("[REVIEW] grammar-1" in output) == (failure != "manual")
+    assert "[PASS] grammar-1" not in output and SECRET_ERROR not in output
+    assert mock.await_count == len(samples)
 
 
 @pytest.mark.parametrize("args", [
