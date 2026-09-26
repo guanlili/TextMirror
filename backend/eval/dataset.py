@@ -9,9 +9,9 @@ TextMirror 审校评测集（固定样本，回归跑分用）
 - 确定性锚点只绑规则引擎层（词库扫描/格式规则/一致性检查），稳定 100%
 - LLM 层锚点选形态稳定的：多轮验证 original 一致才收录；带上下文的
   引用比裸符号稳定（如「三个环节:」比裸「:」稳）
-- expect=[] 且非零误报维度的样本为人工验收项（LLM 应产出 issue 但
-  引用形态不定，跑分只看有没有产出）
-- 零误报维度：任何 issue 都算误报，防误报回归的主闸门
+- expectation 默认 report，须命中所有非空锚点；空锚点必须显式分类。
+- no_report：任何 issue 都算误报，与 dim 无关。
+- manual：未检出判失败，检出后须人工验收，不计自动通过。
 
 覆盖度：LLM 判定类（语法/逻辑/标点/数字体例）每类 ≥5 个锚点；
 确定性类由单元测试锁回归（tests/），eval 锚点做全链路冒烟。
@@ -82,7 +82,7 @@ SAMPLES = [
     # ---- 语法/搭配 ----
     {"id": "grammar-1", "dim": "语法", "domain": "general",
      "text": "通过这次培训，使全体干部的思想觉悟得到了显著提升。",
-     "expect": []},  # 「通过…使…」缺主语，LLM 应报（锚点不定，人工验收项）
+     "expectation": "manual", "expect": []},  # 「通过…使…」缺主语，LLM 应报（锚点不定，人工验收项）
     {"id": "grammar-2", "dim": "语法", "domain": "general",
      "text": "本产品全国第一，遥遥领先于所有竞争对手，是行业内最最好的选择。",
      "expect": ["最最好"]},
@@ -108,7 +108,7 @@ SAMPLES = [
      "expect": ["唐代"]},
     {"id": "logic-2", "dim": "逻辑", "domain": "general",
      "text": "该公司去年营收增长30%，利润大幅下滑。总体来看，公司经营状况非常乐观，各项指标全面向好。",
-     "expect": []},  # 前后矛盾，验收项
+     "expectation": "manual", "expect": []},  # 前后矛盾，验收项
     {"id": "logic-3", "dim": "逻辑", "domain": "general",
      "text": "该项目的三个核心目标分别是降低成本、提高效率。经过两年努力，这一目标已全部实现。",
      "expect": ["这一目标"]},
@@ -157,7 +157,7 @@ SAMPLES = [
      "expect": ["贰佰万元整（￥200000元）"]},
     {"id": "cons-2", "dim": "一致性", "domain": "general",
      "text": "本方案第一条为总体要求，第二条为实施步骤，第三条为保障措施。",
-     "expect": []},  # 编号连续，不得报断档
+     "expectation": "no_report", "expect": []},  # 编号连续，不得报断档
     {"id": "cons-3", "dim": "一致性", "domain": "general",
      "text": "杭州国电南自自动化有限公司负责实施。项目由国电南自统筹，杭州国电南自自动化有限公司验收。",
      "expect": ["国电南自"]},
@@ -194,24 +194,24 @@ SAMPLES = [
     # ---- 零误报对照（正确文本，任何 issue 都算误报） ----
     {"id": "clean-1", "dim": "零误报", "domain": "general",
      "text": "会议定于2025年8月15日召开，联系电话13800138000，项目总投资3000万元。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "clean-2", "dim": "零误报", "domain": "general",
      "text": "该站配置了SF6断路器与GIS组合电器，采用了VLAN划分和OSPF动态路由协议，满足N-1供电可靠性要求。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "clean-3", "dim": "零误报", "domain": "general",
      "text": "国网浙江供电公司完成了110kV变电站检修。合同金额为人民币壹拾万元整（￥100000）。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "clean-4", "dim": "零误报", "domain": "official",
      "text": "各部门要严格执行会议决定，确保各项任务按时完成。特此通知。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "clean-5", "dim": "零误报", "domain": "general",
      "text": "合同约定：第一条 总则。第二条 双方权利义务。第三条 违约责任。第四条 争议解决。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
 
     # ---- 领域（公文规则） ----
     {"id": "domain-1", "dim": "领域规则", "domain": "official",
      "text": "发文字号为杭政办[2025]第18号。",
-     "expect": []},
+     "expectation": "manual", "expect": []},
 
     # ---- 标点规范（半角混用由 format_rules 确定性检出，其余 LLM） ----
     {"id": "punct-1", "dim": "标点", "domain": "general",
@@ -256,42 +256,42 @@ SAMPLES = [
      "expect": ["合计1250万元"]},
     {"id": "sum-2", "dim": "金额加总", "domain": "general",
      "text": "设备采购400万元，安装调试300万元，培训150万元，合计850万元。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "sum-3", "dim": "金额加总", "domain": "general",
      "text": "A项花费3000元，B项花费2000元，总计5000元。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "sum-4", "dim": "金额加总", "domain": "general",
      "text": "差旅费2000元，餐费1500元，住宿费2500元，总计5000元。",
      "expect": ["总计5000元"]},  # 6000≠5000，应报
     {"id": "sum-5", "dim": "金额加总", "domain": "general",
      "text": "装修费用合计8万元：地板3万元，涂料2万元，人工3万元。",
-     "expect": []},  # 总额在前明细在后（向后不核验，不得误报）
+     "expectation": "no_report", "expect": []},  # 总额在前明细在后（向后不核验，不得误报）
 
     # ---- 零误报扩展（本会话实测的正确文本） ----
     {"id": "clean-6", "dim": "零误报", "domain": "general",
      "text": "该站配置了SF6断路器与GIS组合电器，满足N-1供电可靠性要求。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "clean-7", "dim": "零误报", "domain": "general",
      "text": "版本2.1发布，性能大幅提升。更新内容包括界面优化和性能提升两个方面。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "clean-8", "dim": "零误报", "domain": "general",
      "text": "增长率为2.5%，利润率3.1%，均高于行业均值。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "clean-9", "dim": "零误报", "domain": "official",
      "text": "会议学习了党中央的重要讲话精神。要坚决贯彻上级决策部署，扎实推进各项工作。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "clean-10", "dim": "零误报", "domain": "general",
      "text": "项目总投资3000万元，其中设备费1200万元，材料费800万元，人工费1000万元，合计3000万元。",
-     "expect": []},  # 总额句+明细+合计的正确文本（锁定加总防误报）
+     "expectation": "no_report", "expect": []},  # 总额句+明细+合计的正确文本（锁定加总防误报）
     {"id": "clean-11", "dim": "零误报", "domain": "general",
      "text": "该方案经董事会审议通过后组织实施。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "clean-12", "dim": "零误报", "domain": "general",
      "text": "人民代表大会依法行使权力，公民的基本权利受法律保障。",
-     "expect": []},  # 权力/权利双词正确用法（混淆词规则防误报陷阱）
+     "expectation": "no_report", "expect": []},  # 权力/权利双词正确用法（混淆词规则防误报陷阱）
     {"id": "clean-13", "dim": "零误报", "domain": "general",
      "text": "该线路全长3.5公里，共设12座车站，平均站间距约800米，最高时速100公里。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
 ]
 
 # ======================================================================
@@ -500,22 +500,22 @@ SAMPLES += [
     # ---- 零误报闸门（扩 6：真实常见正确文本，防误报回归） ----
     {"id": "clean-14", "dim": "零误报", "domain": "general",
      "text": "该电站装机容量为120万千瓦，年发电量约24亿千瓦时。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "clean-15", "dim": "零误报", "domain": "general",
      "text": "他不辞辛劳，日复一日坚守岗位，终于赢得了大家的尊重。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "clean-16", "dim": "零误报", "domain": "legal",
      "text": "本合同自双方签字盖章之日起生效，有效期一年。任何一方违约应承担相应责任。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "clean-17", "dim": "零误报", "domain": "general",
      "text": "研讨会围绕人工智能、大数据、云计算等前沿技术展开了深入讨论，与会专家各抒己见。",
-     "expect": []},
+     "expectation": "no_report", "expect": []},
     {"id": "clean-18", "dim": "零误报", "domain": "general",
      "text": "他反应很快，立刻反映了现场情况，处理得当。",
-     "expect": []},  # 反应/反映双词正确用法（易混词防误报陷阱）
+     "expectation": "no_report", "expect": []},  # 反应/反映双词正确用法（易混词防误报陷阱）
     {"id": "clean-19", "dim": "零误报", "domain": "general",
      "text": "截至2025年12月31日，公司资产总额为5.6亿元，负债率为42%。",
-     "expect": []},  # 截至正确用法 + 总额句无明细（加总防误报陷阱）
+     "expectation": "no_report", "expect": []},  # 截至正确用法 + 总额句无明细（加总防误报陷阱）
 ]
 
 # ======================================================================
@@ -552,7 +552,7 @@ SAMPLES += [
              "随后评标委员会依据评分细则对各标书进行了独立评审，经过两轮打分与"
              "充分讨论，形成了综合排名。最终，进入候选名单的五家单位中，"
              "排名靠前的三家顺利中标。",
-     "expect": []},  # 对照项：六家投标→五家候选→三家中标，数字递减各有其因，无矛盾——
+     "expectation": "no_report", "expect": []},  # 对照项：六家投标→五家候选→三家中标，数字递减各有其因，无矛盾——
     # 观察 prompt 强化后是否产生「见数字就要核对」的过度纠错（误报倾向探针）
     {"id": "logic-19", "dim": "逻辑", "domain": "general",
      "text": "园区计划新建两个地下停车场，共计八百个车位，以缓解停车难问题。"
@@ -573,7 +573,7 @@ SAMPLES += [
      "expect": ["登陆系统"]},  # 确定性规则锚点（format_rules 混淆词搭配）
     {"id": "clean-20", "dim": "零误报", "domain": "general",
      "text": "台风预计明日登陆浙江沿海地区，各地需提前做好防范准备。",
-     "expect": []},  # 台风登陆为正确用法，登陆/登录规则防误报陷阱
+     "expectation": "no_report", "expect": []},  # 台风登陆为正确用法，登陆/登录规则防误报陷阱
 ]
 
 # ======================================================================
@@ -602,13 +602,13 @@ SAMPLES += [
     # ---- 中英混排 ----
     {"id": "mixen-1", "dim": "标点", "domain": "general",
      "text": "请使用Python语言进行开发，并安装pip包管理工具。",
-     "expect": []},  # 中英混排正确用法（专有名词保留英文），零误报探针
+     "expectation": "no_report", "expect": []},  # 中英混排正确用法（专有名词保留英文），零误报探针
     {"id": "mixen-2", "dim": "错别字", "domain": "general",
      "text": "该系统的API接口采用了RESTfull架构风格。",
      "expect": ["RESTfull"]},  # 应为 RESTful
     {"id": "mixen-3", "dim": "格式", "domain": "general",
      "text": "请将文件保存为PDF格式和JPG图片格式后上传到FTP服务器。",
-     "expect": []},  # 技术缩略词正确用法，零误报探针
+     "expectation": "no_report", "expect": []},  # 技术缩略词正确用法，零误报探针
     {"id": "mixen-4", "dim": "语法", "domain": "general",
      "text": "我们团队使用了Agile敏捷开发方法论。",
      "expect": ["Agile敏捷"]},  # 中英文语义重复（Agile=敏捷）
@@ -625,46 +625,46 @@ SAMPLES += [
      "expect": ["上海"]},  # 首都应为北京
     {"id": "proper-3", "dim": "错别字", "domain": "general",
      "text": "该项目由中科院计算技术研究所承担。",
-     "expect": []},  # 正确机构名，零误报探针
+     "expectation": "no_report", "expect": []},  # 正确机构名，零误报探针
     {"id": "proper-4", "dim": "逻辑", "domain": "general",
      "text": "《本草纲目》是孙思邈所著的医学典籍。",
      "expect": ["孙思邈"]},  # 《本草纲目》作者李时珍
     {"id": "proper-5", "dim": "逻辑", "domain": "general",
      "text": "深圳是中国经济特区中最早设立的城市。",
-     "expect": []},  # 深圳确实是最早的经济特区之一，正确表述，零误报探针
+     "expectation": "no_report", "expect": []},  # 深圳确实是最早的经济特区之一，正确表述，零误报探针
 
     # ---- 排版格式 ----
     {"id": "layout-1", "dim": "格式", "domain": "general",
      "text": "一、总体要求\n\n\n二、主要任务\n\n\n三、保障措施",
-     "expect": []},  # 多余空行属排版问题，审校不报（避免过度干预），零误报探针
+     "expectation": "no_report", "expect": []},  # 多余空行属排版问题，审校不报（避免过度干预），零误报探针
     {"id": "layout-2", "dim": "标点", "domain": "general",
      "text": "项目名称：TextMirror（文本镜像）\n版本号：V2.0",
-     "expect": []},  # 正确排版，零误报探针
+     "expectation": "no_report", "expect": []},  # 正确排版，零误报探针
     {"id": "layout-3", "dim": "格式", "domain": "official",
      "text": "附件：1.项目可行性研究报告\n2.环境影响评价报告\n3.用地预审意见",
-     "expect": []},  # 公文附件列表正确格式，零误报探针
+     "expectation": "no_report", "expect": []},  # 公文附件列表正确格式，零误报探针
 
     # ---- 领域规则（法律） ----
     {"id": "legal-1", "dim": "领域规则", "domain": "legal",
      "text": "根据《中华人民共和国民法典》第一千零七十九条规定，人民法院审理离婚案件，应当进行调解。",
-     "expect": []},  # 法条引用正确，零误报探针
+     "expectation": "no_report", "expect": []},  # 法条引用正确，零误报探针
     {"id": "legal-2", "dim": "领域规则", "domain": "legal",
      "text": "依据《劳动合同法》第三十八条，用人单位未按照劳动合同约定提供劳动保护的，劳动者可以解除劳动合同。",
-     "expect": []},  # 法条引用正确，零误报探针
+     "expectation": "no_report", "expect": []},  # 法条引用正确，零误报探针
     {"id": "legal-3", "dim": "逻辑", "domain": "legal",
      "text": "根据《刑法》第二百三十四条规定，盗窃公私财物数额较大的，处三年以下有期徒刑。",
      "expect": ["第二百三十四条"]},  # 盗窃罪是第二百六十四条，第二百三十四条是故意伤害罪
     {"id": "legal-4", "dim": "领域规则", "domain": "legal",
      "text": "本合同一式两份，甲乙双方各执一份，具有同等法律效力。",
-     "expect": []},  # 合同条款标准表述，零误报探针
+     "expectation": "no_report", "expect": []},  # 合同条款标准表述，零误报探针
 
     # ---- 领域规则（金融） ----
     {"id": "fin-1", "dim": "逻辑", "domain": "financial",
      "text": "该公司2025年第三季度营业收入为12.5亿元，同比增长-15%。",
-     "expect": []},  # 负增长表述合法（同比-15%=同比下降15%），零误报探针
+     "expectation": "no_report", "expect": []},  # 负增长表述合法（同比-15%=同比下降15%），零误报探针
     {"id": "fin-2", "dim": "格式", "domain": "financial",
      "text": "基金年化收益率为8.50%，同期沪深300指数涨幅为3.2%，超额收益为5.3个百分点。",
-     "expect": []},  # 金融数据表述正确，零误报探针
+     "expectation": "no_report", "expect": []},  # 金融数据表述正确，零误报探针
     {"id": "fin-3", "dim": "逻辑", "domain": "financial",
      "text": "该债券面值为100元，票面利率为5%，到期一次还本付息，投资者以98元购入，持有至到期的实际收益率低于票面利率。",
      "expect": ["低于票面利率"]},  # 折价购入（98<100）+票面5%，实际收益率应高于票面利率
@@ -675,8 +675,8 @@ SAMPLES += [
      "expect": ["杠杠的", "点个赞"]},  # 口语化表述不宜出现在正式公文/汇报中
     {"id": "style-2", "dim": "语法", "domain": "official",
      "text": "经研究决定，现将该事项通知如下，请各单位务必认真贯彻落实，不得有误。",
-     "expect": []},  # 公文语体正确用法，零误报探针
+     "expectation": "no_report", "expect": []},  # 公文语体正确用法，零误报探针
     {"id": "style-3", "dim": "语法", "domain": "general",
      "text": "亲，您的订单已经发货了哦，请注意查收哈～",
-     "expect": []},  # 电商客服语体正确用法（特定场景），零误报探针
+     "expectation": "no_report", "expect": []},  # 电商客服语体正确用法（特定场景），零误报探针
 ]
