@@ -630,6 +630,125 @@ async def test_fixed_cli_gate_and_cross_dimension_summary(monkeypatch, capsys, f
     assert mock.await_count == len(samples)
 
 
+async def test_fixed_eval_runs_with_bounded_concurrency(monkeypatch):
+    active = peak = 0
+    enough, release = asyncio.Event(), asyncio.Event()
+
+    async def mock_proofread(**kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        if active == 2:
+            enough.set()
+        try:
+            await release.wait()
+            return result([{"original": "错词"}])
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(fixed_eval, "proofread_text", mock_proofread)
+    monkeypatch.setattr(fixed_eval, "SAMPLES", [
+        {"id": f"s{i}", "dim": "错别字", "domain": "general", "text": "甲错词。", "expect": ["错词"]}
+        for i in range(4)
+    ])
+    monkeypatch.setattr(fixed_eval, "EVAL_CONCURRENCY", 2)
+    monkeypatch.delenv("EVAL_CONFIG_ID", raising=False)
+    task = asyncio.create_task(fixed_eval.main([]))
+    await asyncio.wait_for(enough.wait(), 1)
+    assert peak == 2
+    release.set()
+    assert await asyncio.wait_for(task, 1) == 0
+    assert peak == 2
+
+
+def _fixed_two_samples():
+    return [
+        {"id": "report", "dim": "错别字", "domain": "general", "text": "甲错词。", "expect": ["错词"]},
+        {"id": "clean", "dim": "零误报", "domain": "general", "text": "正确文本。",
+         "expectation": "no_report", "expect": []},
+    ]
+
+
+async def test_fixed_rounds_aggregate_and_json_report(monkeypatch, capsys, tmp_path):
+    calls = {}
+
+    async def mock_proofread(**kwargs):
+        seen = calls.get(kwargs["text"], 0) + 1
+        calls[kwargs["text"]] = seen
+        if kwargs["text"] == "甲错词。":
+            return result([{"original": "错词"}]) if seen == 1 else result()
+        return result()
+
+    monkeypatch.setattr(fixed_eval, "proofread_text", mock_proofread)
+    monkeypatch.setattr(fixed_eval, "SAMPLES", _fixed_two_samples())
+    monkeypatch.delenv("EVAL_CONFIG_ID", raising=False)
+    target = tmp_path / "eval-report.json"
+    assert await fixed_eval.main(["--rounds", "2", "--output", str(target)]) == 1
+    output = capsys.readouterr().out
+    assert "--- 第 1/2 轮 ---" in output and "--- 第 2/2 轮 ---" in output
+    assert "多轮汇总(2轮)" in output and SECRET_ERROR not in output
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert data["config_id"] is None and data["generated_at"]
+    first, second = data["rounds"]
+    assert first["metrics"]["fail"] == 0 and second["metrics"]["fail"] == 1
+    assert first["samples"][0]["status"] == "PASS" and second["samples"][0]["status"] == "FAIL"
+    assert first["dims"] == [
+        {"dim": "错别字", "anchor_hit": 1, "anchor_total": 1, "clean_pass": 0, "clean_total": 0,
+         "review": 0, "fail": 0, "error": 0},
+        {"dim": "零误报", "anchor_hit": 0, "anchor_total": 0, "clean_pass": 1, "clean_total": 1,
+         "review": 0, "fail": 0, "error": 0},
+    ]
+    assert data["aggregate"]["anchor_recall"] == {"mean": 50.0, "min": 0.0, "max": 100.0}
+
+
+async def test_fixed_single_round_json_report_and_dim_summary(monkeypatch, capsys, tmp_path):
+    async def mock_proofread(**kwargs):
+        return result([{"original": "错词"}]) if kwargs["text"] == "甲错词。" else result()
+
+    monkeypatch.setattr(fixed_eval, "proofread_text", mock_proofread)
+    monkeypatch.setattr(fixed_eval, "SAMPLES", _fixed_two_samples())
+    monkeypatch.delenv("EVAL_CONFIG_ID", raising=False)
+    target = tmp_path / "eval-report.json"
+    assert await fixed_eval.main(["--output", str(target)]) == 0
+    output = capsys.readouterr().out
+    assert "错别字: 锚点 1/1" in output and "零误报: 零误报 1/1" in output
+    assert "多轮汇总" not in output and "--- 第" not in output
+    assert "评测报告已写入" in output
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert len(data["rounds"]) == 1 and data["aggregate"]["anchor_recall"]["mean"] == 100.0
+
+
+async def test_fixed_output_unwritable_path_fails_closed(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(fixed_eval, "proofread_text", AsyncMock(return_value=result([{"original": "错词"}])))
+    monkeypatch.setattr(fixed_eval, "SAMPLES", _fixed_two_samples()[:1])
+    monkeypatch.delenv("EVAL_CONFIG_ID", raising=False)
+    assert await fixed_eval.main(["--output", str(tmp_path / "missing-dir" / "r.json")]) == 1
+    captured = capsys.readouterr()
+    assert "评测报告写入失败" in captured.err
+
+
+@pytest.mark.parametrize("args", [["--rounds", "0"], ["--rounds", "11"], ["--rounds", "1.5"]])
+def test_cli_rejects_invalid_rounds(monkeypatch, args):
+    monkeypatch.delenv("EVAL_CONFIG_ID", raising=False)
+    with pytest.raises(SystemExit) as exc:
+        fixed_eval.parse_args(args)
+    assert exc.value.code == 2
+
+
+def test_cli_rejects_round_and_output_flags_in_feedback_mode():
+    with pytest.raises(SystemExit) as exc:
+        fixed_eval.parse_args(["--feedback-only", "--config-ids", "1", "--rounds", "2"])
+    assert exc.value.code == 2
+    with pytest.raises(SystemExit) as exc:
+        fixed_eval.parse_args(["--feedback-only", "--config-ids", "1", "--output", "r.json"])
+    assert exc.value.code == 2
+
+
+def test_cli_accepts_rounds_and_output():
+    args = fixed_eval.parse_args(["--rounds", "3", "--output", "eval-report.json"])
+    assert args.rounds == 3 and args.output == "eval-report.json"
+
+
 @pytest.mark.parametrize("args", [
     ["--feedback-only"], ["--feedback-only", "--config-ids", "1,1"],
     ["--feedback-only", "--config-ids", "1,2,3,4,5"], ["--feedback-only", "--config-ids", "0"],
