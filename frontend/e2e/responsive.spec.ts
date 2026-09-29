@@ -354,6 +354,8 @@ for (const width of [320, 375, 390, 430, 768, 1440]) {
           'PUT /history/7/review', 'POST /history/7/export',
         ])
         expect(scenario.calls.some(call => call.path === '/document/proofread/async')).toBe(false)
+        // 触屏模拟仍保留鼠标指针，悬停提示会暂停其自动关闭计时。
+        await page.mouse.move(width - 1, page.viewportSize()!.height - 1)
         await expect(page.locator('.el-message')).toHaveCount(0)
 
         const navigation = page.getByRole('button', { name: '打开导航菜单', exact: true })
