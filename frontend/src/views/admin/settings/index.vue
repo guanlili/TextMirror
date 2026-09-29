@@ -448,6 +448,7 @@ async function handleClean(type: string) {
 
 .favicon-options {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -507,6 +508,23 @@ async function handleClean(type: string) {
       background: #eff6ff;
       box-shadow: 0 0 0 2px rgba(0, 86, 179, 0.1);
     }
+  }
+}
+
+@media (max-width: 600px) {
+  .admin-settings :deep(.el-form-item) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-settings :deep(.el-form-item__label) {
+    width: auto !important;
+    justify-content: flex-start;
+    margin-bottom: 8px;
+  }
+
+  .admin-settings :deep(.el-form-item__content) {
+    margin-left: 0 !important;
   }
 }
 </style>

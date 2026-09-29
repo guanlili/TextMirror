@@ -904,7 +904,7 @@ function handleCommand(cmd: string, item: LLMConfigItem) {
 
   .config-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr));
     gap: 16px;
   }
 
