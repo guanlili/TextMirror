@@ -215,6 +215,31 @@ html.dark .el-table th.el-table__cell {
   color: #8a99b0;
 }
 
+.el-dialog:not(.is-fullscreen),
+.el-message-box {
+  max-width: calc(100% - 32px);
+}
+
+.el-drawer.rtl,
+.el-drawer.ltr {
+  max-width: 100%;
+}
+
+.el-pagination {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+  row-gap: 8px;
+
+  .el-pager,
+  .el-pagination__rightwrapper {
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+}
+
 /* 暗色滚动条 */
 html.dark ::-webkit-scrollbar-thumb {
   background-color: #2c3950;
