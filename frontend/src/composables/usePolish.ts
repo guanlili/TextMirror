@@ -1,5 +1,18 @@
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, type Component } from 'vue'
 import { ElMessage } from 'element-plus'
+import {
+  Aim,
+  ChatDotRound,
+  ChatLineSquare,
+  DataAnalysis,
+  Flag,
+  Lightning,
+  MagicStick,
+  Notebook,
+  Promotion,
+  TrendCharts,
+  Umbrella,
+} from '@element-plus/icons-vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { htmlToPlainText, copyRichTextBySelection, compactRichHtml } from '@/utils/clipboard'
 import {
@@ -26,18 +39,21 @@ const SENSITIVE_KEYWORDS = [
 ]
 
 // ---- 风格图标映射 ----
-export const styleIcons: Record<string, string> = {
-  formal: '📋',
-  friendly: '😊',
-  plain: '💬',
-  concise: '⚡',
-  evidence: '📊',
-  strategic: '🏔️',
-  practical: '🎯',
-  firm: '🤝',
-  gentle: '🌸',
-  action: '🚀',
+export const styleIcons: Record<string, Component> = {
+  formal: Notebook,
+  friendly: ChatDotRound,
+  plain: ChatLineSquare,
+  concise: Lightning,
+  evidence: DataAnalysis,
+  strategic: TrendCharts,
+  practical: Aim,
+  firm: Flag,
+  gentle: Umbrella,
+  action: Promotion,
 }
+
+// 风格 key 未命中映射时的兜底图标
+export const defaultStyleIcon = MagicStick
 
 // 风格接口失败时的兜底列表
 const FALLBACK_STYLES: PolishStyle[] = [
@@ -418,6 +434,7 @@ export function usePolish() {
   return {
     // 常量/纯函数
     styleIcons,
+    defaultStyleIcon,
     levelTagType,
     levelDesc,
     renderMarkdown,
