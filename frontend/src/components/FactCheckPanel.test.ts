@@ -606,7 +606,7 @@ describe.each(['panel', 'workbench'] as const)('%s 实际渲染：空报告与�
     const { root, current: displayed } = await mountReport(view, current)
     expect(reportLabel(root)).toBe(view === 'panel' ? '核查部分完成' : '核查不完整')
     expect(text(root)).toContain('事实陈述')
-    expect(text(root)).toContain('未检查')
+    expect(text(root)).toContain(view === 'panel' ? '未检查' : '未核查')
     expect(text(root)).toContain(current.result!.coverage.reason)
     expect(text(root)).not.toContain('事实提取失败')
     expect(text(root)).not.toContain('未识别到可核查事实')

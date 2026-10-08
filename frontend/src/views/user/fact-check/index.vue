@@ -1,10 +1,11 @@
 <template>
   <div
+    :key="route.fullPath"
     class="fact-workbench"
     data-testid="fact-workbench"
   >
     <header class="workbench-heading">
-      <div><span class="eyebrow">EVIDENCE · CONTEXT · REVIEW</span><h2>事实核查工作台</h2><p>从一段陈述，到可追溯的证据。独立核查，也可衔接文字审校。</p></div>
+      <div><h2>事实核查</h2><p>核实数字、日期和事实，附上可追溯的来源</p></div>
       <el-button
         v-if="run"
         @click="router.push('/fact-check')"
@@ -34,7 +35,7 @@
     <template v-if="!route.params.id">
       <section class="paper intake">
         <div class="section-heading">
-          <h3><span class="step">01</span> 提交待核查材料</h3><span class="muted">不需要先做文字审校</span>
+          <h3>待核查材料</h3>
         </div>
         <div
           v-if="recordId"
@@ -86,34 +87,6 @@
             </p>
           </div>
         </template>
-        <div class="configuration">
-          <el-select
-            v-model="mode"
-            aria-label="检索范围"
-            :disabled="!!busy || !!pendingCreate"
-          >
-            <el-option
-              value="web"
-              label="开放网络检索"
-            /><el-option
-              value="trusted"
-              label="指定可信信源"
-            />
-          </el-select><el-select
-            v-if="mode === 'trusted'"
-            v-model="sourceIds"
-            multiple
-            aria-label="选择可信信源"
-            :disabled="!!busy || !!pendingCreate"
-          >
-            <el-option
-              v-for="source in options?.sources || []"
-              :key="source.id"
-              :value="source.id"
-              :label="source.name"
-            />
-          </el-select><span class="muted">{{ options?.model_name || '读取模型配置中' }}</span>
-        </div>
         <p
           v-if="options && !options.available"
           class="notice warning"
@@ -131,13 +104,14 @@
           :disabled="!!busy || !!pendingCreate"
           aria-label="同意材料外发"
         >
-          确认材料可发送至外部模型与检索服务，不含涉密内容
+          同意联网核查，材料可发送至外部模型与检索服务，确认不含涉密内容
         </el-checkbox>
-        <p class="muted">
-          两种模式均会联网。可信信源约束可采纳证据，不等于离线检索，也不保证来源内容正确。
-        </p>
-        <p class="muted">
-          原文、证据与复核从任务创建起保留 {{ options?.retention_days || 90 }} 天；到期清理，也可在任务结束后主动清理。上传文件沿用文档管理的独立保留规则。
+        <p
+          v-if="mode === 'trusted'"
+          class="muted mode-hint"
+          role="status"
+        >
+          当前仅采纳指定可信信源（已选 {{ sourceIds.length }} 个）；可在“更多选项”调整。
         </p>
         <div class="actions">
           <el-button
@@ -147,23 +121,65 @@
             @click="create(false)"
           >
             {{ pendingCreate ? '重试提交（同一请求）' : '开始事实核查' }}
-          </el-button><el-button
-            :disabled="!canCreate || !!pendingCreate"
-            @click="create(true)"
-          >
-            先确认事实项
-          </el-button><span class="muted">最多核查 {{ options?.max_claims || 10 }} 条 · 每日最多 {{ options?.daily_limit || 20 }} 次</span>
+          </el-button>
         </div>
         <p
           v-if="pendingCreate"
           class="notice warning"
         >
-          提交结果尚未确认；重试使用同一请求编号，不会重复创建。可先查看下方历史。
+          提交结果尚未确认；重试使用同一请求编号，不会重复创建。可展开下方“核查记录”查看。
         </p>
+        <details class="advanced-options">
+          <summary>更多选项</summary>
+          <div class="configuration">
+            <el-select
+              v-model="mode"
+              aria-label="检索范围"
+              :disabled="!!busy || !!pendingCreate"
+            >
+              <el-option
+                value="web"
+                label="开放网络检索"
+              /><el-option
+                value="trusted"
+                label="指定可信信源"
+              />
+            </el-select><el-select
+              v-if="mode === 'trusted'"
+              v-model="sourceIds"
+              multiple
+              aria-label="选择可信信源"
+              :disabled="!!busy || !!pendingCreate"
+            >
+              <el-option
+                v-for="source in options?.sources || []"
+                :key="source.id"
+                :value="source.id"
+                :label="source.name"
+              />
+            </el-select><span class="muted">{{ options?.model_name || '读取模型配置中' }}</span>
+          </div>
+          <p class="muted">
+            两种模式均会联网。可信信源约束可采纳证据，不等于离线检索，也不保证来源内容正确。
+          </p>
+          <el-button
+            :disabled="!canCreate || !!pendingCreate"
+            @click="create(true)"
+          >
+            先确认事实项
+          </el-button>
+          <p class="muted">
+            最多核查 {{ options?.max_claims || 10 }} 条 · 每日最多 {{ options?.daily_limit || 20 }} 次
+          </p>
+          <p class="muted">
+            原文、证据与复核从任务创建起保留 {{ options?.retention_days || 90 }} 天；到期清理，也可在任务结束后主动清理。上传文件沿用文档管理的独立保留规则。
+          </p>
+        </details>
       </section>
-      <section class="paper history">
+      <details class="paper history">
+        <summary>核查记录</summary>
         <div class="section-heading">
-          <h3><span class="step">02</span> 核查记录</h3><el-button
+          <span class="muted">共 {{ total }} 条</span><el-button
             text
             @click="loadHistory"
           >
@@ -218,52 +234,26 @@
           layout="prev, pager, next"
           @current-change="loadHistory"
         />
-      </section>
+      </details>
     </template>
     <template v-else-if="run">
       <section class="paper run-overview">
         <div class="section-heading">
-          <div><span class="eyebrow">核查记录 #{{ run.id }} · {{ run.depth === 'deep' ? '单条深入核查' : '标准核查' }}</span><h3>{{ run.title }}</h3></div><el-tag :type="run.status === 'FAILURE' ? 'danger' : run.result?.coverage.status === 'partial' ? 'warning' : 'info'">
+          <h3>{{ run.title || '核查结果' }}</h3><el-tag :type="run.status === 'FAILURE' ? 'danger' : fetchBlocked(run) || run.result?.coverage.status === 'partial' ? 'warning' : 'info'">
             {{ runLabel }}
           </el-tag>
         </div>
         <p
-          v-if="run.parent_run_id"
-          class="notice"
+          class="run-message"
+          role="status"
         >
-          仅重新核查选中的一条事实，其他历史结论未刷新。<router-link :to="`/fact-check/${run.parent_run_id}`">
-            查看来源报告 #{{ run.parent_run_id }}
-          </router-link>
-        </p>
-        <p :class="{ 'notice warning': run.status === 'SUCCESS' && run.result?.coverage.status === 'partial' }">
-          {{ runMessage }} <span
-            v-if="run.error_code"
-            class="muted"
-          >{{ run.error_code }}</span>
+          {{ runMessage }}
         </p>
         <el-progress
           v-if="running"
           :percentage="run.progress"
           :stroke-width="5"
         />
-        <div
-          v-if="run.result"
-          class="metrics"
-        >
-          <div><strong>{{ run.result.coverage.extracted }}</strong><span>识别事实</span></div><div><strong>{{ selectedCount }}</strong><span>本次选择</span></div><div><strong>{{ run.result.coverage.checked }}</strong><span>已尝试核查</span></div><div><strong>{{ citedClaims }}</strong><span>有正文引用</span></div><div><strong>{{ insufficientClaims }}</strong><span>仍证据不足</span></div><div><strong>{{ run.result.coverage.unverified }}</strong><span>尚未尝试</span></div>
-        </div>
-        <p
-          v-if="run.result?.claims.length"
-          class="muted"
-        >
-          尝试完成不等于已证实。有正文引用也可能只是背景或反驳材料，请逐条查看“检索资料与佐证”。
-        </p>
-        <p
-          v-if="run.result?.coverage.reason"
-          class="muted"
-        >
-          {{ run.result.coverage.reason }}
-        </p>
         <div class="actions">
           <el-button
             v-if="running || waiting"
@@ -272,32 +262,91 @@
           >
             取消核查
           </el-button><el-button
+            v-if="run.status === 'FAILURE' && !error"
             :disabled="!!busy"
             @click="load"
           >
-            刷新状态
-          </el-button><template v-if="terminal && user.hasPermission('fact-check:export')">
+            重新读取
+          </el-button><el-button
+            v-if="terminal && user.hasPermission('fact-check:export')"
+            :disabled="!!busy"
+            @click="download('html')"
+          >
+            下载打印版
+          </el-button>
+        </div>
+        <details class="report-details">
+          <summary>核查详情与管理</summary>
+          <p class="muted">
+            核查记录 #{{ run.id }} · {{ run.depth === 'deep' ? '单条深入核查' : '标准核查' }}
+          </p>
+          <p
+            v-if="run.parent_run_id"
+            class="notice"
+          >
+            仅重新核查选中的一条事实，其他历史结论未刷新。<router-link :to="`/fact-check/${run.parent_run_id}`">
+              查看来源报告 #{{ run.parent_run_id }}
+            </router-link>
+          </p>
+          <div
+            v-if="run.result"
+            class="metrics"
+          >
+            <div><strong>{{ run.result.coverage.extracted }}</strong><span>识别事实</span></div><div><strong>{{ selectedCount }}</strong><span>本次选择</span></div><div><strong>{{ run.result.coverage.checked }}</strong><span>已尝试核查</span></div><div><strong>{{ citedClaims }}</strong><span>有正文引用</span></div><div><strong>{{ insufficientClaims }}</strong><span>仍证据不足</span></div><div><strong>{{ run.result.coverage.unverified }}</strong><span>尚未尝试</span></div>
+          </div>
+          <p
+            v-if="run.result?.claims.length"
+            class="muted"
+          >
+            尝试完成不等于已证实。有正文引用也可能只是背景或反驳材料，请逐条查看结论与依据。
+          </p>
+          <p v-if="runDetailMessage">
+            执行说明：{{ runDetailMessage }}
+          </p>
+          <p v-if="run.result?.coverage.reason">
+            覆盖说明：{{ run.result.coverage.reason }}
+          </p>
+          <p v-if="run.error_code">
+            错误代码：<code>{{ run.error_code }}</code>
+          </p>
+          <div class="actions">
             <el-button
               :disabled="!!busy"
-              @click="download('html')"
+              @click="load"
             >
-              下载打印版
+              刷新状态
             </el-button><el-button
+              v-if="terminal && user.hasPermission('fact-check:export')"
               :disabled="!!busy"
               @click="download('json')"
             >
               导出 JSON
+            </el-button><el-button
+              v-if="!running"
+              text
+              type="danger"
+              :disabled="!!busy"
+              @click="clearRun"
+            >
+              清理材料与证据
             </el-button>
-          </template><el-button
-            v-if="!running"
-            text
-            type="danger"
-            :disabled="!!busy"
-            @click="clearRun"
+          </div>
+          <h4>原文快照</h4>
+          <div
+            v-if="highlight"
+            class="source-body"
           >
-            清理材料与证据
-          </el-button>
-        </div>
+            <span>{{ highlight.before }}</span><mark>{{ highlight.target }}</mark><span>{{ highlight.after }}</span>
+          </div><div
+            v-else
+            class="source-body"
+          >
+            {{ sourceText || '原文已清理或暂不可用' }}
+          </div>
+          <p class="hash muted">
+            原文指纹：{{ run.source_hash }}
+          </p>
+        </details>
       </section>
       <section
         v-if="waiting"
@@ -333,45 +382,10 @@
           确认并核查 {{ chosenIds.length }} 条事实
         </el-button>
       </section>
-      <div class="mobile-tabs">
-        <button
-          v-for="(label, key) in { source: '原文', claims: '事实项', evidence: '证据与复核' }"
-          :key="key"
-          :class="{ active: mobileTab === key }"
-          @click="mobileTab = key"
-        >
-          {{ label }}
-        </button>
-      </div>
       <div class="review-grid">
-        <section
-          class="paper source-pane"
-          :class="{ 'mobile-active': mobileTab === 'source' }"
-        >
+        <section class="paper claims-pane">
           <div class="section-heading">
-            <h3>原文快照</h3><span class="eyebrow">SOURCE</span>
-          </div><div
-            v-if="highlight"
-            class="source-body"
-          >
-            <span>{{ highlight.before }}</span><mark>{{ highlight.target }}</mark><span>{{ highlight.after }}</span>
-          </div><div
-            v-else
-            class="source-body"
-          >
-            {{ sourceText || '原文已清理或暂不可用' }}
-          </div><details class="muted">
-            <summary>原文指纹</summary><p class="hash">
-              {{ run.source_hash }}
-            </p>
-          </details>
-        </section>
-        <section
-          class="paper claims-pane"
-          :class="{ 'mobile-active': mobileTab === 'claims' }"
-        >
-          <div class="section-heading">
-            <h3>事实清单</h3><span class="eyebrow">CLAIMS</span>
+            <h3>事实清单</h3>
           </div><el-select
             v-model="verdictFilter"
             clearable
@@ -393,39 +407,45 @@
             v-for="claim in visibleClaims"
             :key="claim.id"
             class="claim-item"
+            type="button"
             :class="{ active: activeClaim?.id === claim.id }"
+            :aria-pressed="activeClaim?.id === claim.id"
             @click="selectClaim(claim.id)"
           >
             <span class="claim-label">{{ claim.id }} <el-tag
               size="small"
-              :type="claim.verdict === 'refuted' ? 'danger' : claim.verdict === 'conflicting' ? 'warning' : 'info'"
-            >{{ claim.checked ? verdictLabels[claim.verdict] : '未检查' }}</el-tag></span><strong>{{ claim.statement }}</strong><small>{{ claim.reason }}</small>
+              :type="claimTagType(claim)"
+            >{{ claimLabel(claim) }}</el-tag></span><strong>{{ claim.statement }}</strong><small>{{ claimReason(claim, true) }}</small><span class="claim-link">查看依据 →</span>
           </button>
         </section>
         <section
+          ref="evidencePane"
           class="paper evidence-pane"
-          :class="{ 'mobile-active': mobileTab === 'evidence' }"
+          tabindex="-1"
+          aria-labelledby="evidence-heading"
         >
           <div class="section-heading">
-            <h3>证据与复核</h3><span class="eyebrow">EVIDENCE</span>
+            <h3 id="evidence-heading">
+              结论与依据
+            </h3>
           </div><template v-if="activeClaim">
-            <h4>{{ activeClaim.statement }}</h4><p>{{ activeClaim.reason }}</p><p
-              v-if="activeClaim.original_statement && activeClaim.original_statement !== activeClaim.statement"
-              class="notice"
-            >
-              提取原始陈述：{{ activeClaim.original_statement }}
-            </p><p
+            <h4>{{ activeClaim.statement }}</h4>
+            <p class="claim-verdict">
+              结论：<el-tag :type="claimTagType(activeClaim)">
+                {{ claimLabel(activeClaim) }}
+              </el-tag>
+            </p>
+            <p class="claim-reason">
+              {{ claimReason(activeClaim) }}
+            </p>
+            <p
               v-if="activeClaim.suggestion"
               class="notice"
             >
               人工参考建议：{{ activeClaim.suggestion }}
             </p>
-            <FactCheckSearchTrace
-              :claim="activeClaim"
-              @show-evidence="showEvidence"
-            />
             <h4 v-if="activeClaim.evidence.length">
-              已引用证据 · 正文快照
+              来源与引文
             </h4>
             <p
               v-if="!activeClaim.evidence.length"
@@ -440,111 +460,146 @@
               tabindex="-1"
               class="evidence-card"
             >
-              <span class="eyebrow">{{ stanceLabels[evidence.stance] }}</span><h4>
+              <span class="evidence-stance">{{ stanceLabels[evidence.stance] }}</span><h4>
                 <a
                   v-if="safeUrl(evidence.url)"
                   :href="safeUrl(evidence.url)"
                   target="_blank"
                   rel="noopener noreferrer"
-                >{{ evidence.title }}</a><span v-else>{{ evidence.title }}</span>
+                >{{ evidence.title || evidence.url || '未提供标题' }}</a><span v-else>{{ evidence.title || '未提供标题' }}</span>
               </h4><blockquote>{{ evidence.quote }}</blockquote><p class="muted">
-                {{ evidence.publisher }} · 发布：{{ formatDate(evidence.published_at) }}<br>抓取：{{ formatDate(evidence.retrieved_at) }}
-              </p><ul
-                v-if="evidence.checks"
-                class="check-list"
-              >
-                <li
-                  v-for="(label, key) in checkLabels"
-                  :key="key"
-                >
-                  <strong>{{ label }} · {{ consistencyLabels[evidence.checks[key].status] }}</strong><span>{{ evidence.checks[key].reason }}</span>
-                </li>
-              </ul><p
-                v-else
-                class="muted"
-              >
-                历史报告未记录结构化口径检查。
-              </p><details v-if="evidence.body_text">
-                <summary>查看当次模型可见正文</summary><pre>{{ evidence.body_text }}</pre><p class="hash muted">
-                  SHA-256：{{ evidence.body_sha256 }}
+                {{ evidence.publisher || '未提供发布者' }}
+              </p>
+              <details class="evidence-details">
+                <summary>证据详情</summary>
+                <p class="muted">
+                  发布：{{ formatDate(evidence.published_at) }} · 抓取：{{ formatDate(evidence.retrieved_at) }}
                 </p>
-              </details><p
-                v-else
-                class="notice warning"
-              >
-                历史报告未保存正文快照，不能复现当时全文依据。
-              </p>
-            </article>
-            <p class="muted">
-              口径检查是模型的语义评估；程序验证逐字引文与结构约束，不独立保证语义正确。
-            </p>
-            <div
-              v-if="terminal && sourceText"
-              class="deep-section"
-            >
-              <h4>针对这条事实深入核查</h4><el-input
-                v-model="supplemental"
-                type="textarea"
-                :rows="2"
-                placeholder="可选：补充原始证据链接，每行一个，最多3个"
-                aria-label="补充证据链接"
-                :disabled="!!busy"
-              /><el-checkbox
-                v-model="deepConsent"
-                :disabled="!!busy"
-              >
-                确认可再次对外检索
-              </el-checkbox><el-button
-                :disabled="!!busy || !deepConsent"
-                :loading="busy === 'deepen'"
-                @click="deepen"
-              >
-                发起单条深查
-              </el-button><p class="muted">
-                创建新报告，最多三轮检索。保留本次结论，不自动修改原文。
-              </p>
-            </div>
-            <div class="human-review">
-              <h4>人工复核记录</h4><p
-                v-if="!claimReviews.length"
-                class="muted"
-              >
-                尚未复核
-              </p><article
-                v-for="review in claimReviews"
-                :key="review.id"
-                class="review-entry"
-              >
-                <strong>{{ reviewLabels[review.decision] }}</strong> · #{{ review.user_id }} · {{ formatDate(review.created_at) }}<p>{{ review.note }}</p>
-              </article><template v-if="terminal && activeClaim.checked && user.hasPermission('fact-check:review')">
-                <el-select
-                  v-model="decision"
-                  aria-label="人工复核意见"
-                  :disabled="!!busy"
+                <ul
+                  v-if="evidence.checks"
+                  class="check-list"
                 >
-                  <el-option
-                    v-for="(label, key) in reviewLabels"
+                  <li
+                    v-for="(label, key) in checkLabels"
                     :key="key"
-                    :label="label"
-                    :value="key"
-                  />
-                </el-select><el-input
-                  v-model="note"
-                  type="textarea"
-                  :rows="3"
-                  :maxlength="2000"
-                  :disabled="!!busy"
-                  aria-label="复核说明"
-                  placeholder="填写复核依据；提出异议时必填。不会覆盖机器结论。"
-                /><el-button
-                  :disabled="!!busy || (decision === 'disagree' && !note.trim())"
-                  :loading="busy === 'review'"
-                  @click="saveReview"
+                  >
+                    <strong>{{ label }} · {{ consistencyLabels[evidence.checks[key].status] }}</strong><span>{{ evidence.checks[key].reason }}</span>
+                  </li>
+                </ul><p
+                  v-else
+                  class="muted"
                 >
-                  保存复核意见
-                </el-button>
-              </template>
-            </div>
+                  历史报告未记录结构化口径检查。
+                </p>
+                <p class="muted">
+                  口径检查是模型的语义评估；程序验证逐字引文与结构约束，不独立保证语义正确。
+                </p>
+                <template v-if="evidence.body_text">
+                  <h4>当次模型可见正文</h4>
+                  <pre>{{ evidence.body_text }}</pre>
+                </template><p
+                  v-else
+                  class="notice warning"
+                >
+                  历史报告未保存正文快照，不能复现当时全文依据。
+                </p>
+                <p class="hash muted">
+                  SHA-256：{{ evidence.body_sha256 || '未记录' }}
+                </p>
+              </details>
+            </article>
+            <details
+              :key="`search-${activeClaim.id}`"
+              class="search-details"
+            >
+              <summary>检索过程</summary>
+              <p class="original-reason">
+                完整判定说明：{{ activeClaim.reason || '未记录' }}
+              </p>
+              <p
+                v-if="activeClaim.original_statement && activeClaim.original_statement !== activeClaim.statement"
+                class="notice"
+              >
+                提取原始陈述：{{ activeClaim.original_statement }}
+              </p>
+              <FactCheckSearchTrace
+                :claim="activeClaim"
+                @show-evidence="showEvidence"
+              />
+            </details>
+            <details
+              :key="`review-${activeClaim.id}`"
+              class="review-options"
+            >
+              <summary>深查与人工复核</summary>
+              <div
+                v-if="terminal && sourceText"
+                class="deep-section"
+              >
+                <h4>针对这条事实深入核查</h4><el-input
+                  v-model="supplemental"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="可选：补充原始证据链接，每行一个，最多3个"
+                  aria-label="补充证据链接"
+                  :disabled="!!busy"
+                /><el-checkbox
+                  v-model="deepConsent"
+                  :disabled="!!busy"
+                >
+                  确认可再次对外检索
+                </el-checkbox><el-button
+                  :disabled="!!busy || !deepConsent"
+                  :loading="busy === 'deepen'"
+                  @click="deepen"
+                >
+                  发起单条深查
+                </el-button><p class="muted">
+                  创建新报告，最多三轮检索。保留本次结论，不自动修改原文。
+                </p>
+              </div>
+              <div class="human-review">
+                <h4>人工复核记录</h4><p
+                  v-if="!claimReviews.length"
+                  class="muted"
+                >
+                  尚未复核
+                </p><article
+                  v-for="review in claimReviews"
+                  :key="review.id"
+                  class="review-entry"
+                >
+                  <strong>{{ reviewLabels[review.decision] }}</strong> · #{{ review.user_id }} · {{ formatDate(review.created_at) }}<p>{{ review.note }}</p>
+                </article><template v-if="terminal && activeClaim.checked && user.hasPermission('fact-check:review')">
+                  <el-select
+                    v-model="decision"
+                    aria-label="人工复核意见"
+                    :disabled="!!busy"
+                  >
+                    <el-option
+                      v-for="(label, key) in reviewLabels"
+                      :key="key"
+                      :label="label"
+                      :value="key"
+                    />
+                  </el-select><el-input
+                    v-model="note"
+                    type="textarea"
+                    :rows="3"
+                    :maxlength="2000"
+                    :disabled="!!busy"
+                    aria-label="复核说明"
+                    placeholder="填写复核依据；提出异议时必填。不会覆盖机器结论。"
+                  /><el-button
+                    :disabled="!!busy || (decision === 'disagree' && !note.trim())"
+                    :loading="busy === 'review'"
+                    @click="saveReview"
+                  >
+                    保存复核意见
+                  </el-button>
+                </template>
+              </div>
+            </details>
           </template><p
             v-else
             class="empty"
@@ -558,7 +613,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
@@ -569,7 +624,7 @@ import {
   createFactCheckId, createFactCheckRunApi, getFactCheckOptionsApi, getFactCheckRunApi, cancelFactCheckRunApi,
   factCheckHistoryApi, factCheckSourceApi, executeFactCheckApi, deepenFactCheckApi, factCheckReviewsApi,
   addFactCheckReviewApi, exportFactCheckApi, deleteFactCheckApi,
-  type CreateFactCheckPayload, type FactCheckRun, type FactCheckOptions, type FactCheckMode, type FactCheckReview,
+  type CreateFactCheckPayload, type FactCheckRun, type FactCheckOptions, type FactCheckMode, type FactCheckReview, type FactCheckClaim,
 } from '@/api/factCheck'
 
 const route = useRoute(), router = useRouter(), user = useUserStore()
@@ -580,13 +635,14 @@ const history = ref<FactCheckRun[]>([]), total = ref(0), page = ref(1), query = 
 const loading = ref(false), busy = ref(''), error = ref(''), selectedId = ref(''), verdictFilter = ref('')
 const selection = ref<Record<string, boolean>>({}), statements = ref<Record<string, string>>({})
 const reviews = ref<FactCheckReview[]>([]), decision = ref<FactCheckReview['decision']>('agree'), note = ref('')
-const supplemental = ref(''), deepConsent = ref(false), mobileTab = ref('claims')
+const supplemental = ref(''), deepConsent = ref(false)
+const evidencePane = ref<HTMLElement | null>(null)
 const pendingCreate = ref<CreateFactCheckPayload | null>(null)
 let executeId = '', executeHash = '', reviewId = '', reviewHash = '', deepId = '', deepHash = ''
 let epoch = 0, alive = true, timer: ReturnType<typeof setTimeout> | undefined, controller: AbortController | undefined
 const statusLabels = { PENDING: '等待执行', RUNNING: '核查中', WAITING_CONFIRMATION: '待确认事实', SUCCESS: '执行完成', FAILURE: '执行失败', CANCELLED: '已取消' }
 const verdictLabels = { supported: '证据支持', refuted: '证据反驳', insufficient: '证据不足', conflicting: '证据冲突' }
-const stanceLabels = { supports: '支持证据', refutes: '反驳证据', context: '背景材料' }
+const stanceLabels = { supports: '支持证据', refutes: '反驳证据', context: '背景材料，不能单独证实' }
 const checkLabels = { subject: '主体 / 事件', event_time: '事件时间', scope_unit: '统计范围 / 单位' }
 const consistencyLabels = { match: '一致', mismatch: '不一致', unknown: '无法确定', not_applicable: '不适用' }
 const reviewLabels = { agree: '认可结论', disagree: '提出异议', unresolved: '仍待核实' }
@@ -625,11 +681,25 @@ const runLabel = computed(() => run.value ? runStatusLabel(run.value) : '')
 const runMessage = computed(() => {
   const value = run.value
   if (!value) return ''
-  if (extractionFailed(value)) return '事实提取失败：未能获得可准确定位到原文的事实项；本次未完成事实核查，不代表全文没有事实或事实正确。'
-  if (noFacts(value)) return '未识别到可核查事实；本次未进行搜索或证据核查，不代表全文事实正确。'
-  if (fetchBlocked(value)) return '搜索或正文读取受阻，未取得可核对的正文；任务已结束，但不能形成可靠结论。'
-  return value.status === 'SUCCESS' && value.result?.coverage.status === 'partial'
-    ? '任务已结束，但部分核查未完整完成；请查看各条事实的资料处理情况。' : value.message
+  if (extractionFailed(value)) return '事实提取失败，本次尚未核查，不代表原文没有事实或事实正确。'
+  if (noFacts(value)) return '未识别到可核查事实，本次未核查，不代表全文正确。'
+  if (fetchBlocked(value)) return '资料读取受阻，未取得可核对的正文，本次尚不能形成可靠结论。'
+  if (value.status === 'SUCCESS' && !value.result) return '任务已结束，未取得可展示的报告，不能据此判断全文。'
+  if (value.status === 'SUCCESS') return value.result?.coverage.status === 'partial'
+    ? '核查未完整完成，请逐条查看结论；不代表全文正确。'
+    : '本次核查已结束，请逐条查看结论；完成不等于全部正确。'
+  if (value.status === 'FAILURE') return '任务执行失败，请查看已有结果；未核查部分不能判断。'
+  if (value.status === 'CANCELLED') return '核查已取消，请查看已有结果；未核查部分不能判断。'
+  if (value.status === 'WAITING_CONFIRMATION') return '确认事实范围后继续核查，当前尚无结论。'
+  if (value.status === 'PENDING') return '等待开始核查，尚未得出结论。'
+  return value.stage === 'extract' ? '正在提取待核查事实…' : '正在检索来源并核对事实，请稍候。'
+})
+const runDetailMessage = computed(() => {
+  const value = run.value
+  if (!value) return ''
+  if (extractionFailed(value)) return '未能获得可准确定位到原文的事实项；本次未完成事实核查，不代表全文没有事实或事实正确。'
+  if (noFacts(value)) return '本次未进行搜索或证据核查，不代表全文事实正确。'
+  return value.message
 })
 const emptyMessage = computed(() => {
   const value = run.value
@@ -655,10 +725,51 @@ function safeUrl(value: string) {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : '' } catch { return '' }
 }
 function showError(cause: unknown) { error.value = getReviewErrorDetail(cause) }
-function selectClaim(id: string) { selectedId.value = id; mobileTab.value = 'evidence'; note.value = ''; supplemental.value = ''; deepConsent.value = false; decision.value = 'agree' }
+// 仅派生可读文案；接口原始 reason 始终保留在“检索过程”中。
+function technicalReason(reason: string) {
+  return /\b(?:UNSAFE_[A-Z0-9_]+|INVALID_[A-Z0-9_]+|(?:[A-Z][A-Z0-9]*_)+(?:FAILED|FAILURE|ERROR|UNAVAILABLE|UNSUPPORTED|MISSING|TIMEOUT|EXCEEDED|BLOCKED|REJECTED|EXHAUSTED|MISMATCH|CHANGED|DISABLED)|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|DNS|SSRF|TimeoutError|HTTP\s*[45]\d{2})\b/.test(reason)
+}
+function claimBlocked(claim: FactCheckClaim) {
+  return !claim.evidence.length && (technicalReason(claim.reason)
+    || !!claim.search_rounds?.some(round => round.error_codes.length || round.status === 'failed'
+      || round.sources?.some(source => source.status === 'failed')))
+}
+function claimLabel(claim: FactCheckClaim) {
+  if (!claim.checked) return '未核查'
+  if (claimBlocked(claim)) return '核查受阻'
+  return claim.evidence.length ? verdictLabels[claim.verdict] : '证据不足'
+}
+function claimTagType(claim: FactCheckClaim) {
+  if (!claim.checked) return 'info'
+  if (claimBlocked(claim)) return 'warning'
+  if (!claim.evidence.length) return 'info'
+  return claim.verdict === 'refuted' ? 'danger' : claim.verdict === 'conflicting' ? 'warning' : 'info'
+}
+function claimReason(claim: FactCheckClaim, short = false) {
+  let reason = claim.reason.trim()
+  if (!claim.checked) reason = claim.selected === false ? '本次未选择这条事实，尚未核查。' : '本条尚未完成核查，暂不能判断。'
+  else if (claimBlocked(claim)) reason = '资料暂时无法读取，本条尚不能判断。'
+  else if (!claim.evidence.length) reason = technicalReason(reason) || claim.verdict !== 'insufficient'
+    ? '没有可引用的正文证据，本条尚不能判断。' : reason || '证据不足，本条尚不能判断。'
+  else if (technicalReason(reason)) reason = '部分资料处理受阻，请结合下方正文证据判断。'
+  else if (!reason) reason = '未记录判定理由，请结合正文证据审慎判断。'
+  const chars = Array.from(reason)
+  return short && chars.length > 76 ? `${chars.slice(0, 76).join('')}…` : reason
+}
+async function selectClaim(id: string) {
+  selectedId.value = id; note.value = ''; supplemental.value = ''; deepConsent.value = false; decision.value = 'agree'
+  const token = epoch
+  await nextTick()
+  // 仅响应主动选择；初始加载和轮询不滚动，也不改变请求归属。
+  if (!alive || token !== epoch || selectedId.value !== id || !window.matchMedia('(max-width: 800px)').matches) return
+  evidencePane.value?.scrollIntoView({ block: 'start' })
+  evidencePane.value?.focus({ preventScroll: true })
+}
 function evidenceAnchor(id: string) { return `workbench-evidence-${run.value?.id}-${activeClaim.value?.id}-${id}` }
 function showEvidence(id: string) {
   const target = document.getElementById(evidenceAnchor(id))
+  const details = target?.querySelector<globalThis.HTMLDetailsElement>('.evidence-details')
+  if (details) details.open = true
   target?.scrollIntoView({ block: 'start' }); target?.focus({ preventScroll: true })
 }
 function acceptRun(value: FactCheckRun) {
@@ -776,9 +887,115 @@ onBeforeUnmount(() => { alive = false; epoch++; controller?.abort(); clearTimeou
 </script>
 
 <style scoped>
-.fact-workbench{--ink:var(--el-text-color-primary);--accent:#247f77;max-width:1600px;margin:0 auto;color:var(--ink)}
-.workbench-heading{display:flex;justify-content:space-between;align-items:center;gap:20px;margin:0 0 28px}.eyebrow{font-size:10px;letter-spacing:2px;color:var(--accent);font-weight:700}.workbench-heading h2{font-size:30px;font-weight:600;letter-spacing:1px;margin:8px 0;font-family:'Songti SC','STSong',serif}.workbench-heading p{font-size:13px;color:var(--el-text-color-secondary);margin:0}.paper{background:var(--el-bg-color);border:1px solid var(--el-border-color-lighter);border-radius:8px;padding:24px;min-width:0}.intake{border-top:3px solid var(--accent)}.section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}.section-heading h3{font-size:17px;margin:0}.step{font-family:monospace;color:var(--accent);font-size:13px;margin-right:12px}.muted{font-size:12px;color:var(--el-text-color-secondary);line-height:1.7}.input-toolbar,.configuration,.actions,.history-tools{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:16px 0}.input-toolbar{justify-content:space-between}.configuration>.el-select{width:230px}.configuration>.el-select:nth-child(2){width:320px}.actions{margin-bottom:0}.notice{font-size:13px;line-height:1.7;padding:12px 16px;background:var(--el-fill-color-light);border-left:3px solid var(--accent);margin:12px 0;overflow-wrap:anywhere}.error{border-color:var(--el-color-danger);color:var(--el-color-danger)}.warning{border-color:var(--el-color-warning)}.upload-area{border:1px dashed var(--el-border-color);background:var(--el-fill-color-lighter);padding:30px;display:flex;flex-direction:column;gap:12px}.history{margin-top:24px}.history-tools>.el-input{max-width:400px}.history-tools>.el-select{width:180px}.history-item{width:100%;display:flex;align-items:center;gap:20px;border:0;border-top:1px solid var(--el-border-color-lighter);padding:20px 4px;background:transparent;text-align:left;color:inherit;cursor:pointer}.history-item:hover{background:var(--el-fill-color-light)}.history-number{font:12px monospace;color:var(--el-text-color-secondary)}.history-title{flex:1;min-width:0}.history-title strong{font-weight:500;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-title small{display:block;color:var(--el-text-color-secondary);font-size:11px;margin-top:7px}.empty{padding:28px 12px;text-align:center;color:var(--el-text-color-secondary);font-size:13px;line-height:1.8}.run-overview h3{margin:10px 0;overflow-wrap:anywhere}.metrics{display:flex;gap:40px;margin:24px 0}.metrics>div{display:flex;flex-direction:column;gap:7px}.metrics strong{font:30px Georgia,serif;color:var(--accent)}.metrics span{font-size:11px;color:var(--el-text-color-secondary)}.confirmation{margin-top:20px;border-left:3px solid var(--accent)}.selection-row{display:grid;grid-template-columns:70px 1fr;gap:10px;margin:16px 0}.selection-row>span{grid-column:2}.review-grid{display:grid;grid-template-columns:minmax(210px,.9fr) minmax(230px,.9fr) minmax(320px,1.35fr);gap:16px;align-items:start;margin-top:20px}.review-grid>.paper{padding:20px}.source-body{white-space:pre-wrap;overflow-wrap:anywhere;font:16px/2 'Songti SC','STSong',serif;max-height:760px;overflow:auto;margin-bottom:20px}.source-body mark{background:var(--el-color-warning-light-7);color:inherit;border-bottom:2px solid var(--el-color-warning)}.hash{overflow-wrap:anywhere}.claim-item{width:100%;display:flex;flex-direction:column;gap:10px;text-align:left;padding:18px 12px;background:transparent;color:inherit;border:0;border-bottom:1px solid var(--el-border-color-lighter);cursor:pointer}.claim-item.active{background:var(--el-fill-color-light);box-shadow:inset 3px 0 var(--accent)}.claim-item strong{font-size:14px;line-height:1.8;font-weight:500}.claim-item small{color:var(--el-text-color-secondary);line-height:1.6}.claim-label{display:flex;justify-content:space-between;font:11px monospace}.evidence-pane h4{font-size:15px;line-height:1.8;margin:12px 0;overflow-wrap:anywhere}.evidence-pane p{font-size:13px;line-height:1.8;overflow-wrap:anywhere}.evidence-card{border-top:1px solid var(--el-border-color-lighter);margin-top:22px;padding-top:18px}.evidence-card a{color:var(--accent);text-decoration:underline;text-underline-offset:3px}.evidence-card blockquote{font:15px/1.9 'Songti SC','STSong',serif;margin:16px 0;padding:12px 16px;border-left:2px solid var(--accent);background:var(--el-fill-color-lighter);white-space:pre-wrap;overflow-wrap:anywhere}.check-list{padding:0;list-style:none;font-size:12px}.check-list li{margin:10px 0}.check-list strong,.check-list span{display:block;line-height:1.7}.check-list span{color:var(--el-text-color-secondary)}details{font-size:12px;line-height:1.8}summary{cursor:pointer;color:var(--accent)}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.8 monospace;max-height:350px;overflow:auto}.human-review,.deep-section{border-top:1px solid var(--el-border-color);margin-top:28px;padding-top:12px}.human-review>.el-select{width:100%;margin-bottom:12px}.human-review>.el-button{margin-top:12px}.deep-section>.el-checkbox{display:flex;margin:12px 0}.review-entry{font-size:12px;border-left:2px solid var(--el-border-color);padding-left:12px;margin:14px 0}.mobile-tabs{display:none}:deep(.el-checkbox){white-space:normal;height:auto}:deep(.el-checkbox__label){white-space:normal;line-height:1.7}.history-item:focus-visible,.claim-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.metrics{flex-wrap:wrap}.evidence-card{scroll-margin-top:24px}.evidence-card:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-@media(max-width:1100px){.review-grid{grid-template-columns:1fr 1.3fr}.source-pane{grid-column:1/-1}.source-body{max-height:240px}}@media(max-width:700px){.workbench-heading{align-items:flex-start}.workbench-heading h2{font-size:25px}.workbench-heading p{max-width:270px;line-height:1.8}.paper{padding:18px}.review-grid{display:block}.review-grid>.paper{display:none}.review-grid>.mobile-active{display:block}.mobile-tabs{display:flex;margin:20px 0 0;border-bottom:1px solid var(--el-border-color)}.mobile-tabs button{flex:1;border:0;background:transparent;color:var(--el-text-color-secondary);padding:14px 4px}.mobile-tabs button.active{color:var(--accent);border-bottom:2px solid var(--accent)}.metrics{justify-content:space-between;gap:10px}.history-item{gap:10px}.history-number{display:none}.configuration>.el-select,.configuration>.el-select:nth-child(2){width:100%}.section-heading{align-items:flex-start}.section-heading>.muted{display:none}.source-body{max-height:65vh}.selection-row{grid-template-columns:60px 1fr}.input-toolbar{gap:16px}}
+.fact-workbench{--ink:var(--el-text-color-primary);--accent:#247f77;max-width:1600px;min-width:0;margin:0 auto;color:var(--ink);overflow-wrap:anywhere}
+html.dark .fact-workbench{--accent:#78c6bd}
+.workbench-heading{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:16px;margin:0 0 28px}
+.workbench-heading>div{min-width:0}
+.workbench-heading h2{font-size:30px;font-weight:600;letter-spacing:1px;margin:8px 0;font-family:'Songti SC','STSong',serif}
+.workbench-heading p{font-size:13px;line-height:1.8;color:var(--el-text-color-secondary);margin:0}
+.paper{box-sizing:border-box;background:var(--el-bg-color);border:1px solid var(--el-border-color-lighter);border-radius:8px;padding:24px;min-width:0;max-width:100%}
+.intake{border-top:3px solid var(--accent)}
+.section-heading{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+.section-heading>*{min-width:0;max-width:100%}
+.section-heading h3{font-size:17px;margin:0;line-height:1.7}
+.muted{font-size:12px;color:var(--el-text-color-secondary);line-height:1.7}
+.input-toolbar,.configuration,.actions,.history-tools{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:16px 0}
+.input-toolbar{justify-content:space-between}
+.configuration>.el-select{width:230px}
+.configuration>.el-select:nth-child(2){width:320px}
+.actions{margin-bottom:0}
+.actions>.el-button+.el-button{margin-left:0}
+.notice{font-size:13px;line-height:1.7;padding:12px 16px;background:var(--el-fill-color-light);border-left:3px solid var(--accent);margin:12px 0}
+.error{border-color:var(--el-color-danger);color:var(--el-color-danger)}
+.warning{border-color:var(--el-color-warning)}
+.upload-area{border:1px dashed var(--el-border-color);background:var(--el-fill-color-lighter);padding:24px;display:flex;flex-direction:column;gap:12px;font-size:13px}
+.upload-area input{box-sizing:border-box;min-width:0;max-width:100%;width:100%;font:inherit;color:inherit}
+.intake>.el-checkbox{margin-top:18px}
+.history{margin-top:24px}
+.history>.section-heading{margin-top:16px}
+.history-tools>.el-input{flex:1 1 200px;max-width:400px}
+.history-tools>.el-select{width:180px}
+.history-item{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:16px;border:0;border-top:1px solid var(--el-border-color-lighter);padding:20px 4px;background:transparent;text-align:left;color:inherit;cursor:pointer;font:inherit}
+.history-item:hover{background:var(--el-fill-color-light)}
+.history-number{font:12px monospace;color:var(--el-text-color-secondary)}
+.history-title{min-width:0}
+.history-title strong{font-size:14px;font-weight:500;display:block;line-height:1.7}
+.history-title small{display:block;color:var(--el-text-color-secondary);font-size:11px;margin-top:7px}
+.empty{padding:24px 8px;text-align:center;color:var(--el-text-color-secondary);font-size:13px;line-height:1.8}
+.run-message{font-size:14px;line-height:1.8}
+.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;margin:24px 0;max-width:620px}
+.metrics>div{display:flex;flex-direction:column;gap:7px;min-width:0}
+.metrics strong{font:24px Georgia,serif;color:var(--accent)}
+.metrics span{font-size:12px;color:var(--el-text-color-secondary)}
+.confirmation{margin-top:20px;border-left:3px solid var(--accent)}
+.selection-row{display:grid;grid-template-columns:60px minmax(0,1fr);gap:10px;margin:16px 0}
+.selection-row>span{grid-column:2;min-width:0}
+.review-grid{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.4fr);gap:20px;align-items:start;margin-top:20px}
+.review-grid>.paper{padding:20px}
+.source-body{white-space:pre-wrap;font:16px/2 'Songti SC','STSong',serif;max-height:350px;overflow:auto;margin-bottom:20px}
+.source-body mark{background:var(--el-color-warning-light-7);color:inherit;border-bottom:2px solid var(--el-color-warning)}
+.hash{overflow-wrap:anywhere}
+.claim-item{box-sizing:border-box;width:100%;min-width:0;display:flex;flex-direction:column;gap:10px;text-align:left;padding:18px 12px;background:transparent;color:inherit;border:0;border-bottom:1px solid var(--el-border-color-lighter);cursor:pointer;font:inherit;white-space:normal}
+.claim-item>*{min-width:0;max-width:100%}
+.claim-item.active{background:var(--el-fill-color-light);box-shadow:inset 3px 0 var(--accent)}
+.claim-item strong{font-size:14px;line-height:1.8;font-weight:500}
+.claim-item small{font-size:12px;color:var(--el-text-color-secondary);line-height:1.7}
+.claim-label{width:100%;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;font:11px monospace}
+.claim-link,.evidence-stance{font-size:12px;color:var(--accent)}
+.evidence-pane,.evidence-card{scroll-margin-top:24px}
+.evidence-pane h4,.report-details h4{font-size:15px;line-height:1.8;margin:16px 0 12px}
+.evidence-pane p{font-size:13px;line-height:1.8}
+.claim-verdict{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.evidence-card{border-top:1px solid var(--el-border-color-lighter);margin-top:22px;padding-top:18px;min-width:0}
+.evidence-card a{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+.evidence-card blockquote{font:15px/1.9 'Songti SC','STSong',serif;margin:16px 0;padding:12px 16px;border-left:2px solid var(--accent);background:var(--el-fill-color-lighter);white-space:pre-wrap}
+.check-list{padding:0;list-style:none;font-size:12px}
+.check-list li{margin:10px 0}
+.check-list strong,.check-list span{display:block;line-height:1.7}
+.check-list span{color:var(--el-text-color-secondary)}
+details{min-width:0;font-size:12px;line-height:1.8}
+summary{cursor:pointer;color:var(--accent);font-size:13px;font-weight:500;padding:8px 2px;line-height:1.7}
+.history>summary{font-size:15px}
+.advanced-options,.report-details,.search-details,.review-options{border-top:1px solid var(--el-border-color-lighter);margin-top:22px;padding-top:10px}
+.evidence-details{margin-top:12px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.8 monospace;max-height:350px;overflow:auto}
+.human-review,.deep-section{margin-top:16px}
+.deep-section+.human-review{border-top:1px solid var(--el-border-color);margin-top:24px;padding-top:12px}
+.human-review>.el-select{width:100%;margin-bottom:12px}
+.human-review>.el-button{margin-top:12px}
+.deep-section>.el-checkbox{display:flex;margin:12px 0}
+.review-entry{font-size:12px;border-left:2px solid var(--el-border-color);padding-left:12px;margin:14px 0}
+:deep(.el-input),:deep(.el-textarea),:deep(.el-select){min-width:0;max-width:100%}
+:deep(.el-checkbox){white-space:normal;height:auto;max-width:100%;align-items:flex-start;margin-right:0}
+:deep(.el-checkbox__input){margin-top:4px}
+:deep(.el-checkbox__label){white-space:normal;line-height:1.7;min-width:0;overflow-wrap:anywhere}
+:deep(.el-button){max-width:100%;height:auto;min-height:32px;white-space:normal;line-height:1.5}
+:deep(.el-button>span){min-width:0;overflow-wrap:anywhere}
+:deep(.el-tag){max-width:100%;height:auto;min-height:24px;white-space:normal;line-height:1.6}
+:deep(.el-tag__content){min-width:0;overflow-wrap:anywhere}
+:deep(.el-radio-group),:deep(.trace-counts){flex-wrap:wrap;max-width:100%}
+:deep(.trace-heading>span){display:none}
+.history-item:focus-visible,.claim-item:focus-visible,.evidence-pane:focus-visible,.evidence-card:focus-visible,:deep(summary:focus-visible),a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+@media(max-width:800px){
+  .review-grid{grid-template-columns:minmax(0,1fr)}
+  .workbench-heading{align-items:flex-start}
+  .workbench-heading h2{font-size:25px}
+  .paper,.review-grid>.paper{padding:18px}
+  .configuration>.el-select,.configuration>.el-select:nth-child(2){width:100%}
+  .source-body{max-height:50vh}
+}
+@media(max-width:480px){
+  .paper,.review-grid>.paper{padding:14px}
+  .upload-area{padding:16px}
+  .section-heading{align-items:flex-start}
+  .history-item{grid-template-columns:minmax(0,1fr) auto;gap:10px}
+  .history-title{grid-column:1/-1}
+  .history-number{display:none}
+  .history-tools>.el-select{width:100%}
+  .metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+  .selection-row{grid-template-columns:minmax(0,1fr)}
+  .selection-row>span{grid-column:1}
+  .evidence-card blockquote,.notice{padding:10px 12px}
+}
 @media(prefers-reduced-motion:no-preference){.paper{animation:appear .22s ease-out}@keyframes appear{from{opacity:.5;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}}
 </style>
