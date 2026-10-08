@@ -339,9 +339,7 @@ const factSubmit = (page: Page) => page.getByRole('button', { name: /^(开始事
 const factError = (page: Page) => page.getByTestId('fact-workbench').getByRole('alert')
 
 async function factText(page: Page, text: string) {
-  const radio = page.getByRole('radio', { name: '粘贴文本', exact: true })
-  await page.locator('label').filter({ has: radio }).click()
-  await expect(radio).toBeChecked()
+  await page.getByRole('button', { name: '粘贴文本', exact: true }).click()
   await expect(factInput(page)).toBeEnabled()
   await factInput(page).fill(text)
   const consent = page.getByRole('checkbox', { name: '同意材料外发', exact: true })
@@ -350,9 +348,7 @@ async function factText(page: Page, text: string) {
   await expect(factSubmit(page)).toBeEnabled()
 }
 async function factUpload(page: Page) {
-  const radio = page.getByRole('radio', { name: '上传文档', exact: true })
-  await page.locator('label').filter({ has: radio }).click()
-  await expect(radio).toBeChecked()
+  await page.getByRole('button', { name: '上传文档', exact: true }).click()
   await page.locator('#fact-file').setInputFiles({ name: '浏览器回归.txt', mimeType: 'text/plain', buffer: Buffer.from(source) })
 }
 async function factHistory(page: Page) {
@@ -373,7 +369,7 @@ test('事实核查：上传并提取文本后可提交文档任务', async ({ pa
   scenario.factCheck = true
   await page.goto('/fact-check')
   await factUpload(page)
-  await expect(page.getByText(`浏览器回归.txt · 已提取 ${Array.from(source).length} 字符`, { exact: true })).toBeVisible()
+  await expect(page.getByText(`浏览器回归.txt · 已提取 ${Array.from(source).length.toLocaleString()} 字`, { exact: true })).toBeVisible()
   await expect(page.locator('#fact-file')).toBeEnabled()
   const consent = page.getByRole('checkbox', { name: '同意材料外发', exact: true })
   await page.locator('label').filter({ has: consent }).click()

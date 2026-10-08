@@ -61,7 +61,7 @@
             v-if="modelOptions.length > 1"
             class="setting-row"
           >
-            <span class="setting-label">校对模型：</span>
+            <span class="setting-label">校对模型</span>
             <el-select
               v-model="selectedModelId"
               size="default"
@@ -1364,6 +1364,7 @@ function resetAll() {
   }
 }
 
+.upload-section { min-height: calc(100vh - 220px); display: flex; flex-direction: column; justify-content: center; }
 .upload-section :deep(.el-card) { box-shadow: none; border-radius: 12px; }
 .upload-section :deep(.el-upload-dragger) { padding: 60px 24px; background: var(--surface-soft); border-radius: 12px; }
 .document-review-heading { margin: 4px 0 24px; }.document-review-heading > span { color: var(--color-primary); font-size: 12px; }.document-review-heading h2 { margin: 10px 0; font-size: 24px; font-weight: 600; }.document-review-heading p { color: var(--color-text-secondary); font-size: 13px; }

@@ -4,12 +4,11 @@
     class="fact-workbench"
     data-testid="fact-workbench"
   >
-    <header class="workbench-heading">
-      <div><h2>事实核查</h2><p>核实数字、日期和事实，附上可追溯的来源</p></div>
-      <el-button
-        v-if="run"
-        @click="router.push('/fact-check')"
-      >
+    <header
+      v-if="run"
+      class="workbench-heading"
+    >
+      <el-button @click="router.push('/fact-check')">
         新建核查
       </el-button>
     </header>
@@ -50,16 +49,27 @@
         </div>
         <template v-else>
           <div class="input-toolbar">
-            <el-radio-group
-              v-model="inputKind"
-              :disabled="!!busy || !!pendingCreate"
+            <div
+              class="input-tabs"
+              aria-label="输入方式"
             >
-              <el-radio-button value="text">
-                粘贴文本
-              </el-radio-button><el-radio-button value="document">
-                上传文档
-              </el-radio-button>
-            </el-radio-group><span class="muted">{{ textLength }} / {{ options?.max_text_chars || 20000 }} 字符</span>
+              <button
+                type="button"
+                :aria-pressed="inputKind === 'text'"
+                :disabled="!!busy || !!pendingCreate"
+                @click="inputKind = 'text'"
+              >
+                <el-icon><EditPen /></el-icon>粘贴文本
+              </button>
+              <button
+                type="button"
+                :aria-pressed="inputKind === 'document'"
+                :disabled="!!busy || !!pendingCreate"
+                @click="inputKind = 'document'"
+              >
+                <el-icon><Upload /></el-icon>上传文档
+              </button>
+            </div><span class="muted">{{ textLength.toLocaleString() }} / {{ (options?.max_text_chars || 20000).toLocaleString() }} 字</span>
           </div>
           <el-input
             v-if="inputKind === 'text'"
@@ -81,7 +91,7 @@
               :disabled="!!busy || !!pendingCreate"
               @change="upload"
             ><p v-if="fileId">
-              {{ filename }} · 已提取 {{ textLength }} 字符
+              {{ filename }} · 已提取 {{ textLength.toLocaleString() }} 字
             </p><p class="muted">
               支持现有文档格式；无法提取文字或超长材料会明确提示，不自动截断。
             </p>
@@ -889,10 +899,7 @@ onBeforeUnmount(() => { alive = false; epoch++; controller?.abort(); clearTimeou
 <style scoped>
 .fact-workbench{--ink:var(--el-text-color-primary);--accent:#247f77;max-width:1600px;min-width:0;margin:0 auto;color:var(--ink);overflow-wrap:anywhere}
 html.dark .fact-workbench{--accent:#78c6bd}
-.workbench-heading{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:16px;margin:0 0 28px}
-.workbench-heading>div{min-width:0}
-.workbench-heading h2{font-size:30px;font-weight:600;letter-spacing:1px;margin:8px 0;font-family:'Songti SC','STSong',serif}
-.workbench-heading p{font-size:13px;line-height:1.8;color:var(--el-text-color-secondary);margin:0}
+.workbench-heading{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:16px;margin:0 0 28px}
 .paper{box-sizing:border-box;background:var(--el-bg-color);border:1px solid var(--el-border-color-lighter);border-radius:8px;padding:24px;min-width:0;max-width:100%}
 .intake{border-top:3px solid var(--accent)}
 .section-heading{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
@@ -901,6 +908,10 @@ html.dark .fact-workbench{--accent:#78c6bd}
 .muted{font-size:12px;color:var(--el-text-color-secondary);line-height:1.7}
 .input-toolbar,.configuration,.actions,.history-tools{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:16px 0}
 .input-toolbar{justify-content:space-between}
+.input-tabs{display:flex;padding:4px;border:1px solid var(--el-border-color);border-radius:10px;background:var(--el-bg-color)}
+.input-tabs button{display:flex;gap:8px;align-items:center;padding:9px 16px;border:0;border-radius:7px;background:transparent;color:var(--el-text-color-secondary);font:inherit;font-weight:500;cursor:pointer}
+.input-tabs button[aria-pressed="true"]{background:var(--el-color-primary-light-9);color:var(--el-color-primary)}
+.input-tabs button:disabled{cursor:not-allowed;opacity:.6}
 .configuration>.el-select{width:230px}
 .configuration>.el-select:nth-child(2){width:320px}
 .actions{margin-bottom:0}

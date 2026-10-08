@@ -111,7 +111,7 @@
           v-if="advancedOpen"
           class="setting-row advanced-row"
         >
-          <span class="setting-label">审校方式：</span>
+          <span class="setting-label">审校方式</span>
           <el-radio-group
             v-model="proofreadMode"
             :disabled="controlsLocked"
@@ -170,7 +170,7 @@
           v-if="proofreadMode === 'single'"
           class="setting-row"
         >
-          <span class="setting-label">审校深度：</span>
+          <span class="setting-label">审校深度</span>
           <el-radio-group
             v-model="depth"
             :disabled="controlsLocked"
@@ -199,7 +199,7 @@
           v-if="modelOptions.length && advancedOpen"
           class="setting-row"
         >
-          <span class="setting-label">校对模型：</span>
+          <span class="setting-label">校对模型</span>
           <template v-if="compareMode">
             <el-select
               v-model="compareModelIds"
@@ -1935,5 +1935,8 @@ async function goBack() {
 @media(max-width:1150px) { .input-section { grid-template-columns: minmax(0, 1fr) 270px; gap: 16px; }.result-columns { grid-template-columns: 1fr; height: auto; }.result-columns .column-card { max-height: 650px; } }
 @media(max-width:700px) { .input-section { grid-template-columns: 1fr; }.proofread-settings { padding: 8px 0; }.scenario-list { grid-template-columns: 1fr 1fr; }.editor-wrapper :deep(.el-textarea__inner) { min-height: 280px !important; padding: 20px; }.action-bar { padding: 14px; }.action-bar :deep(.el-button--large) { min-width: 110px; }.result-toolbar .toolbar-info { flex-wrap: wrap; }.review-heading h2 { font-size: 21px; } }
 
-@media(max-width:700px) { .input-section { padding-bottom: 84px; }.input-section .action-bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 18px max(12px, env(safe-area-inset-bottom)); border-radius: 0; box-shadow: 0 -4px 18px rgba(0,0,0,.04); }.editor-wrapper :deep(.el-textarea__inner) { height: 330px; } }
+@media(max-width:700px) { .input-section { padding-bottom: 84px; }.input-section .action-bar { position: fixed; left: 0; right: 0; bottom: calc(var(--mobile-tabbar-h) + env(safe-area-inset-bottom)); padding: 12px 18px; border-radius: 0; box-shadow: 0 -4px 18px rgba(0,0,0,.04); }.editor-wrapper :deep(.el-textarea__inner) { height: 330px; } }
+
+/* 底部导航（≤900px 显示）占位：sticky 操作栏停在其上方，避免被遮挡 */
+@media(min-width:701px) and (max-width:900px) { .action-bar { bottom: calc(var(--mobile-tabbar-h) + env(safe-area-inset-bottom)); } }
 </style>
