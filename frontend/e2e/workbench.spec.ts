@@ -357,9 +357,12 @@ async function factUpload(page: Page) {
 }
 async function factHistory(page: Page) {
   // SPA navigation reuses the workbench instance; page.goto would hide the epoch regression.
+  await page.locator('details.history > summary').click()
   await page.locator('.history-item').filter({ hasText: '模拟核查 41' }).click()
   await expect(page).toHaveURL(/\/fact-check\/41$/)
   await expect(page.getByRole('heading', { name: '模拟核查 41', exact: true })).toBeVisible()
+  await page.locator('details.report-details > summary').click()
+  await page.locator('details.review-options > summary').click()
   for (const name of ['刷新状态', '导出 JSON', '清理材料与证据', '保存复核意见']) {
     await expect(page.getByRole('button', { name, exact: true })).toBeEnabled()
   }
@@ -378,7 +381,7 @@ test('事实核查：上传并提取文本后可提交文档任务', async ({ pa
   await expect(factSubmit(page)).toBeEnabled()
   await factSubmit(page).click()
   await expect(page).toHaveURL(/\/fact-check\/42$/)
-  await expect(page.getByRole('button', { name: '刷新状态', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: '下载打印版', exact: true })).toBeEnabled()
   const creates = scenario.calls.filter(call => call.method === 'POST' && call.path === '/fact-check/runs')
   expect(creates).toHaveLength(1)
   expect(creates[0].body).toMatchObject({ file_id: 'browser-file', allow_external_search: true, confirm_claims: false })
@@ -407,7 +410,7 @@ for (const phase of ['upload', 'extract'] as const) {
       await factText(page, '改用文本输入，重新提交需要核查的材料。')
       await factSubmit(page).click()
       await expect(page).toHaveURL(/\/fact-check\/42$/)
-      await expect(page.getByRole('button', { name: '刷新状态', exact: true })).toBeEnabled()
+      await expect(page.getByRole('button', { name: '下载打印版', exact: true })).toBeEnabled()
     } finally {
       await failed.dispose()
     }
@@ -448,7 +451,7 @@ for (const phase of ['upload', 'extract'] as const) {
 
         await current.respond(factRun(42))
         await expect(page).toHaveURL(/\/fact-check\/42$/)
-        await expect(page.getByRole('button', { name: '刷新状态', exact: true })).toBeEnabled()
+        await expect(page.getByRole('button', { name: '下载打印版', exact: true })).toBeEnabled()
       } finally {
         await old.dispose()
         await current.dispose()
@@ -491,7 +494,7 @@ for (const outcome of ['resolve', 'reject'] as const) {
         expect((await retryRequest.started).request().postDataJSON()).toEqual(currentRequest)
         await retryRequest.respond(factRun(42))
         await expect(page).toHaveURL(/\/fact-check\/42$/)
-        await expect(page.getByRole('button', { name: '刷新状态', exact: true })).toBeEnabled()
+        await expect(page.getByRole('button', { name: '下载打印版', exact: true })).toBeEnabled()
       } finally {
         await retryRequest.dispose()
       }
