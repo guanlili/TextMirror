@@ -38,13 +38,38 @@ def captured_posts(monkeypatch):
     return calls
 
 
-def _provider(slug=None):
+def _provider(slug=None, model="test-model"):
     return OpenAICompatProvider(
         api_key="sk-test",
         api_base="https://example.com/v1",
-        model="test-model",
+        model=model,
         provider_slug=slug,
     )
+
+
+async def test_regular_model_keeps_temperature(captured_posts):
+    await _provider("qwen", model="qwen3.8-flash").chat(
+        [{"role": "user", "content": "hi"}], temperature=0.7,
+    )
+    assert captured_posts[0]["json"]["temperature"] == 0.7
+
+
+async def test_kimi_k3_omits_temperature(captured_posts):
+    await _provider("qwen", model="kimi-k3").chat(
+        [{"role": "user", "content": "hi"}], temperature=0.7,
+    )
+    assert "temperature" not in captured_posts[0]["json"]
+
+
+def test_kimi_k3_stream_payload_omits_temperature():
+    payload = _provider("qwen", model="kimi-k3")._build_chat_payload(
+        messages=[{"role": "user", "content": "hi"}],
+        temperature=0.7,
+        max_tokens=None,
+        stream=True,
+    )
+    assert payload["stream"] is True
+    assert "temperature" not in payload
 
 
 async def test_volcengine_thinking_off(captured_posts):

@@ -49,6 +49,11 @@ _THINKING_DIALECTS: Dict[str, Dict[bool, dict]] = {
     },
 }
 
+# 部分 OpenAI 兼容网关虽然走 /chat/completions，但个别模型不接受采样参数。
+# 阿里百炼的 kimi-k3 会对任意 temperature 返回 400：
+# InternalError.Algo.InvalidParameter: Parameter 'temperature'=... is not supported for kimi-k3 model.
+_TEMPERATURE_UNSUPPORTED_MODELS = {"kimi-k3"}
+
 
 class OpenAICompatProvider(BaseLLMProvider):
     """
@@ -124,6 +129,27 @@ class OpenAICompatProvider(BaseLLMProvider):
             pool[key] = client
         return client
 
+    def _supports_temperature(self) -> bool:
+        return self.model.lower() not in _TEMPERATURE_UNSUPPORTED_MODELS
+
+    def _build_chat_payload(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: Optional[int],
+        stream: bool,
+    ) -> Dict[str, object]:
+        payload: Dict[str, object] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": stream,
+        }
+        if self._supports_temperature():
+            payload["temperature"] = temperature
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
+        return payload
+
     async def chat(
         self,
         messages: List[Dict[str, str]],
@@ -141,14 +167,12 @@ class OpenAICompatProvider(BaseLLMProvider):
                          供思考模式等长耗时场景按请求放宽，不影响共享连接池
         :param response_format: 显式指定响应格式，None 不发送该参数；供应商拒绝时不降级
         """
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": False,
-        }
-        if max_tokens:
-            payload["max_tokens"] = max_tokens
+        payload = self._build_chat_payload(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=False,
+        )
         if response_format is not None:
             payload["response_format"] = response_format
         if thinking is not None:
@@ -240,16 +264,14 @@ class OpenAICompatProvider(BaseLLMProvider):
         流式调用 Chat Completions API，逐段 yield 文本增量
         失败时抛出 RuntimeError（与 chat() 一致的错误语义）
         """
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": True,
-        }
+        payload = self._build_chat_payload(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
         if self.provider_slug in {"openai", "deepseek", "qwen", "volcengine"}:
             payload["stream_options"] = {"include_usage": True}
-        if max_tokens:
-            payload["max_tokens"] = max_tokens
 
         endpoints = (
             [self._verified_endpoint] if self._verified_endpoint else self._endpoints
