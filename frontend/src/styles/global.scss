@@ -49,6 +49,9 @@
   --surface: #FFFFFF;
   --surface-soft: #F7F9FC;
   --surface-border: #E5EBF3;
+
+  /* 移动端底部导航高度（≤900px 显示；页面底部留白与固定操作栏偏移共用） */
+  --mobile-tabbar-h: 56px;
 }
 
 /* 暗色主题 */

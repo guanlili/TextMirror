@@ -230,7 +230,7 @@ defineExpose({ open })
 </script>
 
 <style scoped>
-.quality-feedback-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 0; color: var(--el-text-color-secondary); font-size: 13px; }
+.quality-feedback-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 11px 16px; margin-bottom: 10px; border: 1px dashed var(--el-border-color); border-radius: 8px; color: var(--el-text-color-secondary); font-size: 13px; }
 .feedback-note { margin: 0 0 20px; color: var(--el-text-color-secondary); line-height: 1.7; }
 .feedback-source { box-sizing: border-box; width: 100%; min-height: 160px; max-height: 320px; resize: vertical; padding: 14px; border: 1px solid var(--el-border-color); border-radius: 4px; background: var(--el-fill-color-light); color: var(--el-text-color-primary); font: inherit; line-height: 1.9; }
 .feedback-source:focus { outline: 2px solid var(--el-color-primary-light-5); }

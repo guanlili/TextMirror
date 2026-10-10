@@ -79,12 +79,37 @@
             </div>
           </div>
         </template>
+        <div
+          v-if="!editMode"
+          class="info-view"
+        >
+          <div class="view-row">
+            <span class="view-label">姓名</span>
+            <span class="view-value">{{ profileForm.username || '未填写' }}</span>
+          </div>
+          <div class="view-row">
+            <span class="view-label">手机号</span>
+            <span class="view-value">{{ profileForm.phone || '未填写' }}</span>
+          </div>
+          <div class="view-row">
+            <span class="view-label">性别</span>
+            <span class="view-value">{{ profileForm.gender === 'male' ? '男' : profileForm.gender === 'female' ? '女' : '未填写' }}</span>
+          </div>
+          <div class="view-row">
+            <span class="view-label">工号</span>
+            <span class="view-value">{{ userInfo?.employee_id }}</span>
+          </div>
+          <div class="view-row">
+            <span class="view-label">部门</span>
+            <span class="view-value">{{ userInfo?.department || '未分配' }}</span>
+          </div>
+        </div>
         <el-form
+          v-else
           ref="profileFormRef"
           :model="profileForm"
           :rules="profileRules"
           label-width="80px"
-          :disabled="!editMode"
         >
           <el-form-item
             label="姓名"
@@ -399,6 +424,33 @@ onMounted(() => {
   font-size: 12px;
   color: #999;
   margin-top: 4px;
+}
+
+/* 浏览态纯文本 */
+.info-view {
+  display: flex;
+  flex-direction: column;
+
+  .view-row {
+    display: flex;
+    gap: 16px;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--surface-border);
+    font-size: 14px;
+    line-height: 1.5;
+
+    &:last-child { border-bottom: 0; }
+  }
+
+  .view-label {
+    flex: 0 0 64px;
+    color: var(--color-text-secondary);
+  }
+
+  .view-value {
+    color: var(--color-text);
+    word-break: break-all;
+  }
 }
 
 /* 响应式 */

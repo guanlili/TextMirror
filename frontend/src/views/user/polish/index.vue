@@ -43,7 +43,7 @@
               @click="selectedStyle = item.key"
             >
               <div class="card-icon">
-                {{ styleIcons[item.key] || '✨' }}
+                <el-icon><component :is="styleIcons[item.key] || defaultStyleIcon" /></el-icon>
               </div>
               <div class="card-content">
                 <div class="card-name">
@@ -158,7 +158,7 @@
       <div class="panel-right">
         <div class="result-panel-title">
           <div>
-            <span class="result-kicker">AI OUTPUT</span>
+            <span class="result-kicker">AI 输出</span>
             <h2>{{ compareMode ? '模型对比' : '润色结果' }}</h2>
           </div>
           <span class="result-hint">{{ compareMode ? '同一段文本由多个模型并发润色' : '将生成轻度、标准、深度 3 个版本' }}</span>
@@ -171,7 +171,9 @@
             class="empty-state"
           >
             <div class="empty-illustration">
-              <span class="empty-icon">⚖️</span>
+              <el-icon class="empty-icon">
+                <Histogram />
+              </el-icon>
             </div>
             <h3>模型对比结果将在这里展示</h3>
             <p>选择 2-4 个模型，点击「开始对比」，同一段文本将由多个模型并发润色</p>
@@ -246,7 +248,9 @@
             class="empty-state"
           >
             <div class="empty-illustration">
-              <span class="empty-icon">📝</span>
+              <el-icon class="empty-icon">
+                <EditPen />
+              </el-icon>
             </div>
             <h3>润色结果将在这里展示</h3>
             <p>输入文本并选择风格，点击「一键润色」即可生成三种不同程度的润色版本</p>
@@ -374,7 +378,7 @@ import { usePolish } from '@/composables/usePolish'
 
 // 状态、流式/对比/复制逻辑与生命周期已抽到 usePolish 组合式；模板与样式保持不变。
 const {
-  styleIcons, levelTagType, levelDesc, renderMarkdown,
+  styleIcons, defaultStyleIcon, levelTagType, levelDesc, renderMarkdown,
   styles, selectedStyle, inputText, loading, regenerating, versions, originalText,
   currentStyleName, showSensitiveWarning, streaming, compareMode, availableModels,
   selectedModelIds, compareResults, comparing, hasCompareResult, canCompare,
@@ -682,6 +686,7 @@ const {
 
     .empty-icon {
       font-size: 36px;
+      color: var(--color-primary);
     }
   }
 
@@ -1203,6 +1208,7 @@ const {
     margin: 0;
     font-size: 19px;
     line-height: 1;
+    color: var(--color-text-secondary);
     filter: saturate(.82);
   }
 
@@ -1242,6 +1248,7 @@ const {
     background: linear-gradient(145deg, #eef5ff, #f9fbff);
     box-shadow: 0 0 0 2px rgba(45, 115, 221, .09);
 
+    .card-icon { color: var(--color-primary); }
     .card-name { color: #1e5fbd; }
   }
 }
@@ -1381,5 +1388,103 @@ const {
 }
 .sensitive-alert {
   margin-bottom: 8px;
+}
+
+/* ===== 暗色模式适配 ===== */
+html.dark {
+  .style-card {
+    &:hover {
+      border-color: #2c3950;
+      background: #202b3d;
+      box-shadow: none;
+    }
+
+    &.is-active {
+      border-color: #4d8bea;
+      background: linear-gradient(145deg, #1c2c45, #18243a);
+      box-shadow: 0 0 0 2px rgba(77, 139, 234, .18);
+
+      .card-icon { color: #6da2f0; }
+      .card-name { color: #6da2f0; }
+    }
+  }
+
+  .card-icon { color: #8a99b0; }
+
+  .step-index,
+  .section-heading b {
+    color: #6da2f0;
+    background: #1c2c45;
+  }
+
+  .panel-left { border-right-color: #2c3950; }
+
+  .result-kicker { color: #6da2f0; }
+  .result-panel-title { border-bottom-color: #2c3950; }
+  .result-card { border-color: #2c3950; }
+  .card-head { border-bottom-color: #26334a; }
+  .card-label { color: #dbe4f0; }
+
+  .empty-state {
+    .empty-illustration {
+      background: linear-gradient(145deg, #1c2c45, #18243a);
+      box-shadow: inset 0 0 0 1px #2c3950, 0 12px 28px rgba(0, 0, 0, .3);
+
+      &::after { border-color: #2c3950; }
+    }
+
+    h3 { color: #dbe4f0; }
+    p { color: #8a99b0; }
+  }
+
+  .dot-pulse,
+  .dot-pulse::before,
+  .dot-pulse::after { background: #6da2f0; }
+
+  .compare-section { border-color: #2c3950; }
+  .compare-head,
+  .compare-foot { border-color: #26334a; }
+  .compare-elapsed { color: #6da2f0; }
+
+  .compare-card.is-failed {
+    border-color: #5a3a3a;
+    background: #2a1f22;
+  }
+  .compare-error p { color: #f08ba0; }
+  .compare-error span { color: #b98a8a; }
+
+  .sensitive-warning {
+    background: linear-gradient(135deg, #3a2f14, #2e2612);
+    border-color: #5a4a1f;
+    color: #e6c17a;
+  }
+
+  .action-bar .btn-clear {
+    border-color: #2c3950;
+    color: #b6c2d4;
+  }
+
+  .textarea-wrapper :deep(.el-textarea__inner) {
+    color: #dbe4f0;
+    border-color: #2c3950;
+
+    &:focus {
+      border-color: #4d8bea;
+      box-shadow: 0 0 0 3px rgba(77, 139, 234, .14);
+    }
+
+    &::placeholder { color: #5c6b80; }
+  }
+
+  .card-body {
+    :deep(strong),
+    :deep(h1), :deep(h2), :deep(h3), :deep(h4) { color: #dbe4f0; }
+    :deep(code) { background: #202b3d; color: #f08ba0; }
+    :deep(blockquote) {
+      background: #1c2637;
+      border-left-color: #2c3950;
+      color: #8a99b0;
+    }
+  }
 }
 </style>

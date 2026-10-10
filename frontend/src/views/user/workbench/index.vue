@@ -18,7 +18,7 @@
         <div class="card-icon">
           <el-icon><EditPen /></el-icon>
         </div>
-        <h3>开始一次审校 <span>↗</span></h3>
+        <h3>开始一次审校</h3>
         <p>粘贴或输入文本，检查文字、语法与表达。</p>
         <span class="card-action">输入文本 <span>→</span></span>
       </router-link>
@@ -29,7 +29,7 @@
         <div class="card-icon">
           <el-icon><Document /></el-icon>
         </div>
-        <h3>审校一份文档 <span>↗</span></h3>
+        <h3>审校一份文档</h3>
         <p>上传 Word、PDF 或 TXT，逐条处理修改建议。</p>
         <span class="card-action">上传文档 <span>→</span></span>
       </router-link>
@@ -156,8 +156,7 @@ h2 { font-size: clamp(25px, 3vw, 36px); font-weight: 650; letter-spacing: -1px; 
 .start-card:hover { border-color: var(--color-primary); transform: translateY(-2px); }
 .primary-card { background: var(--el-color-primary-light-9); border-color: var(--el-color-primary-light-7); }
 .card-icon { width: 42px; height: 42px; border-radius: 12px; background: var(--surface); color: var(--color-primary); display: grid; place-items: center; font-size: 22px; margin-bottom: 24px; }
-.start-card h3 { font-size: 21px; display: flex; justify-content: space-between; margin-bottom: 12px; }
-.start-card h3 span { color: var(--color-text-secondary); font-weight: 400; }
+.start-card h3 { font-size: 21px; margin-bottom: 12px; }
 .start-card p { color: var(--color-text-secondary); font-size: 13px; line-height: 1.8; }
 .card-action { display: inline-flex; gap: 36px; margin-top: 26px; font-weight: 600; color: var(--color-primary); }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
