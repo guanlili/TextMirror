@@ -56,7 +56,7 @@
           >
             <el-icon
               :size="28"
-              color="#409eff"
+              color="var(--color-primary)"
             >
               <Edit />
             </el-icon>
@@ -82,7 +82,7 @@
           >
             <el-icon
               :size="28"
-              color="#67c23a"
+              color="var(--color-success)"
             >
               <Document />
             </el-icon>
@@ -108,7 +108,7 @@
           >
             <el-icon
               :size="28"
-              color="#e6a23c"
+              color="var(--color-warning)"
             >
               <User />
             </el-icon>
@@ -134,7 +134,7 @@
           >
             <el-icon
               :size="28"
-              color="#f56c6c"
+              color="var(--color-danger)"
             >
               <UserFilled />
             </el-icon>
@@ -458,8 +458,8 @@ onBeforeUnmount(() => {
   .stat-content { display: flex; align-items: center; gap: 16px; }
   .stat-icon { width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
   .stat-info {
-    .stat-value { font-size: 28px; font-weight: 700; color: #333; line-height: 1.2; }
-    .stat-label { font-size: 13px; color: #999; margin-top: 4px; }
+    .stat-value { font-size: 28px; font-weight: 700; color: var(--color-text); line-height: 1.2; }
+    .stat-label { font-size: 13px; color: var(--color-text-tertiary); margin-top: 4px; }
   }
 }
 
