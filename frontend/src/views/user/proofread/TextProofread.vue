@@ -846,7 +846,7 @@
                     label="错别字"
                     value="typo"
                   >
-                    <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;">
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-danger);">
                       <EditPen />
                     </el-icon>错别字
                   </el-option>
@@ -854,7 +854,7 @@
                     label="语法错误"
                     value="grammar"
                   >
-                    <el-icon style="vertical-align:middle;margin-right:6px;color:#e6a23c;">
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-warning);">
                       <Reading />
                     </el-icon>语法错误
                   </el-option>
@@ -862,7 +862,7 @@
                     label="标点符号"
                     value="punctuation"
                   >
-                    <el-icon style="vertical-align:middle;margin-right:6px;color:#909399;">
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-info);">
                       <Operation />
                     </el-icon>标点符号
                   </el-option>
@@ -870,7 +870,7 @@
                     label="表达优化"
                     value="style"
                   >
-                    <el-icon style="vertical-align:middle;margin-right:6px;color:#409eff;">
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-primary);">
                       <MagicStick />
                     </el-icon>表达优化
                   </el-option>
@@ -878,7 +878,7 @@
                     label="敏感词"
                     value="sensitive"
                   >
-                    <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;">
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-danger);">
                       <Warning />
                     </el-icon>敏感词
                   </el-option>
@@ -886,7 +886,7 @@
                     label="逻辑问题"
                     value="logic"
                   >
-                    <el-icon style="vertical-align:middle;margin-right:6px;color:#67c23a;">
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-success);">
                       <Connection />
                     </el-icon>逻辑问题
                   </el-option>
@@ -1571,11 +1571,11 @@ async function goBack() {
     font-size: 14px;
     line-height: 1.8;
     font-family: var(--font-family);
-    box-shadow: 0 0 0 1px #dfe6ef inset;
+    box-shadow: 0 0 0 1px var(--color-border) inset;
 
     &:focus {
       background: var(--surface);
-      box-shadow: 0 0 0 1px #4e86db inset, 0 0 0 3px rgba(45, 115, 221, .08);
+      box-shadow: 0 0 0 1px var(--color-primary) inset, 0 0 0 3px rgba(45, 115, 221, .08);
     }
   }
 }
@@ -1698,13 +1698,13 @@ async function goBack() {
     transition: all 0.2s;
   }
 
-  :deep(mark.hl-error) { background: #fee2e2; }
-  :deep(mark.hl-warning) { background: #fef3c7; }
-  :deep(mark.hl-info) { background: #dbeafe; }
+  :deep(mark.hl-error) { background: var(--color-danger-soft); }
+  :deep(mark.hl-warning) { background: var(--color-warning-soft); }
+  :deep(mark.hl-info) { background: var(--color-primary-soft); }
 
   :deep(mark.is-hover) {
-    background: #fde68a;
-    box-shadow: 0 0 0 2px #f59e0b;
+    background: var(--color-warning-soft);
+    box-shadow: 0 0 0 2px var(--color-warning);
     font-weight: 600;
   }
 }
@@ -1782,24 +1782,24 @@ async function goBack() {
     min-width: 96px;
     padding: 10px 14px;
     border-radius: 10px;
-    background: var(--surface-soft, #f7f9fc);
-    border: 1px solid var(--surface-border, #e5ebf3);
+    background: var(--surface-soft);
+    border: 1px solid var(--surface-border);
     text-align: center;
 
     .stat-num {
       font-size: 22px;
       font-weight: 700;
-      color: var(--color-text, #374151);
+      color: var(--color-text);
 
-      &.is-consensus { color: #3a8a3a; }
-      &.is-unique { color: #c04040; }
-      &.is-accepted { color: #286dd7; }
+      &.is-consensus { color: var(--color-success-soft-text); }
+      &.is-unique { color: var(--color-danger-soft-text); }
+      &.is-accepted { color: var(--color-primary); }
     }
 
     .stat-label {
       margin-top: 2px;
       font-size: 11px;
-      color: #8d99a9;
+      color: var(--color-text-secondary);
     }
   }
 }
@@ -1811,20 +1811,20 @@ async function goBack() {
   flex-wrap: wrap;
   padding: 10px 12px;
   margin-bottom: 12px;
-  border: 1px dashed var(--surface-border, #e5ebf3);
+  border: 1px dashed var(--surface-border);
   border-radius: 10px;
-  background: var(--surface-soft, #f7f9fc);
+  background: var(--surface-soft);
 
   .strategy-label {
     font-size: 13px;
-    color: var(--color-text-secondary, #738197);
+    color: var(--color-text-secondary);
     font-weight: 600;
   }
 }
 
 .issue-source {
   font-size: 11px;
-  color: #8d99a9;
+  color: var(--color-text-secondary);
   margin-left: auto;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1846,9 +1846,9 @@ async function goBack() {
 .compare-issue-item {
   padding: 10px 12px;
   margin-bottom: 8px;
-  border: 1px solid var(--surface-border, #e5ebf3);
+  border: 1px solid var(--surface-border);
   border-radius: 10px;
-  background: var(--surface, #fff);
+  background: var(--surface);
 
   &.is-consensus {
     border-color: rgba(103, 194, 58, .45);
@@ -1882,10 +1882,10 @@ async function goBack() {
     font-size: 13px;
     line-height: 1.7;
 
-    .label { color: #8d99a9; }
-    .text-del { color: #c04040; text-decoration: line-through; }
-    .text-add { color: #3a8a3a; font-weight: 600; }
-    .text-muted { color: #8d99a9; }
+    .label { color: var(--color-text-secondary); }
+    .text-del { color: var(--color-danger-soft-text); text-decoration: line-through; }
+    .text-add { color: var(--color-success-soft-text); font-weight: 600; }
+    .text-muted { color: var(--color-text-secondary); }
   }
 }
 
@@ -1894,7 +1894,7 @@ async function goBack() {
   overflow-y: auto;
   font-size: 13px;
   line-height: 1.8;
-  color: var(--color-text, #374151);
+  color: var(--color-text);
   white-space: pre-wrap;
   padding: 4px 2px;
 }

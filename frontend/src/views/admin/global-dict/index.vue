@@ -8,7 +8,7 @@
       >
         <div
           class="stat-value"
-          style="color: #333;"
+          style="color: var(--color-text);"
         >
           {{ stats.total }}
         </div>
@@ -22,7 +22,7 @@
       >
         <div
           class="stat-value"
-          style="color: #f56c6c;"
+          style="color: var(--color-danger);"
         >
           {{ stats.sensitive_count }}
         </div>
@@ -36,7 +36,7 @@
       >
         <div
           class="stat-value"
-          style="color: #e6a23c;"
+          style="color: var(--color-warning);"
         >
           {{ stats.banned_count }}
         </div>
@@ -50,7 +50,7 @@
       >
         <div
           class="stat-value"
-          style="color: #0056b3;"
+          style="color: var(--color-primary-hover);"
         >
           {{ stats.correction_count }}
         </div>
@@ -64,7 +64,7 @@
       >
         <div
           class="stat-value"
-          style="color: #67c23a;"
+          style="color: var(--color-success);"
         >
           {{ stats.whitelist_count }}
         </div>
@@ -161,7 +161,7 @@
           min-width="140"
         >
           <template #default="{ row }">
-            <span :style="{ fontWeight: 500, color: typeColorMap[row.type] || '#333' }">{{ row.word }}</span>
+            <span :style="{ fontWeight: 500, color: typeColorMap[row.type] || 'var(--color-text)' }">{{ row.word }}</span>
           </template>
         </el-table-column>
         <el-table-column
@@ -187,11 +187,11 @@
           <template #default="{ row }">
             <span
               v-if="row.replacement"
-              style="color: #67c23a;"
+              style="color: var(--color-success);"
             >→ {{ row.replacement }}</span>
             <span
               v-else
-              style="color: #ccc;"
+              style="color: var(--color-text-tertiary);"
             >-</span>
           </template>
         </el-table-column>
@@ -502,7 +502,7 @@ const showQualityFeedback = ref(false)
 
 const typeLabelMap: Record<string, string> = { sensitive: '敏感词', banned: '禁词', correction: '纠错词条', whitelist: '放行词' }
 const typeTagMap: Record<string, '' | 'success' | 'warning' | 'info' | 'danger'> = { sensitive: 'danger', banned: 'warning', correction: '', whitelist: 'success' }
-const typeColorMap: Record<string, string> = { sensitive: '#f56c6c', banned: '#e6a23c', correction: '#0056b3', whitelist: '#67c23a' }
+const typeColorMap: Record<string, string> = { sensitive: 'var(--color-danger)', banned: 'var(--color-warning)', correction: 'var(--color-primary-hover)', whitelist: 'var(--color-success)' }
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -689,10 +689,10 @@ async function handleBatchImport() {
     .stat-card {
       flex: 1; text-align: center;
       .stat-value { font-size: 28px; font-weight: 700; line-height: 1.4; }
-      .stat-label { font-size: 13px; color: #999; margin-top: 2px; }
+      .stat-label { font-size: 13px; color: var(--color-text-tertiary); margin-top: 2px; }
     }
   }
-  .card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; .card-title { font-size: 16px; font-weight: 600; color: #333; } }
+  .card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; .card-title { font-size: 16px; font-weight: 600; color: var(--color-text); } }
 }
 .sug-section-title {
   font-size: 14px; font-weight: 600; margin: 14px 0 8px;
@@ -700,11 +700,11 @@ async function handleBatchImport() {
 }
 .sug-item {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 10px 12px; border: 1px solid #ebeef5; border-radius: 8px; margin-bottom: 8px;
+  padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 8px; margin-bottom: 8px;
   .sug-main { min-width: 0; display: flex; flex-direction: column; gap: 3px;
     .sug-word { font-weight: 500; font-size: 14px; word-break: break-all; }
-    .sug-meta { font-size: 12px; color: #999; }
+    .sug-meta { font-size: 12px; color: var(--color-text-tertiary); }
   }
 }
-.sug-empty-tip { font-size: 12px; color: #999; max-width: 320px; margin: 0 auto; line-height: 1.7; }
+.sug-empty-tip { font-size: 12px; color: var(--color-text-tertiary); max-width: 320px; margin: 0 auto; line-height: 1.7; }
 </style>

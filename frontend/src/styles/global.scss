@@ -12,6 +12,7 @@
   --color-primary-hover: #1E5DBD;
   --color-text: #233148;
   --color-text-secondary: #738197;
+  --color-text-tertiary: #9AA5B3;
   --color-disabled: #A9A9A9;
   --color-accent: #FFA500;
   --color-white: #FFFFFF;
@@ -19,6 +20,16 @@
   --color-warning: #E6A23C;
   --color-danger: #F56C6C;
   --color-info: #909399;
+
+  /* 柔和状态徽章（bg / text 成对使用） */
+  --color-primary-soft: #EDF4FD;
+  --color-primary-soft-text: #1E5DBD;
+  --color-success-soft: #F0FDF4;
+  --color-success-soft-text: #3A8A3A;
+  --color-warning-soft: #FEF3C7;
+  --color-warning-soft-text: #92400E;
+  --color-danger-soft: #FEE2E2;
+  --color-danger-soft-text: #C04040;
 
   /* 字体规范 */
   --font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
@@ -49,6 +60,10 @@
   --surface: #FFFFFF;
   --surface-soft: #F7F9FC;
   --surface-border: #E5EBF3;
+
+  /* 顶栏（带毛玻璃，独立成 token 供布局复用） */
+  --header-bg: rgba(255, 255, 255, 0.92);
+  --scrollbar-thumb: #C0C4CC;
 }
 
 /* 暗色主题 */
@@ -60,11 +75,22 @@ html.dark {
   --color-primary-hover: #6da2f0;
   --color-text: #dbe4f0;
   --color-text-secondary: #8a99b0;
+  --color-text-tertiary: #7A8797;
   --color-disabled: #5c6b80;
   --color-white: #1a2332;
   --surface: #1a2332;
   --surface-soft: #202b3d;
   --surface-border: #2c3950;
+  --header-bg: rgba(16, 22, 33, 0.92);
+  --color-primary-soft: #1C2C45;
+  --color-primary-soft-text: #6DA2F0;
+  --color-success-soft: #22331F;
+  --color-success-soft-text: #85CE61;
+  --color-warning-soft: #38301D;
+  --color-warning-soft-text: #FBBF24;
+  --color-danger-soft: #3A2527;
+  --color-danger-soft-text: #F89898;
+  --scrollbar-thumb: #2c3950;
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
   --shadow-lg: 0 18px 44px rgba(0, 0, 0, 0.45);
@@ -100,7 +126,7 @@ html, body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: #c0c4cc;
+  background-color: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 
@@ -183,13 +209,7 @@ html.dark .el-card {
 .el-input__wrapper,
 .el-select__wrapper,
 .el-textarea__inner {
-  box-shadow: 0 0 0 1px #dfe6ef inset;
-}
-
-html.dark .el-input__wrapper,
-html.dark .el-select__wrapper,
-html.dark .el-textarea__inner {
-  box-shadow: 0 0 0 1px #2c3950 inset;
+  box-shadow: 0 0 0 1px var(--color-border) inset;
 }
 
 .el-table {
@@ -238,11 +258,6 @@ html.dark .el-table th.el-table__cell {
     flex-wrap: wrap;
     row-gap: 8px;
   }
-}
-
-/* 暗色滚动条 */
-html.dark ::-webkit-scrollbar-thumb {
-  background-color: #2c3950;
 }
 
 /* 通用链接样式 */

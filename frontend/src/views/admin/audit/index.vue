@@ -203,7 +203,7 @@
             </template>
             <template v-else>
               <span style="font-weight: 500;">{{ row.username }}</span>
-              <div style="font-size: 11px; color: #999;">
+              <div style="font-size: 11px; color: var(--color-text-tertiary);">
                 {{ row.employee_id }}
               </div>
             </template>
@@ -265,7 +265,7 @@
             </div>
             <span
               v-if="!row.input_preview && !row.output_preview && !row.file_name"
-              style="color: #999;"
+              style="color: var(--color-text-tertiary);"
             >-</span>
           </template>
         </el-table-column>
@@ -292,7 +292,7 @@
             <span v-if="row.duration_ms != null">{{ row.duration_ms }}ms</span>
             <span
               v-else
-              style="color: #999;"
+              style="color: var(--color-text-tertiary);"
             >-</span>
           </template>
         </el-table-column>
@@ -390,7 +390,7 @@
             v-if="detail.error_message"
             label="错误信息"
           >
-            <span style="color: #f56c6c;">{{ detail.error_message }}</span>
+            <span style="color: var(--color-danger);">{{ detail.error_message }}</span>
           </el-descriptions-item>
         </el-descriptions>
 
@@ -574,10 +574,10 @@ const stats = ref<AuditStats>({
 })
 
 const statCards = computed(() => [
-  { label: '今日操作', value: stats.value.today_count, color: '#0056b3' },
-  { label: '今日游客操作', value: stats.value.today_guest_count, color: '#f59e0b' },
-  { label: '今日失败', value: stats.value.today_failed_count, color: '#ef4444' },
-  { label: '总操作数', value: stats.value.total_count, color: '#333' },
+  { label: '今日操作', value: stats.value.today_count, color: 'var(--color-primary-hover)' },
+  { label: '今日游客操作', value: stats.value.today_guest_count, color: 'var(--color-warning)' },
+  { label: '今日失败', value: stats.value.today_failed_count, color: 'var(--color-danger)' },
+  { label: '总操作数', value: stats.value.total_count, color: 'var(--color-text)' },
 ])
 
 // 详情
@@ -711,7 +711,7 @@ function deviceLabel(type: string | null): string {
 
   .quick-label {
     font-size: 13px;
-    color: #999;
+    color: var(--color-text-tertiary);
   }
 }
 
@@ -737,7 +737,7 @@ function deviceLabel(type: string | null): string {
 
     .stat-label {
       font-size: 13px;
-      color: #6b7280;
+      color: var(--color-text-secondary);
       margin-top: 4px;
     }
   }
@@ -755,7 +755,7 @@ function deviceLabel(type: string | null): string {
 
 .content-preview {
   font-size: 12px;
-  color: #666;
+  color: var(--color-text-secondary);
   line-height: 1.5;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -763,7 +763,7 @@ function deviceLabel(type: string | null): string {
   max-width: 300px;
 
   .preview-label {
-    color: #999;
+    color: var(--color-text-tertiary);
     font-weight: 500;
   }
 }
@@ -785,22 +785,22 @@ function deviceLabel(type: string | null): string {
   h4 {
     font-size: 14px;
     font-weight: 600;
-    color: #333;
+    color: var(--color-text);
     margin-bottom: 8px;
-    border-left: 3px solid #0056b3;
+    border-left: 3px solid var(--color-primary-hover);
     padding-left: 8px;
 
     .text-count {
       font-weight: 400;
       font-size: 12px;
-      color: #999;
+      color: var(--color-text-tertiary);
     }
   }
 }
 
 .text-block {
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--surface-soft);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 12px;
   font-size: 13px;
@@ -817,19 +817,19 @@ function deviceLabel(type: string | null): string {
   gap: 8px;
 
   .param-item {
-    background: #f3f4f6;
+    background: var(--surface-soft);
     padding: 4px 10px;
     border-radius: 4px;
     font-size: 13px;
 
     .param-key {
-      color: #6b7280;
+      color: var(--color-text-secondary);
       margin-right: 4px;
     }
 
     .param-val {
       font-weight: 500;
-      color: #333;
+      color: var(--color-text);
     }
   }
 }

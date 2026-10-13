@@ -235,7 +235,7 @@
           >
             <el-icon
               :size="48"
-              color="#ccc"
+              color="var(--color-text-tertiary)"
             >
               <WarningFilled />
             </el-icon>
@@ -453,7 +453,7 @@ onMounted(async () => {
   height: 100vh;
   display: flex;
   overflow: hidden;
-  background: #f7f8fa;
+  background: var(--color-bg);
 }
 
 /* 左侧品牌区 */
@@ -547,7 +547,7 @@ onMounted(async () => {
   width: 100%;
   max-width: 420px;
   padding: 48px 40px;
-  background: #fff;
+  background: var(--surface);
   border-radius: 12px;
   box-shadow: 0 2px 16px rgba(0, 0, 0, 0.06);
 }
@@ -563,7 +563,7 @@ onMounted(async () => {
 .logo-icon-sm {
   width: 28px;
   height: 28px;
-  color: #1e40af;
+  color: var(--color-primary);
 }
 
 .logo-img-sm {
@@ -574,26 +574,26 @@ onMounted(async () => {
 .mobile-title {
   font-size: 20px;
   font-weight: 700;
-  color: #1e40af;
+  color: var(--color-primary);
 }
 
 .login-title {
   font-size: 24px;
   font-weight: 600;
-  color: #1a202c;
+  color: var(--color-text);
   margin-bottom: 8px;
 }
 
 .login-desc {
   font-size: 14px;
-  color: #718096;
+  color: var(--color-text-secondary);
   margin-bottom: 32px;
 }
 
 /* 登录方式Tab */
 .login-tabs {
   display: flex;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--color-border);
   margin-bottom: 28px;
 }
 
@@ -606,17 +606,17 @@ onMounted(async () => {
   padding: 12px 0;
   cursor: pointer;
   font-size: 14px;
-  color: #718096;
+  color: var(--color-text-secondary);
   border-bottom: 2px solid transparent;
   transition: all 0.2s;
 
   &:hover {
-    color: #1e40af;
+    color: var(--color-primary);
   }
 
   &.active {
-    color: #1e40af;
-    border-bottom-color: #1e40af;
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
     font-weight: 500;
   }
 }
@@ -636,13 +636,13 @@ onMounted(async () => {
     height: 44px;
     font-size: 16px;
     border-radius: 8px;
-    background: #1e40af;
-    border-color: #1e40af;
+    background: var(--color-primary);
+    border-color: var(--color-primary);
     margin-top: 8px;
 
     &:hover {
-      background: #1d4ed8;
-      border-color: #1d4ed8;
+      background: var(--color-primary-hover);
+      border-color: var(--color-primary-hover);
     }
   }
 }
@@ -672,13 +672,13 @@ onMounted(async () => {
 .feishu-main-tip {
   font-size: 16px;
   font-weight: 500;
-  color: #333;
+  color: var(--color-text);
   margin-bottom: 8px;
 }
 
 .feishu-sub-tip {
   font-size: 13px;
-  color: #999;
+  color: var(--color-text-tertiary);
   margin-bottom: 28px;
 }
 
@@ -702,13 +702,13 @@ onMounted(async () => {
 
   p {
     margin-top: 12px;
-    color: #999;
+    color: var(--color-text-tertiary);
     font-size: 14px;
   }
 
   .feishu-disabled-sub {
     font-size: 12px;
-    color: #bbb;
+    color: var(--color-text-tertiary);
   }
 }
 
@@ -728,7 +728,7 @@ onMounted(async () => {
   text-align: center;
   margin-top: 24px;
   padding-top: 16px;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--color-border);
 }
 
 /* ===== 移动端适配 ===== */
@@ -738,7 +738,7 @@ onMounted(async () => {
   }
 
   .login-page {
-    background: #fff;
+    background: var(--surface);
   }
 
   .login-panel {

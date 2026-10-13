@@ -302,7 +302,7 @@
                   label="错别字"
                   value="typo"
                 >
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;">
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-danger);">
                     <EditPen />
                   </el-icon>错别字
                 </el-option>
@@ -310,7 +310,7 @@
                   label="语法错误"
                   value="grammar"
                 >
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#e6a23c;">
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-warning);">
                     <Reading />
                   </el-icon>语法错误
                 </el-option>
@@ -318,7 +318,7 @@
                   label="标点符号"
                   value="punctuation"
                 >
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#909399;">
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-info);">
                     <Operation />
                   </el-icon>标点符号
                 </el-option>
@@ -326,7 +326,7 @@
                   label="表达优化"
                   value="style"
                 >
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#409eff;">
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-primary);">
                     <MagicStick />
                   </el-icon>表达优化
                 </el-option>
@@ -334,7 +334,7 @@
                   label="敏感词"
                   value="sensitive"
                 >
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;">
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-danger);">
                     <Warning />
                   </el-icon>敏感词
                 </el-option>
@@ -342,7 +342,7 @@
                   label="逻辑问题"
                   value="logic"
                 >
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#67c23a;">
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-success);">
                     <Connection />
                   </el-icon>逻辑问题
                 </el-option>
@@ -1190,7 +1190,7 @@ function resetAll() {
   }
   .upload-icon {
     font-size: 50px;
-    color: #4a7fce;
+    color: var(--color-primary);
     margin-bottom: 14px;
   }
 }
