@@ -253,6 +253,14 @@
           <el-icon><Key /></el-icon><span>API 密钥</span>
         </el-menu-item>
       </el-menu>
+      <button
+        class="theme-toggle drawer-theme-toggle"
+        :title="isDark ? '切换到亮色模式' : '切换到暗色模式'"
+        @click="toggle"
+      >
+        <el-icon><component :is="isDark ? Sunny : Moon" /></el-icon>
+        <span>{{ isDark ? '亮色模式' : '暗色模式' }}</span>
+      </button>
     </el-drawer>
   </el-container>
 </template>
@@ -410,13 +418,14 @@ async function handleLogout() {
 }
 .mobile-menu-btn, .mobile-brand { display: none; }
 .mobile-nav-menu { border-right: 0; }
+.drawer-theme-toggle { margin-top: 12px; }
 .drawer-brand { display: flex; align-items: center; gap: 10px; }
 .drawer-brand img { width: 34px; height: 34px; }
 .drawer-brand div { display: flex; flex-direction: column; }
 .drawer-brand strong { color: var(--color-text); font-size: 17px; }
 .drawer-brand span { color: var(--color-text-secondary); font-size: 11px; }
 .desktop-only { display: flex; }
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .desktop-only { display: none !important; }
   .workspace-header { height: 60px; padding: 0 14px; }
   .mobile-menu-btn { display: inline-flex; margin-right: 4px; }
