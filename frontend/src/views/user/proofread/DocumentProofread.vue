@@ -1369,6 +1369,6 @@ function resetAll() {
 .document-review-heading { margin: 4px 0 24px; }.document-review-heading > span { color: var(--color-primary); font-size: 12px; }.document-review-heading h2 { margin: 10px 0; font-size: 24px; font-weight: 600; }.document-review-heading p { color: var(--color-text-secondary); font-size: 13px; }
 .document-review-tools { border: 1px solid var(--color-border); background: var(--surface); border-radius: 8px; margin-bottom: 10px; }.document-review-tools summary { padding: 13px 16px; cursor: pointer; color: var(--color-text-secondary); font-size: 13px; }
 .result-toolbar { margin-top: 16px; box-shadow: none; border: 1px solid var(--color-border); flex-wrap: wrap; }.result-columns { grid-template-columns: minmax(0,1.35fr) minmax(340px,1fr); }.column-card { box-shadow: none; }
-@media(max-width:1150px) { .result-columns { grid-template-columns: 1fr; height: auto; }.result-columns .column-card { max-height: 650px; } }
-@media(max-width:700px) { .document-review-heading h2 { font-size: 21px; }.upload-section .card-header { flex-wrap: wrap; gap: 12px; } }
+@media(max-width:1080px) { .result-columns { grid-template-columns: 1fr; height: auto; }.result-columns .column-card { max-height: 650px; } }
+@media(max-width:768px) { .document-review-heading h2 { font-size: 21px; }.upload-section .card-header { flex-wrap: wrap; gap: 12px; } }
 </style>

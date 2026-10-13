@@ -732,7 +732,7 @@ onMounted(async () => {
 }
 
 /* ===== 移动端适配 ===== */
-@media (max-width: 960px) {
+@media (max-width: 768px) {
   .login-brand {
     display: none;
   }

@@ -134,7 +134,7 @@
       </template>
       <el-form
         label-width="160px"
-        style="max-width: 600px;"
+        style="max-width: 768px;"
       >
         <el-form-item label="版本号">
           <el-input
@@ -172,7 +172,7 @@
       </template>
       <el-form
         label-width="160px"
-        style="max-width: 600px;"
+        style="max-width: 768px;"
         :model="securitySettings"
       >
         <el-form-item label="新用户初始密码">
@@ -511,7 +511,7 @@ async function handleClean(type: string) {
   }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 768px) {
   .admin-settings :deep(.el-form-item) {
     flex-direction: column;
     align-items: stretch;

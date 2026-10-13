@@ -432,7 +432,7 @@ onBeforeUnmount(() => {
   gap: 16px;
   margin-top: 16px;
 
-  @media (max-width: 992px) {
+  @media (max-width: 1080px) {
     grid-template-columns: 1fr;
   }
 }
@@ -466,5 +466,5 @@ onBeforeUnmount(() => {
 .overview-heading { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:28px; }.overview-eyebrow { font-size:12px; color:var(--color-primary); letter-spacing:2px; }.overview-heading h2 { font-size:28px; font-weight:600; margin:12px 0; }.overview-heading p { color:var(--color-text-secondary); font-size:13px; }
 .admin-shortcuts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-bottom:32px; }.admin-shortcuts a { display:flex; flex-direction:column; align-items:flex-start; gap:14px; padding:22px; border:1px solid var(--color-border); border-radius:12px; background:var(--surface); color:var(--color-text); text-decoration:none; }.admin-shortcuts a:hover { border-color:var(--color-primary); }.admin-shortcuts .el-icon { font-size:22px; color:var(--color-primary); }.admin-shortcuts strong { font-size:14px; }.admin-shortcuts span { color:var(--color-text-secondary); font-size:12px; }
 .section-label { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }.section-label h3 { font-size:16px; }.section-label span { color:var(--color-text-secondary); font-size:12px; }.stat-card { box-shadow:none; }.stat-card .stat-info .stat-value { color:var(--color-text); font-size:26px; }.stat-card .stat-info .stat-label { color:var(--color-text-secondary); }.stat-card .stat-icon { width:42px; height:42px; }.report-row .el-card { box-shadow:none; }
-@media(max-width:1100px) { .admin-shortcuts { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media(max-width:600px) { .overview-heading h2 { font-size:22px; }.overview-heading { align-items:flex-start; }.admin-shortcuts a { padding:16px; }.stat-card .stat-icon { display:none; }.stat-card .stat-info .stat-value { font-size:22px; }.card-header-flex { flex-wrap:wrap; gap:12px; } }
+@media(max-width:1080px) { .admin-shortcuts { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media(max-width:768px) { .overview-heading h2 { font-size:22px; }.overview-heading { align-items:flex-start; }.admin-shortcuts a { padding:16px; }.stat-card .stat-icon { display:none; }.stat-card .stat-info .stat-value { font-size:22px; }.card-header-flex { flex-wrap:wrap; gap:12px; } }
 </style>
