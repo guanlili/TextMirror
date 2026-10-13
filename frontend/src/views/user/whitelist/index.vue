@@ -51,7 +51,7 @@
           min-width="150"
         >
           <template #default="{ row }">
-            <span style="font-weight: 500; color: #67c23a;">{{ row.word }}</span>
+            <span style="font-weight: 500; color: var(--color-success);">{{ row.word }}</span>
           </template>
         </el-table-column>
         <el-table-column
@@ -81,7 +81,7 @@
           <template #default="{ row }">
             <span
               v-if="row.expire_at"
-              style="font-size: 12px; color: #999;"
+              style="font-size: 12px; color: var(--color-text-tertiary);"
             >{{ row.expire_at }}</span>
             <span v-else>-</span>
           </template>
@@ -216,7 +216,7 @@
       title="批量导入放行词"
       width="480px"
     >
-      <p style="margin-bottom: 8px; color: #666; font-size: 13px;">
+      <p style="margin-bottom: 8px; color: var(--color-text-secondary); font-size: 13px;">
         每行一个放行词，可选格式：放行词,备注
       </p>
       <el-input

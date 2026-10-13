@@ -544,8 +544,8 @@ function polishStyleLabel(style: string): string {
   .issue-body {
     font-size: 13px; line-height: 1.7;
     .label { color: var(--color-text-secondary); font-weight: 500; }
-    .text-del { color: #f56c6c; text-decoration: line-through; }
-    .text-add { color: #67c23a; font-weight: 500; }
+    .text-del { color: var(--color-danger); text-decoration: line-through; }
+    .text-add { color: var(--color-success); font-weight: 500; }
     .text-muted { color: var(--color-text-secondary); font-size: 12px; }
   }
 }
@@ -554,8 +554,8 @@ function polishStyleLabel(style: string): string {
   .polish-version-item {
     margin-bottom: 16px;
     padding: 12px;
-    background: #f9fafb;
-    border: 1px solid #e5e7eb;
+    background: var(--surface-soft);
+    border: 1px solid var(--color-border);
     border-radius: 8px;
 
     .version-label {

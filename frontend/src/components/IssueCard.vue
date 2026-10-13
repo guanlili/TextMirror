@@ -186,7 +186,7 @@ const emit = defineEmits<{
 <style scoped lang="scss">
 .issue-item {
   padding: 14px 14px 12px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   margin-bottom: 12px;
   background: var(--surface);
@@ -206,21 +206,21 @@ const emit = defineEmits<{
   }
 
   &.is-active {
-    border-color: #fbbf24;
+    border-color: var(--color-warning);
     box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.12), 0 4px 12px rgba(251, 191, 36, 0.15);
-    background: linear-gradient(135deg, #fffbeb 0%, #ffffff 100%);
+    background: linear-gradient(135deg, var(--color-warning-soft) 0%, var(--surface) 100%);
   }
 
   &.is-accepted {
     opacity: 0.65;
-    background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);
+    background: linear-gradient(135deg, var(--color-success-soft) 0%, var(--surface) 100%);
     border-color: #bbf7d0;
   }
 
   &.is-ignored {
     opacity: 0.5;
     background: var(--surface-soft);
-    border-color: #e5e7eb;
+    border-color: var(--color-border);
   }
 }
 
@@ -233,9 +233,9 @@ const emit = defineEmits<{
   .issue-number {
     font-size: 11px;
     font-weight: 600;
-    color: #6b7280;
+    color: var(--color-text-secondary);
     min-width: 28px;
-    background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+    background: linear-gradient(135deg, var(--surface-soft) 0%, var(--color-border) 100%);
     padding: 3px 7px;
     border-radius: 6px;
     letter-spacing: 0.02em;
@@ -253,10 +253,10 @@ const emit = defineEmits<{
     gap: 12px;
     flex-wrap: wrap;
     padding: 12px 14px;
-    background: linear-gradient(135deg, #fef2f2 0%, #fafafa 50%, #f0fdf4 100%);
+    background: linear-gradient(135deg, var(--color-danger-soft) 0%, var(--surface) 50%, var(--color-success-soft) 100%);
     border-radius: 8px;
     margin-bottom: 10px;
-    border: 1px solid #f3f4f6;
+    border: 1px solid var(--color-border);
 
     &.issue-manual-check {
       background: var(--surface-soft);
@@ -277,10 +277,10 @@ const emit = defineEmits<{
     }
 
     .text-del {
-      color: #dc2626;
+      color: var(--color-danger);
       text-decoration: line-through;
       text-decoration-thickness: 2px;
-      text-decoration-color: #fca5a5;
+      text-decoration-color: var(--color-danger);
     }
 
     .text-add {
@@ -289,7 +289,7 @@ const emit = defineEmits<{
 
     .arrow-icon {
       font-size: 20px;
-      color: #f59e0b;
+      color: var(--color-warning);
       flex-shrink: 0;
       font-weight: bold;
     }
@@ -299,16 +299,16 @@ const emit = defineEmits<{
     display: flex;
     align-items: flex-start;
     gap: 6px;
-    color: #6b7280;
+    color: var(--color-text-secondary);
     font-size: 13px;
     padding: 6px 8px;
-    background: #f9fafb;
+    background: var(--surface-soft);
     border-radius: 6px;
-    border-left: 2px solid #e5e7eb;
+    border-left: 2px solid var(--color-border);
 
     .el-icon {
       margin-top: 2px;
-      color: #9ca3af;
+      color: var(--color-text-tertiary);
       flex-shrink: 0;
     }
   }

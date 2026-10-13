@@ -50,42 +50,33 @@
       </div>
     </div>
 
-    <p
-      v-if="recordId === null"
-      class="workspace-note"
+    <div
+      v-if="infoNotes.length"
+      class="workspace-notes"
     >
-      需登录保存草稿和版本；当前内容仅保留在本次页面内存中，不会写入本地存储。
-    </p>
-    <p
-      v-else
-      class="workspace-note"
-    >
-      草稿手动保存，版本最多 20 个（当前 {{ versions.length }} 个）。恢复版本仅更新当前草稿，需另行保存。
-    </p>
-    <p
-      v-if="versionLimitReached"
-      class="workspace-note"
-    >
-      已达到 20 个版本上限；仍可保存草稿。
-    </p>
-    <p
-      v-if="compare"
-      class="workspace-note"
-    >
-      多模型审阅 · {{ compare.results.length }} 个模型 · {{ compareCoverageLabel(compare) }}；各模型结果和未审范围随草稿、版本一起保存。
-    </p>
-    <p
-      v-else-if="collaboration"
-      class="workspace-note"
-    >
-      协作报告来自原始结果，只读且不随版本恢复改变。{{ collaboration.status === 'complete' ? '流程已完成，仍需人工复核。' : '流程未完整完成；保存或恢复版本不代表协作已完成。' }}
-    </p>
-    <p
-      v-else-if="!coverage"
-      class="workspace-note"
-    >
-      本记录未保存审校覆盖范围，无法确认是否检查全文。
-    </p>
+      <p class="workspace-note">
+        {{ infoNotes[0] }}
+      </p>
+      <template v-if="infoNotes.length > 1">
+        <div v-if="notesOpen">
+          <p
+            v-for="note in infoNotes.slice(1)"
+            :key="note"
+            class="workspace-note"
+          >
+            {{ note }}
+          </p>
+        </div>
+        <button
+          type="button"
+          class="notes-toggle"
+          :aria-expanded="notesOpen"
+          @click="notesOpen = !notesOpen"
+        >
+          {{ notesOpen ? '收起说明' : `展开其余 ${infoNotes.length - 1} 条说明` }}
+        </button>
+      </template>
+    </div>
     <el-alert
       v-if="error"
       :title="error"
@@ -333,6 +324,26 @@ const statusText = computed(() => {
   return dirty.value ? '有未保存改动' : '已保存'
 })
 
+// 顶部说明降噪：首条直接展示，其余折叠；文案与原逐条 <p> 保持一致。
+const notesOpen = ref(false)
+const infoNotes = computed(() => {
+  const notes: string[] = []
+  if (props.recordId === null) {
+    notes.push('需登录保存草稿和版本；当前内容仅保留在本次页面内存中，不会写入本地存储。')
+  } else {
+    notes.push(`草稿手动保存，版本最多 20 个（当前 ${versions.value.length} 个）。恢复版本仅更新当前草稿，需另行保存。`)
+    if (versionLimitReached.value) notes.push('已达到 20 个版本上限；仍可保存草稿。')
+  }
+  if (props.compare) {
+    notes.push(`多模型审阅 · ${props.compare.results.length} 个模型 · ${compareCoverageLabel(props.compare)}；各模型结果和未审范围随草稿、版本一起保存。`)
+  } else if (props.collaboration) {
+    notes.push(`协作报告来自原始结果，只读且不随版本恢复改变。${props.collaboration.status === 'complete' ? '流程已完成，仍需人工复核。' : '流程未完整完成；保存或恢复版本不代表协作已完成。'}`)
+  } else if (!props.coverage) {
+    notes.push('本记录未保存审校覆盖范围，无法确认是否检查全文。')
+  }
+  return notes
+})
+
 function copy<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
@@ -372,6 +383,7 @@ function resetDocument() {
   notice.value = ''
   versionLabel.value = ''
   drawerOpen.value = false
+  notesOpen.value = false
   leftChoice.value = 'original'
   rightChoice.value = 'current'
   if (props.recordId === null) return
@@ -605,6 +617,17 @@ function decisionLabel(decision: AcceptedReviewDecision | null): string {
   line-height: 1.7;
 }
 .workspace-note, .comparison-note { margin: var(--spacing-sm) 0; }
+.workspace-notes .workspace-note:last-of-type { margin-bottom: 0; }
+.notes-toggle {
+  margin: 0 0 var(--spacing-sm);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: var(--font-size-small);
+  cursor: pointer;
+}
+.notes-toggle:hover { color: var(--color-primary-hover); }
 .version-label { width: 180px; }
 .recovery-actions { margin-top: var(--spacing-sm); }
 .workspace-actions :deep(.el-button + .el-button), .recovery-actions :deep(.el-button + .el-button) { margin-left: 0; }
@@ -640,7 +663,7 @@ function decisionLabel(decision: AcceptedReviewDecision | null): string {
   overflow-wrap: anywhere;
 }
 .decision-original { white-space: pre-wrap; font-weight: 600; }
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .comparison-columns { grid-template-columns: minmax(0, 1fr); }
   .comparison-text { height: 30vh; }
   .workspace-actions { width: 100%; }

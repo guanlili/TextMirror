@@ -166,7 +166,7 @@
             min-width="150"
           >
             <template #default="{ row }">
-              <span style="color: #f56c6c; font-weight: 500;">{{ row.wrong_word }}</span>
+              <span style="color: var(--color-danger); font-weight: 500;">{{ row.wrong_word }}</span>
             </template>
           </el-table-column>
           <el-table-column
@@ -175,7 +175,7 @@
             min-width="150"
           >
             <template #default="{ row }">
-              <span style="color: #67c23a; font-weight: 500;">{{ row.correct_word }}</span>
+              <span style="color: var(--color-success); font-weight: 500;">{{ row.correct_word }}</span>
             </template>
           </el-table-column>
           <el-table-column

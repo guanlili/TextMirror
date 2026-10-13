@@ -138,7 +138,7 @@
             </el-tag>
             <span
               v-else
-              style="color: #ccc;"
+              style="color: var(--color-text-tertiary);"
             >-</span>
           </template>
         </el-table-column>
@@ -151,7 +151,7 @@
             <span v-if="row.daily_quota">{{ row.daily_quota }}</span>
             <span
               v-else
-              style="color: #999;"
+              style="color: var(--color-text-tertiary);"
             >跟随用户</span>
           </template>
         </el-table-column>
@@ -162,11 +162,11 @@
           <template #default="{ row }">
             <span
               v-if="row.expires_at"
-              style="font-size: 12px; color: #999;"
+              style="font-size: 12px; color: var(--color-text-tertiary);"
             >{{ formatTime(row.expires_at) }}</span>
             <span
               v-else
-              style="color: #999;"
+              style="color: var(--color-text-tertiary);"
             >永不</span>
           </template>
         </el-table-column>
@@ -177,11 +177,11 @@
           <template #default="{ row }">
             <span
               v-if="row.last_used_at"
-              style="font-size: 12px; color: #999;"
+              style="font-size: 12px; color: var(--color-text-tertiary);"
             >{{ formatTime(row.last_used_at) }}</span>
             <span
               v-else
-              style="color: #999;"
+              style="color: var(--color-text-tertiary);"
             >未使用</span>
           </template>
         </el-table-column>
@@ -194,11 +194,11 @@
           <template #default="{ row }">
             <span
               v-if="row.remark"
-              style="color: #999;"
+              style="color: var(--color-text-tertiary);"
             >{{ row.remark }}</span>
             <span
               v-else
-              style="color: #ccc;"
+              style="color: var(--color-text-tertiary);"
             >-</span>
           </template>
         </el-table-column>
@@ -422,13 +422,13 @@ function statusTagType(status: string): 'success' | 'info' | 'warning' {
   }
   .user-cell {
     display: flex; flex-direction: column; line-height: 1.4;
-    .employee-id { font-size: 12px; color: #999; }
+    .employee-id { font-size: 12px; color: var(--color-text-tertiary); }
   }
   .key-display {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 12px; background: rgba(0, 0, 0, .04); padding: 2px 6px; border-radius: 4px;
   }
-  .form-tip { font-size: 12px; color: #999; line-height: 1.4; margin-top: 4px; }
+  .form-tip { font-size: 12px; color: var(--color-text-tertiary); line-height: 1.4; margin-top: 4px; }
   .pagination-wrapper {
     display: flex; justify-content: flex-end; margin-top: 14px;
   }

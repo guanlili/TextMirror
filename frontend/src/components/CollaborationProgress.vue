@@ -282,8 +282,8 @@ summary { cursor: pointer; padding: 10px 0; color: var(--el-text-color-regular);
 summary:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; border-radius: 4px; }
 .findings ol { padding-left: 24px; }
 .findings li { border-bottom: 1px solid var(--el-border-color-lighter); padding: 6px 0; }
-@media (max-width: 1000px) { .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 540px) {
+@media (max-width: 1080px) { .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) {
   .collaboration-panel { padding: 12px; }
   .roles { grid-template-columns: minmax(0, 1fr); }
   .actions .el-button { max-width: 100%; height: auto; min-height: 32px; white-space: normal; line-height: 1.5; }

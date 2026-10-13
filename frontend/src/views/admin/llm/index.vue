@@ -154,7 +154,7 @@
                   v-if="!item.is_active"
                   command="delete"
                   divided
-                  style="color: #f56c6c;"
+                  style="color: var(--color-danger);"
                 >
                   删除
                 </el-dropdown-item>
@@ -181,7 +181,7 @@
             <span class="info-label">密钥</span>
             <span
               class="info-value"
-              style="font-family: monospace; color: #999;"
+              style="font-family: monospace; color: var(--color-text-tertiary);"
             >{{ item.api_key_masked }}</span>
           </div>
           <div
@@ -191,7 +191,7 @@
             <span class="info-label">测试</span>
             <span
               class="info-value"
-              :style="{ fontSize: '12px', color: testResults[item.id].success ? '#67C23A' : '#F56C6C' }"
+              :style="{ fontSize: '12px', color: testResults[item.id].success ? 'var(--color-success)' : 'var(--color-danger)' }"
             >
               {{ testResults[item.id].success ? `通过 · ${testResults[item.id].latency}` : testResults[item.id].message }}
             </span>
@@ -225,7 +225,7 @@
       >
         <el-empty description="还没有模型配置，两步即可完成接入">
           <div class="quick-start">
-            <p style="color: #999; font-size: 13px; margin-bottom: 12px;">
+            <p style="color: var(--color-text-tertiary); font-size: 13px; margin-bottom: 12px;">
               选择常用供应商快速开始：
             </p>
             <el-button
@@ -283,7 +283,7 @@
           />
           <div
             v-if="editingId"
-            style="font-size: 12px; color: #999; margin-top: 4px;"
+            style="font-size: 12px; color: var(--color-text-tertiary); margin-top: 4px;"
           >
             留空则保持原密钥不变
           </div>
@@ -304,7 +304,7 @@
               :value="m"
             />
           </el-select>
-          <div style="font-size: 12px; color: #999; margin-top: 4px;">
+          <div style="font-size: 12px; color: var(--color-text-tertiary); margin-top: 4px;">
             <template v-if="currentProviderModels.length">
               已预置主流模型，其他型号直接输入
             </template>
@@ -339,12 +339,12 @@
             readonly
           >
             <template #suffix>
-              <el-icon style="color: #67C23A;">
+              <el-icon style="color: var(--color-success);">
                 <CircleCheckFilled />
               </el-icon>
             </template>
           </el-input>
-          <div style="font-size: 12px; color: #999; margin-top: 4px;">
+          <div style="font-size: 12px; color: var(--color-text-tertiary); margin-top: 4px;">
             已使用官方地址，无需填写
           </div>
         </el-form-item>
@@ -378,7 +378,7 @@
                 :max="128000"
                 placeholder="0 表示不限"
               />
-              <span style="margin-left: 8px; font-size: 12px; color: #999;">0 或空表示不限制</span>
+              <span style="margin-left: 8px; font-size: 12px; color: var(--color-text-tertiary);">0 或空表示不限制</span>
             </el-form-item>
             <el-form-item label="超时(秒)">
               <el-input-number
@@ -461,7 +461,7 @@
         :on-change="handleImportFileChange"
         accept=".json"
       >
-        <el-icon style="font-size: 36px; color: #909399;">
+        <el-icon style="font-size: 36px; color: var(--color-info);">
           <UploadFilled />
         </el-icon>
         <div class="el-upload__text">
@@ -899,7 +899,7 @@ function handleCommand(cmd: string, item: LLMConfigItem) {
 .admin-llm {
   .top-bar {
     display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;
-    .page-title { font-size: 18px; font-weight: 600; color: #333; }
+    .page-title { font-size: 18px; font-weight: 600; color: var(--color-text); }
   }
 
   .config-grid {
@@ -911,28 +911,28 @@ function handleCommand(cmd: string, item: LLMConfigItem) {
   .config-card {
     border-radius: 8px;
     transition: all 0.2s;
-    &.active-card { border: 2px solid #0056b3; }
+    &.active-card { border: 2px solid var(--color-primary-hover); }
     &.disabled-card { opacity: 0.6; }
 
     .card-top {
       display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
       .card-name {
         display: flex; align-items: center; gap: 8px;
-        .name-text { font-size: 16px; font-weight: 600; color: #333; }
+        .name-text { font-size: 16px; font-weight: 600; color: var(--color-text); }
       }
     }
 
     .card-info {
       .info-row {
         display: flex; align-items: center; padding: 4px 0; gap: 8px;
-        .info-label { font-size: 13px; color: #999; min-width: 50px; flex-shrink: 0; }
-        .info-value { font-size: 13px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .model-name { font-weight: 600; color: #0056b3; }
+        .info-label { font-size: 13px; color: var(--color-text-tertiary); min-width: 50px; flex-shrink: 0; }
+        .info-value { font-size: 13px; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .model-name { font-weight: 600; color: var(--color-primary-hover); }
       }
     }
 
     .card-footer {
-      display: flex; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid #f0f0f0;
+      display: flex; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--color-border);
     }
   }
 }
@@ -958,7 +958,7 @@ function handleCommand(cmd: string, item: LLMConfigItem) {
     margin-top: 10px;
     max-height: 180px;
     overflow-y: auto;
-    border: 1px solid var(--surface-border, #e5ebf3);
+    border: 1px solid var(--surface-border);
     border-radius: 8px;
     padding: 4px 10px;
   }
@@ -974,7 +974,7 @@ function handleCommand(cmd: string, item: LLMConfigItem) {
     &:last-child { border-bottom: none; }
 
     .import-model {
-      color: #8d99a9;
+      color: var(--color-text-secondary);
       font-size: 12px;
       font-family: monospace;
       margin-left: auto;
@@ -984,8 +984,8 @@ function handleCommand(cmd: string, item: LLMConfigItem) {
 }
 
 .model-caption { color:var(--color-text-secondary); font-size:13px; margin:8px 0 24px; line-height:1.8; }.model-summary { display:grid; grid-template-columns:1fr 1fr 2fr; gap:16px; margin-bottom:24px; }.model-summary > div { background:var(--surface); border:1px solid var(--color-border); border-radius:12px; padding:20px; }.model-summary small { display:block; color:var(--color-text-secondary); font-size:12px; margin-bottom:12px; }.model-summary strong { font-size:26px; color:var(--color-text); }.model-summary .default-name { font-size:18px; overflow-wrap:anywhere; }.model-filters { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:20px; }.model-filters .el-input { width:320px; max-width:100%; }.model-filters .el-select { width:140px; }.top-bar { flex-wrap:wrap; gap:16px; }.top-bar > div:last-child { flex-wrap:wrap; }.config-card { box-shadow:none; }.config-card.active-card { border-color:var(--color-primary); }
-@media(max-width:600px) { .model-summary { grid-template-columns:1fr 1fr; gap:10px; }.model-summary > div:last-child { grid-column:1/-1; }.model-filters .el-input { width:100%; }.config-grid { grid-template-columns:1fr; } }
+@media(max-width:768px) { .model-summary { grid-template-columns:1fr 1fr; gap:10px; }.model-summary > div:last-child { grid-column:1/-1; }.model-filters .el-input { width:100%; }.config-grid { grid-template-columns:1fr; } }
 
 .top-bar > div:first-child { min-width:0; }.top-bar :deep(.el-tag) { max-width:100%; height:auto; white-space:normal; }.top-bar :deep(.el-tag__content) { overflow-wrap:anywhere; white-space:normal; }
-@media(max-width:600px) { .top-bar > div:first-child { display:flex; flex-direction:column; align-items:flex-start; gap:8px; }.top-bar :deep(.el-tag) { margin-left:0 !important; line-height:1.6; } }
+@media(max-width:768px) { .top-bar > div:first-child { display:flex; flex-direction:column; align-items:flex-start; gap:8px; }.top-bar :deep(.el-tag) { margin-left:0 !important; line-height:1.6; } }
 </style>

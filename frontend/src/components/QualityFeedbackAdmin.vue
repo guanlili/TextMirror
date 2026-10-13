@@ -904,7 +904,7 @@ mark { background: var(--el-color-warning-light-7); color: var(--el-text-color-p
 .report-samples { margin-top: 16px; }
 .report-samples summary { cursor: pointer; }
 .report-sample { font-size: 12px; }
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .review-panel, .evaluation-panel, .results-panel, .feedback-card { padding: 12px; }
   .form-grid, .metrics { grid-template-columns: 1fr; }
   .metrics { gap: 14px; }

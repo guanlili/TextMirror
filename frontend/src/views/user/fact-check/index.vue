@@ -989,7 +989,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.8 monospace;max-heig
 :deep(.el-radio-group),:deep(.trace-counts){flex-wrap:wrap;max-width:100%}
 :deep(.trace-heading>span){display:none}
 .history-item:focus-visible,.claim-item:focus-visible,.evidence-pane:focus-visible,.evidence-card:focus-visible,:deep(summary:focus-visible),a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-@media(max-width:800px){
+@media(max-width:768px){
   .review-grid{grid-template-columns:minmax(0,1fr)}
   .workbench-heading{align-items:flex-start}
   .workbench-heading h2{font-size:25px}

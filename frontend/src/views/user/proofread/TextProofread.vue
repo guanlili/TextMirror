@@ -526,7 +526,7 @@
                     label="错别字"
                     value="typo"
                   >
-                    <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;">
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-danger);">
                       <EditPen />
                     </el-icon>错别字
                   </el-option>
@@ -534,7 +534,7 @@
                     label="语法错误"
                     value="grammar"
                   >
-                    <el-icon style="vertical-align:middle;margin-right:6px;color:#e6a23c;">
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-warning);">
                       <Reading />
                     </el-icon>语法错误
                   </el-option>
@@ -542,7 +542,7 @@
                     label="标点符号"
                     value="punctuation"
                   >
-                    <el-icon style="vertical-align:middle;margin-right:6px;color:#909399;">
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-info);">
                       <Operation />
                     </el-icon>标点符号
                   </el-option>
@@ -550,7 +550,7 @@
                     label="表达优化"
                     value="style"
                   >
-                    <el-icon style="vertical-align:middle;margin-right:6px;color:#409eff;">
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-primary);">
                       <MagicStick />
                     </el-icon>表达优化
                   </el-option>
@@ -558,7 +558,7 @@
                     label="敏感词"
                     value="sensitive"
                   >
-                    <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;">
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-danger);">
                       <Warning />
                     </el-icon>敏感词
                   </el-option>
@@ -566,7 +566,7 @@
                     label="逻辑问题"
                     value="logic"
                   >
-                    <el-icon style="vertical-align:middle;margin-right:6px;color:#67c23a;">
+                    <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-success);">
                       <Connection />
                     </el-icon>逻辑问题
                   </el-option>
@@ -1187,11 +1187,11 @@ async function goBack() {
     font-size: 14px;
     line-height: 1.8;
     font-family: var(--font-family);
-    box-shadow: 0 0 0 1px #dfe6ef inset;
+    box-shadow: 0 0 0 1px var(--color-border) inset;
 
     &:focus {
       background: var(--surface);
-      box-shadow: 0 0 0 1px #4e86db inset, 0 0 0 3px rgba(45, 115, 221, .08);
+      box-shadow: 0 0 0 1px var(--color-primary) inset, 0 0 0 3px rgba(45, 115, 221, .08);
     }
   }
 }
@@ -1287,13 +1287,13 @@ async function goBack() {
     transition: all 0.2s;
   }
 
-  :deep(mark.hl-error) { background: #fee2e2; }
-  :deep(mark.hl-warning) { background: #fef3c7; }
-  :deep(mark.hl-info) { background: #dbeafe; }
+  :deep(mark.hl-error) { background: var(--color-danger-soft); }
+  :deep(mark.hl-warning) { background: var(--color-warning-soft); }
+  :deep(mark.hl-info) { background: var(--color-primary-soft); }
 
   :deep(mark.is-hover) {
-    background: #fde68a;
-    box-shadow: 0 0 0 2px #f59e0b;
+    background: var(--color-warning-soft);
+    box-shadow: 0 0 0 2px var(--color-warning);
     font-weight: 600;
   }
 }
@@ -1426,7 +1426,7 @@ async function goBack() {
   overflow-y: auto;
   font-size: 13px;
   line-height: 1.8;
-  color: var(--color-text, #374151);
+  color: var(--color-text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   padding: 4px 16px;
@@ -1448,8 +1448,8 @@ async function goBack() {
 .review-heading { margin: 4px 0 24px; }.review-eyebrow { font-size: 12px; color: var(--color-primary); }.review-heading h2 { font-size: 24px; font-weight: 600; margin: 10px 0; }.review-heading p { color: var(--color-text-secondary); font-size: 13px; }
 .review-tools { border: 1px solid var(--color-border); background: var(--surface); border-radius: 8px; margin-bottom: 10px; }.review-tools summary { cursor: pointer; padding: 13px 16px; font-size: 13px; color: var(--color-text-secondary); }.review-tools[open] { padding-bottom: 14px; }
 .result-toolbar { box-shadow: none; border: 1px solid var(--color-border); margin-top: 16px; flex-wrap: wrap; }.result-columns { grid-template-columns: minmax(0, 1.35fr) minmax(340px, 1fr); height: max(600px, calc(100vh - 230px)); }.column-card { box-shadow: none; }
-@media(max-width:1150px) { .input-section { grid-template-columns: minmax(0, 1fr) 270px; gap: 16px; }.result-columns { grid-template-columns: 1fr; height: auto; }.result-columns .column-card { max-height: 650px; } }
-@media(max-width:700px) { .input-section { grid-template-columns: 1fr; }.proofread-settings { padding: 8px 0; }.editor-wrapper :deep(.el-textarea__inner) { min-height: 280px !important; padding: 20px; }.action-bar { padding: 14px; flex-wrap: wrap; }.action-bar :deep(.el-button--large) { min-width: 110px; }.result-toolbar .toolbar-info { flex-wrap: wrap; }.review-heading h2 { font-size: 21px; } }
+@media(max-width:1080px) { .input-section { grid-template-columns: minmax(0, 1fr) 270px; gap: 16px; }.result-columns { grid-template-columns: 1fr; height: auto; }.result-columns .column-card { max-height: 650px; } }
+@media(max-width:768px) { .input-section { grid-template-columns: 1fr; }.proofread-settings { padding: 8px 0; }.editor-wrapper :deep(.el-textarea__inner) { min-height: 280px !important; padding: 20px; }.action-bar { padding: 14px; flex-wrap: wrap; }.action-bar :deep(.el-button--large) { min-width: 110px; }.result-toolbar .toolbar-info { flex-wrap: wrap; }.review-heading h2 { font-size: 21px; } }
 
-@media(max-width:700px) { .input-section { padding-bottom: 84px; }.input-section .action-bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 18px max(12px, env(safe-area-inset-bottom)); border-radius: 0; box-shadow: 0 -4px 18px rgba(0,0,0,.04); }.editor-wrapper :deep(.el-textarea__inner) { height: 330px; } }
+@media(max-width:768px) { .input-section { padding-bottom: 84px; }.input-section .action-bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 18px max(12px, env(safe-area-inset-bottom)); border-radius: 0; box-shadow: 0 -4px 18px rgba(0,0,0,.04); }.editor-wrapper :deep(.el-textarea__inner) { height: 330px; } }
 </style>
