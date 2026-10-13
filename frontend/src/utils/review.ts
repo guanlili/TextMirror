@@ -40,11 +40,17 @@ export function reviewIssueKey(issue: ReviewIssue): string {
   return JSON.stringify([issue.start, issue.end, issue.original, issue.type, issue.suggestion])
 }
 
-/** 跨模型/跨 type 共享决策，但绝不跨位置或跨建议。 */
+/** 空建议的敏感词表示删除，其余表示人工核对，不是同一种操作。 */
+export function reviewDecisionKind(issue: ReviewIssue): string {
+  return issue.suggestion ? 'replace' : issue.type === 'sensitive' ? 'delete' : `manual:${issue.type}`
+}
+
+/** 跨模型/跨 type 共享同一修改，绝不跨位置、建议或操作类型。 */
 export function sameReviewDecision(a: ReviewIssue, b: ReviewIssue): boolean {
   return Number.isInteger(a.start) && Number.isInteger(a.end) && a.start! >= 0 && a.end! > a.start!
     && a.start === b.start && a.end === b.end
     && a.original === b.original && a.suggestion === b.suggestion
+    && reviewDecisionKind(a) === reviewDecisionKind(b)
 }
 
 /**
@@ -204,11 +210,12 @@ export function serializeReviewIssues(issues: readonly ReviewIssue[]): ReviewIss
 export function reviewStateFingerprint(issues: readonly ReviewIssue[], coverage?: {
   status: string; total_chunks: number; completed_chunks: number
   failed_chunks: { chunk_index: number; start: number; end: number; text: string }[]
+  person_consistency_status?: 'complete' | 'failed' | null
 } | null): string {
   return JSON.stringify([
     issues.map(i => [i.start ?? -1, i.end ?? -1, i.original, i.suggestion, i.type,
       i.explanation || '', i.severity, !!i._accepted, !!i._ignored]),
     coverage ? [coverage.status, coverage.total_chunks, coverage.completed_chunks,
-      coverage.failed_chunks.map(c => [c.chunk_index, c.start, c.end, c.text])] : null,
+      coverage.failed_chunks.map(c => [c.chunk_index, c.start, c.end, c.text]), coverage.person_consistency_status ?? null] : null,
   ])
 }

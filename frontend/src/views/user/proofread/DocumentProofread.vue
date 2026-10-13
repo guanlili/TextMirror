@@ -56,33 +56,6 @@
               {{ formatSize(selectedFile.size) }}
             </el-tag>
           </div>
-          <ProfessionalRules v-model="domain" />
-          <div
-            v-if="modelOptions.length > 1"
-            class="setting-row"
-          >
-            <span class="setting-label">校对模型：</span>
-            <el-select
-              v-model="selectedModelId"
-              size="default"
-              style="max-width: 320px;"
-              placeholder="默认当前模型"
-              aria-describedby="document-model-help"
-            >
-              <el-option
-                v-for="m in modelOptions"
-                :key="m.id"
-                :label="m.is_active ? `${m.name}（${m.model}）· 当前` : `${m.name}（${m.model}）`"
-                :value="m.id"
-              />
-            </el-select>
-            <p
-              id="document-model-help"
-              class="setting-help"
-            >
-              默认使用标记“当前”的模型；不同模型的速度、效果和用量不同。
-            </p>
-          </div>
           <el-button
             type="primary"
             size="large"
@@ -92,6 +65,15 @@
             <el-icon><Edit /></el-icon>
             {{ statusText }}
           </el-button>
+          <ProofreadOptions
+            v-model:domain="domain"
+            v-model:depth="depth"
+            v-model:model-id="selectedModelId"
+            :models="modelOptions"
+            :allow-modes="false"
+            :disabled="uploading || proofreading"
+            class="document-options"
+          />
         </div>
       </el-card>
     </div>
@@ -113,8 +95,8 @@
               description="解析文档文本"
             />
             <el-step
-              title="AI 校对"
-              description="大模型逐片检查"
+              :title="depth === 'quick' ? '规则检查' : '内容审校'"
+              :description="depth === 'quick' ? '检查词库、格式及已有规则' : '检查文字与文内一致性'"
             />
             <el-step
               title="整理结果"
@@ -392,7 +374,7 @@
 </template>
 
 <script setup lang="ts">
-import ProfessionalRules from '@/components/ProfessionalRules.vue'
+import ProofreadOptions from '@/components/ProofreadOptions.vue'
 import ProofreadEntry from '@/components/ProofreadEntry.vue'
 import IssueCard from '@/components/IssueCard.vue'
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
@@ -509,9 +491,9 @@ watch([filterType, issues], () => { visibleCount.value = ISSUES_PAGE_SIZE })
 const statusText = computed(() => {
   if (cancelling.value) return '正在取消...'
   if (uploading.value) return '上传中...'
-  if (proofreading.value) return 'AI 校对中...'
+  if (proofreading.value) return depth.value === 'quick' ? '规则检查中...' : '审校中...'
   if (step.value === 'processing') return '正在恢复审阅...'
-  return '开始校对'
+  return '开始审校'
 })
 
 const sourceCharacters = computed(() => Array.from(sourceText.value))
@@ -1218,18 +1200,8 @@ function resetAll() {
     border: 1px solid var(--color-border);
   }
 
-  .setting-row {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    row-gap: 6px;
-    margin-bottom: 12px;
-    .setting-label {
-      width: 80px;
-      font-weight: 500;
-      flex-shrink: 0;
-    }
-  }
+  .document-options { margin-top: 20px; max-width: 520px; }
+  .file-info span { overflow-wrap: anywhere; min-width: 0; }
 }
 
 .processing-section {

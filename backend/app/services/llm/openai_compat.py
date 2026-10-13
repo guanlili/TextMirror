@@ -49,10 +49,12 @@ _THINKING_DIALECTS: Dict[str, Dict[bool, dict]] = {
     },
 }
 
-# 部分 OpenAI 兼容网关虽然走 /chat/completions，但个别模型不接受采样参数。
-# 阿里百炼的 kimi-k3 会对任意 temperature 返回 400：
-# InternalError.Algo.InvalidParameter: Parameter 'temperature'=... is not supported for kimi-k3 model.
-_TEMPERATURE_UNSUPPORTED_MODELS = {"kimi-k3"}
+# 部分 OpenAI 兼容网关虽然走 /chat/completions，但个别模型不接受部分可选参数。
+# 阿里百炼的 kimi-k3 会对任意 temperature 返回 400；同类模型级限制也不应继续注入
+# qwen 方言的 enable_thinking，避免修完 temperature 后在审校/自检链路再次 400。
+_UNSUPPORTED_PARAMS_BY_MODEL = {
+    "kimi-k3": {"temperature", "thinking"},
+}
 
 
 class OpenAICompatProvider(BaseLLMProvider):
@@ -129,8 +131,8 @@ class OpenAICompatProvider(BaseLLMProvider):
             pool[key] = client
         return client
 
-    def _supports_temperature(self) -> bool:
-        return self.model.lower() not in _TEMPERATURE_UNSUPPORTED_MODELS
+    def _supports_param(self, param: str) -> bool:
+        return param not in _UNSUPPORTED_PARAMS_BY_MODEL.get(self.model.lower(), set())
 
     def _build_chat_payload(
         self,
@@ -144,7 +146,7 @@ class OpenAICompatProvider(BaseLLMProvider):
             "messages": messages,
             "stream": stream,
         }
-        if self._supports_temperature():
+        if self._supports_param("temperature"):
             payload["temperature"] = temperature
         if max_tokens:
             payload["max_tokens"] = max_tokens
@@ -176,13 +178,18 @@ class OpenAICompatProvider(BaseLLMProvider):
         if response_format is not None:
             payload["response_format"] = response_format
         if thinking is not None:
-            dialect = _THINKING_DIALECTS.get(self.provider_slug or "")
-            if dialect is None:
+            if not self._supports_param("thinking"):
                 logger.debug(
-                    f"[{self.provider_name}] 供应商 {self.provider_slug} 不支持思考模式参数，按模型默认执行"
+                    f"[{self.provider_name}] 模型 {self.model} 不支持思考模式参数，按模型默认执行"
                 )
             else:
-                payload.update(dialect[thinking])
+                dialect = _THINKING_DIALECTS.get(self.provider_slug or "")
+                if dialect is None:
+                    logger.debug(
+                        f"[{self.provider_name}] 供应商 {self.provider_slug} 不支持思考模式参数，按模型默认执行"
+                    )
+                else:
+                    payload.update(dialect[thinking])
 
         # 若已验证过 endpoint，则直接复用，避免每次都试探
         endpoints = (

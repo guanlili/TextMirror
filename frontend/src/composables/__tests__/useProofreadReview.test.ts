@@ -106,6 +106,23 @@ describe('position-based review', () => {
     expect(review.ignoreIssue(items[0])).toBe(true)
   })
 
+  it('同位置的人工核对不能跟随敏感词删除接受或忽略', () => {
+    const review = useProofreadReview()
+    const [manual, deletion] = review.initialize('帐号，', [
+      raw({ type: 'logic', suggestion: '' }), raw({ type: 'sensitive', suggestion: '' }),
+    ])
+    expect(review.deleteIssue(deletion)).toBe(true)
+    expect(deletion._accepted).toBe(true)
+    expect(manual._accepted).toBe(false)
+    expect(review.currentText.value).toBe('')
+    const saved = review.serializeIssues()
+    review.restore('帐号，', saved)
+    expect(review.issues.value.map(i => i._accepted)).toEqual([false, true])
+    review.undoIssue(review.issues.value[1])
+    review.ignoreIssue(review.issues.value[0])
+    expect(review.issues.value[1]._ignored).toBe(false)
+  })
+
   it('同位置不同建议不能同步；冲突失败时不置 accepted、不上报', () => {
     const review = useProofreadReview()
     const [first, conflict] = review.initialize('帐号', [raw(), raw({ suggestion: '账户' })])

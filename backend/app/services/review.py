@@ -34,6 +34,11 @@ TRAILING_PUNCTUATION = "，。！？；、,"
 MAX_STATE_BYTES = 128 * 1024 * 1024
 
 
+def _decision_key(issue: ReviewIssue) -> tuple:
+    action = "replace" if issue.suggestion else "delete" if issue.type == "sensitive" else f"manual:{issue.type}"
+    return issue.start, issue.end, issue.original, issue.suggestion, action
+
+
 def derive_patches(source: str, issues: list[ReviewIssue]) -> list[dict]:
     """所有有定位的问题都核验原文；只接受明确采纳的非重叠修改。"""
     patches = []
@@ -42,7 +47,7 @@ def derive_patches(source: str, issues: list[ReviewIssue]) -> list[dict]:
     for issue in issues:
         # 不同 type 可指向同一位置/建议；它们共享一个用户决策，而非各自修改原文。
         if issue.start is not None:
-            decision_key = (issue.start, issue.end, issue.original, issue.suggestion)
+            decision_key = _decision_key(issue)
             flags = (issue.accepted, issue.ignored)
             if decision_key in decisions and decisions[decision_key] != flags:
                 raise HTTPException(422, "共享位置与建议的问题必须使用一致的采纳/忽略决策")
@@ -184,7 +189,7 @@ def review_content(result: dict | None, state: dict | None) -> tuple[list[Review
         saved_issues = [ReviewIssue.model_validate(item) for item in issues] if state is not None else []
         merged = {issue_key(issue): issue for issue in saved_issues}
         decisions = {
-            (issue.start, issue.end, issue.original, issue.suggestion): {
+            _decision_key(issue): {
                 "accepted": issue.accepted, "ignored": issue.ignored,
             }
             for issue in saved_issues if issue.start is not None
@@ -192,7 +197,7 @@ def review_content(result: dict | None, state: dict | None) -> tuple[list[Review
         for item in compare.results:
             if item.success:
                 for issue in item.issues:
-                    flags = decisions.get((issue.start, issue.end, issue.original, issue.suggestion), {})
+                    flags = decisions.get(_decision_key(issue), {})
                     merged.setdefault(issue_key(issue), issue.model_copy(update=flags))
         issues = list(merged.values())
     return issues, compare

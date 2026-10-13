@@ -639,7 +639,7 @@ const supplemental = ref(''), deepConsent = ref(false)
 const evidencePane = ref<HTMLElement | null>(null)
 const pendingCreate = ref<CreateFactCheckPayload | null>(null)
 let executeId = '', executeHash = '', reviewId = '', reviewHash = '', deepId = '', deepHash = ''
-let epoch = 0, alive = true, timer: ReturnType<typeof setTimeout> | undefined, controller: AbortController | undefined
+let epoch = 0, stateSeq = 0, alive = true, timer: ReturnType<typeof setTimeout> | undefined, revokeTimer: ReturnType<typeof setTimeout> | undefined, controller: AbortController | undefined
 const statusLabels = { PENDING: '等待执行', RUNNING: '核查中', WAITING_CONFIRMATION: '待确认事实', SUCCESS: '执行完成', FAILURE: '执行失败', CANCELLED: '已取消' }
 const verdictLabels = { supported: '证据支持', refuted: '证据反驳', insufficient: '证据不足', conflicting: '证据冲突' }
 const stanceLabels = { supports: '支持证据', refutes: '反驳证据', context: '背景材料，不能单独证实' }
@@ -788,10 +788,13 @@ function schedulePoll() {
 }
 async function refresh() {
   if (!run.value || busy.value) { schedulePoll(); return }
-  const id = run.value.id, token = epoch
-  try { const result = await getFactCheckRunApi(id, { signal: controller?.signal }); if (alive && token === epoch) acceptRun(result) }
-  catch (cause) { if (alive && token === epoch) showError(cause) }
-  finally { if (alive && token === epoch) schedulePoll() }
+  const id = run.value.id, token = epoch, seq = stateSeq
+  try {
+    const result = await getFactCheckRunApi(id, { signal: controller?.signal })
+    if (alive && token === epoch && seq === stateSeq && !busy.value) acceptRun(result)
+  }
+  catch (cause) { if (alive && token === epoch && seq === stateSeq) showError(cause) }
+  finally { if (alive && token === epoch && seq === stateSeq) schedulePoll() }
 }
 async function loadHistory() {
   const token = epoch
@@ -847,7 +850,7 @@ async function create(confirm: boolean) {
 }
 async function action(kind: string, work: (id: number, isCurrent: () => boolean) => Promise<void>) {
   if (!run.value || busy.value) return
-  const id = run.value.id, token = epoch; busy.value = kind; error.value = ''; clearTimeout(timer)
+  const id = run.value.id, token = epoch; stateSeq++; busy.value = kind; error.value = ''; clearTimeout(timer)
   const isCurrent = () => alive && token === epoch && Number(route.params.id) === id
   try { await work(id, isCurrent) } catch (cause) { if (isCurrent()) showError(cause) }
   finally { if (alive && token === epoch) { busy.value = ''; schedulePoll() } }
@@ -874,7 +877,17 @@ async function saveReview() {
   await action('review', async (id, isCurrent) => { const result = await addFactCheckReviewApi(id, { ...data, request_id: reviewId }); if (isCurrent()) { reviews.value = [...reviews.value.filter(item => item.id !== result.id), result]; note.value = '' } })
 }
 async function download(format: 'html' | 'json') {
-  await action('export', async (id, isCurrent) => { const blob = await exportFactCheckApi(id, format); if (!isCurrent()) return; const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `fact-check-${id}.${format}`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000) })
+  await action('export', async (id, isCurrent) => {
+    const blob = await exportFactCheckApi(id, format)
+    if (!isCurrent()) return
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `fact-check-${id}.${format}`
+    link.click()
+    if (revokeTimer) clearTimeout(revokeTimer)
+    revokeTimer = setTimeout(() => { URL.revokeObjectURL(url); revokeTimer = undefined }, 1000)
+  })
 }
 async function clearRun() {
   const token = epoch
@@ -883,7 +896,7 @@ async function clearRun() {
   await action('delete', async (id, isCurrent) => { await deleteFactCheckApi(id); if (isCurrent()) await load() })
 }
 watch(() => route.fullPath, () => { run.value = null; selectedId.value = ''; verdictFilter.value = ''; consented.value = false; deepConsent.value = false; note.value = ''; supplemental.value = ''; executeHash = ''; reviewHash = ''; deepHash = ''; pendingCreate.value = null; void load() }, { immediate: true })
-onBeforeUnmount(() => { alive = false; epoch++; controller?.abort(); clearTimeout(timer) })
+onBeforeUnmount(() => { alive = false; epoch++; stateSeq++; controller?.abort(); clearTimeout(timer); clearTimeout(revokeTimer) })
 </script>
 
 <style scoped>

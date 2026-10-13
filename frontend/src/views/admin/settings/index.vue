@@ -112,15 +112,27 @@
             上传后可在左侧预览效果，点击“保存品牌设置”后生效
           </div>
         </el-form-item>
+        <el-alert
+          v-if="siteConfigLoadError"
+          title="品牌配置加载失败，请刷新页面重试。为避免误把默认值保存到全站，当前已禁用保存。"
+          type="error"
+          :closable="false"
+          show-icon
+          class="settings-alert"
+        />
         <el-form-item>
           <el-button
             type="primary"
             :loading="saving"
+            :disabled="!siteConfigLoaded || Boolean(siteConfigLoadError)"
             @click="saveSiteConfig"
           >
             保存品牌设置
           </el-button>
-          <el-button @click="resetSiteConfig">
+          <el-button
+            :disabled="!siteConfigLoaded"
+            @click="resetSiteConfig"
+          >
             重置
           </el-button>
         </el-form-item>
@@ -248,6 +260,8 @@ import { getErrorDetail } from '@/utils/request'
 const userStore = useUserStore()
 const siteStore = useSiteStore()
 const saving = ref(false)
+const siteConfigLoaded = ref(false)
+const siteConfigLoadError = ref('')
 
 // 预设图标（内嵌SVG，主题色 #0056b3，不依赖外部服务）
 const faviconPresets = [
@@ -340,6 +354,11 @@ onMounted(async () => {
   if (siteRes.status === 'fulfilled') {
     Object.assign(siteConfig, siteRes.value)
     originalSiteConfig = { ...siteRes.value }
+    siteConfigLoaded.value = true
+    siteConfigLoadError.value = ''
+  } else {
+    siteConfigLoaded.value = false
+    siteConfigLoadError.value = getErrorDetail(siteRes.reason) || '品牌配置加载失败'
   }
   if (basicRes.status === 'fulfilled') {
     Object.assign(settings, basicRes.value)
@@ -355,6 +374,10 @@ onMounted(async () => {
 
 /** 保存品牌设置 */
 async function saveSiteConfig() {
+  if (!siteConfigLoaded.value || siteConfigLoadError.value) {
+    ElMessage.error('品牌配置尚未成功加载，请刷新页面后再保存')
+    return
+  }
   if (!siteConfig.platform_name?.trim()) {
     ElMessage.warning('平台名称不能为空')
     return

@@ -52,6 +52,7 @@ export function serializeReviewDraft(state: ReviewDraftState): string {
       status: coverage.status,
       total_chunks: coverage.total_chunks,
       completed_chunks: coverage.completed_chunks,
+      person_consistency_status: coverage.person_consistency_status ?? null,
       failed_chunks: coverage.failed_chunks.map(chunk => ({
         chunk_index: chunk.chunk_index,
         start: chunk.start,

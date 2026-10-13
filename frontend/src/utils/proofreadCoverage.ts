@@ -25,7 +25,8 @@ export function applyChunkRetry(
   return {
     issues,
     coverage: {
-      status: failed.length ? 'partial' : 'complete',
+      ...coverage,
+      status: failed.length || coverage.person_consistency_status === 'failed' ? 'partial' : 'complete',
       total_chunks: total,
       completed_chunks: total - failed.length,
       failed_chunks: failed,

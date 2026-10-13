@@ -99,7 +99,7 @@ def check_amount_consistency(text: str) -> List[Dict[str, Any]]:
             original = m.group(0)[:60]
             issues.append(_issue(
                 original,
-                original,
+                "",
                 f"金额大小写不一致：{cn_part}{cn_unit or ''}元 与 {num_part}{num_unit or ''} 数值不符",
                 "error", start=m.start(), end=m.start() + len(original),
             ))
@@ -211,8 +211,10 @@ def check_consistency(text: str) -> List[Dict[str, Any]]:
     """跨片一致性检查入口：金额一致 + 金额加总 + 称谓统一 + 编号连续"""
     issues: List[Dict[str, Any]] = []
     try:
+        from app.services.proofread.numeric_reasoning import check_numeric_reasoning
         issues.extend(check_amount_consistency(text))
         issues.extend(check_amount_summation(text))
+        issues.extend(check_numeric_reasoning(text))
         issues.extend(check_naming_consistency(text))
         issues.extend(check_sequence_continuity(text))
     except Exception as e:
@@ -297,7 +299,7 @@ def check_amount_summation(text: str) -> List[Dict[str, Any]]:
         if abs(s - total_yuan) / total_yuan > 0.01:
             issues.append(_issue(
                 m.group(0),
-                m.group(0),
+                "",
                 f"金额加总不符：前文各项合计 {s / 10000:.1f} 万元，与「{m.group(0)}」不符（差额 {abs(s - total_yuan) / 10000:.1f} 万元）",
                 "error", start=m.start(), end=m.end(),
             ))

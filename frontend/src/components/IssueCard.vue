@@ -33,7 +33,20 @@
       <div class="issue-context">
         {{ context }}
       </div>
-      <div class="issue-diff">
+      <div
+        v-if="!issue.suggestion && issue.type !== 'sensitive'"
+        class="issue-diff issue-manual-check"
+      >
+        <span
+          class="text"
+          :title="issue.original"
+        >{{ issue.original }}</span>
+        <span class="manual-check-label">需人工核对</span>
+      </div>
+      <div
+        v-else
+        class="issue-diff"
+      >
         <span
           class="text text-del"
           :title="issue.original"
@@ -244,6 +257,16 @@ const emit = defineEmits<{
     border-radius: 8px;
     margin-bottom: 10px;
     border: 1px solid #f3f4f6;
+
+    &.issue-manual-check {
+      background: var(--surface-soft);
+      color: var(--color-text);
+    }
+
+    .manual-check-label {
+      color: var(--color-text-secondary);
+      font-size: 13px;
+    }
 
     .text {
       font-size: 15px;

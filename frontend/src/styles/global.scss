@@ -49,6 +49,11 @@
   --surface: #FFFFFF;
   --surface-soft: #F7F9FC;
   --surface-border: #E5EBF3;
+
+  /* 审校选项：低干扰的渐进披露，不增加首屏视觉负担 */
+  --review-option-selected: color-mix(in srgb, var(--color-primary) 7%, var(--surface));
+  --review-option-ring: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  --review-option-radius: var(--border-radius-md);
 }
 
 /* 暗色主题 */
@@ -65,6 +70,8 @@ html.dark {
   --surface: #1a2332;
   --surface-soft: #202b3d;
   --surface-border: #2c3950;
+  --review-option-selected: color-mix(in srgb, var(--color-primary) 7%, var(--surface));
+  --review-option-ring: color-mix(in srgb, var(--color-primary) 30%, transparent);
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
   --shadow-lg: 0 18px 44px rgba(0, 0, 0, 0.45);

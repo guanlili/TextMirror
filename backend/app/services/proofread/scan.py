@@ -76,6 +76,14 @@ def merge_issues(llm_issues: List[Dict[str, Any]],
                   if i.get("start") is not None}
     legacy_llm = [i for i in llm_issues if i.get("start") is None and "chunk_index" not in i]
     for s in scanned_issues:
+        if s.get("source") == "numeric_rule":
+            merged = [i for i in merged if not (
+                i.get("start") is not None and i.get("end") is not None and i.get("type") == s["type"]
+                and ((i["start"], i["end"]) == (s["start"], s["end"])
+                     or (i.get("source") == "numeric_guard" and i["start"] < s["end"] and s["start"] < i["end"]))
+            )]
+            merged.append(s)
+            continue
         if s.get("start") is not None:
             duplicate = tuple(s.get(k) for k in position_fields) in positioned
             if not duplicate and s.get("end") is not None:

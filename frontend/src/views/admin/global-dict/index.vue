@@ -483,7 +483,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   type GlobalWordItem, type GlobalWordStats, type DictSuggestions,
@@ -575,6 +575,10 @@ onMounted(() => {
   fetchStats()
   fetchList()
   fetchSuggestions()
+})
+
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer)
 })
 
 async function fetchStats() {
