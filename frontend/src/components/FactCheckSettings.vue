@@ -356,5 +356,5 @@ onBeforeUnmount(() => { alive = false; sequence++; controller?.abort(); apiKey.v
 .error-box { color: var(--el-color-danger); padding: 10px 12px; background: var(--el-color-danger-light-9); margin-bottom: 12px; }
 .warning-text { color: var(--el-color-warning-dark-2); font-size: 13px; }
 .success-text { color: var(--el-color-success-dark-2); font-size: 13px; }
-@media (max-width: 640px) { .settings-grid, .source-fields { grid-template-columns: minmax(0, 1fr); gap: 0; } }
+@media (max-width: 768px) { .settings-grid, .source-fields { grid-template-columns: minmax(0, 1fr); gap: 0; } }
 </style>

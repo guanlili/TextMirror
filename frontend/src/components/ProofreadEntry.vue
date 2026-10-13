@@ -30,5 +30,5 @@ const route = useRoute()
 a { display: flex; gap: 8px; align-items: center; padding: 10px 18px; text-decoration: none; color: var(--color-text-secondary); border-radius: 7px; font-weight: 500; }
 a[aria-current] { background: var(--el-color-primary-light-9); color: var(--color-primary); }
 .entry-nav > span { font-size: 12px; color: var(--color-text-secondary); }
-@media(max-width: 650px) { .entry-nav > span { display: none; } .entry-tabs { width: 100%; } a { flex: 1; justify-content: center; } }
+@media(max-width: 768px) { .entry-nav > span { display: none; } .entry-tabs { width: 100%; } a { flex: 1; justify-content: center; } }
 </style>

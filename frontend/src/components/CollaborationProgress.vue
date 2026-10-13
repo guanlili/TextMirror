@@ -171,6 +171,6 @@ article[data-status="running"] { border-color: var(--el-color-primary-light-5); 
 .findings { margin-top: 12px; }
 summary { cursor: pointer; }
 li { border-bottom: 1px solid var(--el-border-color-lighter); padding: 6px 0; }
-@media (max-width: 1000px) { .roles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 540px) { .roles { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 1080px) { .roles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .roles { grid-template-columns: minmax(0, 1fr); } }
 </style>

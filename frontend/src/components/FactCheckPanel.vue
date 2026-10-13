@@ -749,7 +749,7 @@ blockquote { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
 .error-box { padding: 8px 12px; margin: 12px 0; background: var(--el-color-danger-light-9); color: var(--el-color-danger); }
 .fact-check-panel :deep(.el-checkbox) { white-space: normal; height: auto; }
 .fact-check-panel :deep(.el-checkbox__label) { white-space: normal; line-height: 1.65; }
-@media (max-width: 640px) {
+@media (max-width: 768px) {
   .setup-grid { grid-template-columns: minmax(0, 1fr); }
   .heading-note { display: block; margin-left: 0; }
   .panel-heading, .panel-content { padding-left: 12px; padding-right: 12px; }

@@ -157,6 +157,7 @@ interface WorkspaceState {
   error: string
   notice: string
   statusText: string
+  notesOpen: boolean
   remote: ReviewResponse | null
   versionLabel: string
   versionLimitReached: boolean
@@ -508,6 +509,9 @@ describe('ReviewWorkspace 多模型草稿', () => {
     const models = compare()
     const { state, props, root } = mount({ compare: models, savedReview: response({ compare: models }) })
     expect(state.dirty).toBe(false)
+    // 多模型说明默认折叠，展开后展示逐模型状态
+    state.notesOpen = true
+    await flush()
     expect(textContent(root)).toContain('多模型审阅')
     expect(textContent(root)).toContain('2 个模型')
     expect(textContent(root)).toContain('部分模型未完成')
@@ -692,6 +696,8 @@ describe('ReviewWorkspace 多模型草稿', () => {
     vi.stubGlobal('localStorage', storage)
     const { state, root } = mount({ recordId: null, compare: compare(), savedReview: null })
     expect(textContent(root)).toContain('需登录保存')
+    state.notesOpen = true
+    await flush()
     expect(textContent(root)).toContain('多模型审阅')
     await state.save('draft')
     await state.save('version')

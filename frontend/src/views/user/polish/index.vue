@@ -1359,13 +1359,13 @@ const {
 .result-card { border-color: #e3e9f1; border-radius: 12px; box-shadow: 0 3px 12px rgba(31, 55, 84, .04); }
 .card-head { background: var(--surface-soft); }
 
-@media (max-width: 1180px) {
+@media (max-width: 1080px) {
   .style-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .panel-left { min-width: 450px; }
   .result-panel-title .result-hint { display: none; }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .polish-page { height: auto; min-height: 0; overflow: visible; }
   .polish-layout { flex-direction: column; height: auto; }
   .panel-left, .panel-right { width: 100%; max-width: 100%; min-width: 0; padding: 16px; }
@@ -1374,7 +1374,7 @@ const {
   .card-body { max-height: none; }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 768px) {
   .style-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .page-header .strategy-count, .selected-style-preview span:last-child { display: none; }
   .textarea-wrapper :deep(.el-textarea__inner) { min-height: 220px !important; }

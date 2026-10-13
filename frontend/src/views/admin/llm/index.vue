@@ -984,8 +984,8 @@ function handleCommand(cmd: string, item: LLMConfigItem) {
 }
 
 .model-caption { color:var(--color-text-secondary); font-size:13px; margin:8px 0 24px; line-height:1.8; }.model-summary { display:grid; grid-template-columns:1fr 1fr 2fr; gap:16px; margin-bottom:24px; }.model-summary > div { background:var(--surface); border:1px solid var(--color-border); border-radius:12px; padding:20px; }.model-summary small { display:block; color:var(--color-text-secondary); font-size:12px; margin-bottom:12px; }.model-summary strong { font-size:26px; color:var(--color-text); }.model-summary .default-name { font-size:18px; overflow-wrap:anywhere; }.model-filters { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:20px; }.model-filters .el-input { width:320px; max-width:100%; }.model-filters .el-select { width:140px; }.top-bar { flex-wrap:wrap; gap:16px; }.top-bar > div:last-child { flex-wrap:wrap; }.config-card { box-shadow:none; }.config-card.active-card { border-color:var(--color-primary); }
-@media(max-width:600px) { .model-summary { grid-template-columns:1fr 1fr; gap:10px; }.model-summary > div:last-child { grid-column:1/-1; }.model-filters .el-input { width:100%; }.config-grid { grid-template-columns:1fr; } }
+@media(max-width:768px) { .model-summary { grid-template-columns:1fr 1fr; gap:10px; }.model-summary > div:last-child { grid-column:1/-1; }.model-filters .el-input { width:100%; }.config-grid { grid-template-columns:1fr; } }
 
 .top-bar > div:first-child { min-width:0; }.top-bar :deep(.el-tag) { max-width:100%; height:auto; white-space:normal; }.top-bar :deep(.el-tag__content) { overflow-wrap:anywhere; white-space:normal; }
-@media(max-width:600px) { .top-bar > div:first-child { display:flex; flex-direction:column; align-items:flex-start; gap:8px; }.top-bar :deep(.el-tag) { margin-left:0 !important; line-height:1.6; } }
+@media(max-width:768px) { .top-bar > div:first-child { display:flex; flex-direction:column; align-items:flex-start; gap:8px; }.top-bar :deep(.el-tag) { margin-left:0 !important; line-height:1.6; } }
 </style>
