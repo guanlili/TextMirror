@@ -92,6 +92,9 @@ class ProofreadCoverage(BaseModel):
     total_chunks: int = Field(..., ge=0)
     completed_chunks: int = Field(..., ge=0)
     failed_chunks: List[FailedProofreadChunk] = Field(default_factory=list)
+    person_consistency_status: Optional[Literal["complete", "failed"]] = Field(
+        None, exclude_if=lambda value: value is None, description="全文人物指代核对状态；未触发时省略",
+    )
 
 
 class ProofreadIssue(BaseModel):

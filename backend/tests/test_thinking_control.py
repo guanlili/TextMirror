@@ -61,6 +61,15 @@ async def test_kimi_k3_omits_temperature(captured_posts):
     assert "temperature" not in captured_posts[0]["json"]
 
 
+async def test_kimi_k3_omits_qwen_thinking_dialect(captured_posts):
+    await _provider("qwen", model="kimi-k3").chat(
+        [{"role": "user", "content": "hi"}], thinking=False,
+    )
+    payload = captured_posts[0]["json"]
+    assert "enable_thinking" not in payload
+    assert "thinking" not in payload
+
+
 def test_kimi_k3_stream_payload_omits_temperature():
     payload = _provider("qwen", model="kimi-k3")._build_chat_payload(
         messages=[{"role": "user", "content": "hi"}],

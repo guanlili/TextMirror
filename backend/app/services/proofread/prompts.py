@@ -47,7 +47,7 @@ def build_system_prompt(domain: str,
                         user_words: Optional[Dict[str, List[Dict]]] = None,
                         domain_rules: Optional[str] = None) -> str:
     """构建系统 Prompt,包含领域专业规则、全局词库和用户个性化词库"""
-    from .constants import PROOFREAD_SYSTEM_PROMPT
+    from .constants import NUMERIC_REASONING_RULES, PERSON_REFERENCE_RULES, PROOFREAD_SYSTEM_PROMPT
 
     domain_str = DOMAIN_MAP.get(domain, "通用")
 
@@ -64,4 +64,4 @@ def build_system_prompt(domain: str,
         domain=domain_str,
         domain_rules=domain_rules,
         global_words_section=global_words_section,
-    )
+    ) + "\n" + PERSON_REFERENCE_RULES + "\n" + NUMERIC_REASONING_RULES

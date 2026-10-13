@@ -127,6 +127,19 @@ async def test_pending_unlocated_and_sensitive_single_deletion(client, owner):
     assert response.json()["modified_text"] == "甲😀错词，乙尾"
 
 
+async def test_manual_warning_does_not_share_sensitive_deletion_state(client, owner):
+    record = await record_for(owner)
+    url = f"/api/v1/history/{record.id}/review"
+    response = await client.put(url, json={"revision": 0, "issues": [
+        issue(type="sensitive", suggestion=""),
+        issue(type="logic", suggestion="", _accepted=False, _ignored=False),
+    ]})
+    assert response.status_code == 200, response.text
+    assert response.json()["modified_text"] == "甲😀错词，乙尾"
+    restored = (await client.get(url)).json()
+    assert [item["_accepted"] for item in restored["issues"]] == [True, False]
+
+
 async def test_shared_patch_from_multiple_issue_types_applied_once(client, owner):
     record = await record_for(owner)
     response = await client.put(f"/api/v1/history/{record.id}/review", json={"revision": 0, "issues": [

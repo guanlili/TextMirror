@@ -5,6 +5,16 @@
     aria-label="未完成的审校范围"
   >
     <el-alert
+      v-if="coverage.person_consistency_status === 'failed'"
+      type="warning"
+      :closable="false"
+      show-icon
+      title="全文人物指代核对未完成"
+    >
+      <p>系统仍会拦截无依据的性别改写，但尚不能确认全文人物指代一致；请人工核对，或返回编辑后重新审校全文。</p>
+    </el-alert>
+    <el-alert
+      v-if="coverage.failed_chunks.length"
       type="warning"
       :closable="false"
       show-icon
@@ -13,7 +23,10 @@
       <p>已完成 {{ coverage.completed_chunks }}/{{ coverage.total_chunks }} 段；下列范围的 AI 检查未完成，已发现的问题和已采纳的修改会保留。</p>
       <p>补查仅发送失败段（包含少量前文），每段按一次普通审校计入额度。</p>
     </el-alert>
-    <div class="coverage-actions">
+    <div
+      v-if="coverage.failed_chunks.length"
+      class="coverage-actions"
+    >
       <el-button
         type="warning"
         plain

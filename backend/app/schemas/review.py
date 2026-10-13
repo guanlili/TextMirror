@@ -53,14 +53,15 @@ class ReviewCoverage(BaseModel):
     total_chunks: int = Field(ge=0, le=100000, strict=True)
     completed_chunks: int = Field(ge=0, le=100000, strict=True)
     failed_chunks: list[FailedChunk] = Field(default_factory=list, max_length=5000)
+    person_consistency_status: Literal["complete", "failed"] | None = Field(None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def validate_counts(self):
         if self.completed_chunks + len(self.failed_chunks) != self.total_chunks:
             raise ValueError("覆盖统计与失败分片数不一致")
-        expected = "partial" if self.failed_chunks else "complete"
+        expected = "partial" if self.failed_chunks or self.person_consistency_status == "failed" else "complete"
         if self.status != expected:
-            raise ValueError("覆盖状态与失败分片不一致")
+            raise ValueError("覆盖状态与未完成检查不一致")
         indices = [chunk.chunk_index for chunk in self.failed_chunks]
         if len(set(indices)) != len(indices) or any(i >= self.total_chunks for i in indices):
             raise ValueError("失败分片序号重复或越界")

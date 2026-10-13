@@ -22,6 +22,7 @@ from .locate import (
     verify_llm_issues,
 )
 from .parsing import parse_proofread_result
+from .person_reference import check_person_consistency, filter_gender_inferences, needs_person_consistency
 from .prompts import build_system_prompt
 from .scan import merge_issues, scan_words_deterministic
 from .self_check import _needs_self_check, self_check_pass
@@ -175,9 +176,12 @@ async def proofread_text(
             if chunk_cache:
                 cached = await asyncio.to_thread(chunk_cache.get_chunk, idx, chunk_text_hash)
                 if cached is not None:
-                    issues = cached["issues"]
+                    issues = filter_gender_inferences(cached["issues"])
                     for issue in issues:
                         issue["chunk_index"] = idx
+                    issues = filter_gender_inferences(locate_issues(
+                        text, verify_llm_issues(text, issues, chunk_spans), chunk_spans,
+                    ))
                     usage = cached.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
                     done_chunks += 1
                     streamed_issue_count += len(issues)
@@ -203,9 +207,12 @@ async def proofread_text(
                 thinking=deep,
                 timeout=chunk_timeout,
             )
-            issues = parse_proofread_result(response.content)
+            issues = filter_gender_inferences(parse_proofread_result(response.content))
             for issue in issues:
                 issue["chunk_index"] = idx
+            issues = filter_gender_inferences(locate_issues(
+                text, verify_llm_issues(text, issues, chunk_spans), chunk_spans,
+            ))
             done_chunks += 1
             streamed_issue_count += len(issues)
             if len(chunks) > 1:
@@ -226,6 +233,13 @@ async def proofread_text(
             return issues, response.usage
 
     try:
+        if needs_person_consistency(text):
+            _report_progress(on_progress, 2, "正在核对全文人物指代一致性...")
+            person_issues, person_usage, person_complete = await check_person_consistency(text, provider)
+            coverage["person_consistency_status"] = "complete" if person_complete else "failed"
+            scanned_issues.extend(person_issues)
+            for key in total_usage:
+                total_usage[key] += person_usage.get(key, 0)
         tasks = [_process_chunk(i, c) for i, c in enumerate(chunks)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for idx, r in enumerate(results):
@@ -245,7 +259,7 @@ async def proofread_text(
 
         failed_chunks = len(coverage["failed_chunks"])
         coverage["completed_chunks"] = len(chunks) - failed_chunks
-        coverage["status"] = "partial" if failed_chunks else "complete"
+        coverage["status"] = "partial" if failed_chunks or coverage.get("person_consistency_status") == "failed" else "complete"
         # 全失败保留既有失败/退款语义，不暴露 provider 异常细节。
         if failed_chunks == len(chunks):
             raise ModelProofreadError(coverage, actual_config_id)
