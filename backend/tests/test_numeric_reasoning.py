@@ -227,6 +227,15 @@ def test_all_domains_get_numeric_rules():
         assert NUMERIC_REASONING_RULES in build_system_prompt(domain)
 
 
+def test_prompt_injects_today_date_anchor():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    prompt = build_system_prompt("general")
+    assert f"今天的日期：{today.year}年{today.month}月{today.day}日" in prompt
+    assert "不要换算为绝对日期并改写" in prompt
+
+
 def test_unverified_model_average_is_not_used_for_team_data():
     finding = suggestion("累计服务66000小时", "", type="logic", explanation="5年累计66000小时约日均36小时，远超单人合理时长")
     assert protect_numeric_suggestions([finding]) == []
