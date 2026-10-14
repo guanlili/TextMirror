@@ -222,7 +222,7 @@ async def test_time_budget_cancels_model_and_apply_refunds_once_before_next_task
     async def slow_model(**kwargs):
         events.append("started")
         try:
-            await asyncio.sleep(1)
+            await asyncio.sleep(3)
             return RESULT
         except asyncio.CancelledError:
             events.append("cancelled")
@@ -232,7 +232,8 @@ async def test_time_budget_cancels_model_and_apply_refunds_once_before_next_task
             events.append("cleaned")
 
     state.engine.side_effect = slow_model
-    monkeypatch.setattr(worker, "_DOCUMENT_TIME_BUDGET_S", 0.25)
+    # 预算给足 CI 慢机调度余量（远小于模型休眠即可，语义不变）
+    monkeypatch.setattr(worker, "_DOCUMENT_TIME_BUDGET_S", 1.0)
     result = worker.async_proofread_document.apply(args=(task.id,), task_id=task.task_id, throw=False)
     assert result.state == "FAILURE"
     assert isinstance(result.result, TimeoutError)
