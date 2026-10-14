@@ -13,9 +13,9 @@ export interface SiteConfig {
   quick_login_enabled?: string
 }
 
-/** 获取站点公开配置（无需登录） */
+/** 获取站点公开配置（无需登录）。短超时：后端不可达时快速降级默认值，避免导航守卫长挂白屏 */
 export function getSiteInfoApi(): Promise<SiteConfig> {
-  return request.get('/site/info')
+  return request.get('/site/info', { timeout: 8000 })
 }
 
 /** 管理员获取站点配置 */
