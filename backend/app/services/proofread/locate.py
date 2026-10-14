@@ -5,6 +5,7 @@ from loguru import logger
 
 from .chunking import ChunkSpan
 from .constants import _SELF_CHECK_TEXT_LIMIT
+from .entity_guard import protect_entity_suggestions
 from .numeric_reasoning import protect_numeric_suggestions
 from .person_reference import filter_gender_inferences
 
@@ -161,7 +162,7 @@ def verify_llm_issues(text: str, issues: List[Dict[str, Any]],
     verified: List[Dict[str, Any]] = []
     fuzzy_fixed = 0
 
-    for issue in protect_numeric_suggestions(filter_gender_inferences(issues)):
+    for issue in protect_entity_suggestions(text, protect_numeric_suggestions(filter_gender_inferences(issues))):
         issue = dict(issue)
         if issue.get("source") in ("dict_scan", "consistency", "format_rule"):
             verified.append(issue)
