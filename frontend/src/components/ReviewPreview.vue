@@ -72,8 +72,8 @@ watch(() => [props.activeIndex, previewHtml.value], async () => {
 .preview-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 2; }
 .formatted-original { overflow-wrap: anywhere; overflow-x: auto; }
 .preview-text :deep(mark) { padding: 2px 1px; border-radius: 3px; color: inherit; }
-.preview-text :deep(.hl-error) { background: #fee2e2; color: #7f1d1d; }
-.preview-text :deep(.hl-warning) { background: #fef3c7; color: #78350f; }
-.preview-text :deep(.hl-info) { background: #dbeafe; color: #1e3a8a; }
-.preview-text :deep(.is-hover) { outline: 2px solid #f59e0b; font-weight: 600; }
+.preview-text :deep(.hl-error) { background: var(--color-danger-soft); color: var(--color-danger-soft-text); }
+.preview-text :deep(.hl-warning) { background: var(--color-warning-soft); color: var(--color-warning-soft-text); }
+.preview-text :deep(.hl-info) { background: var(--color-primary-soft); color: var(--color-primary-soft-text); }
+.preview-text :deep(.is-hover) { outline: 2px solid var(--color-warning); font-weight: 600; }
 </style>

@@ -371,19 +371,19 @@ onMounted(() => {
     align-items: center;
     gap: 20px;
     padding-bottom: 20px;
-    border-bottom: 1px solid #f0f0f0;
+    border-bottom: 1px solid var(--color-border);
   }
 
   .avatar-info {
     .user-name {
       font-size: 20px;
       font-weight: 600;
-      color: #333;
+      color: var(--color-text);
       margin-bottom: 4px;
     }
     .user-dept {
       font-size: 14px;
-      color: #666;
+      color: var(--color-text-secondary);
       margin-bottom: 6px;
     }
   }
@@ -402,12 +402,12 @@ onMounted(() => {
 
   .meta-label {
     font-size: 12px;
-    color: #999;
+    color: var(--color-text-tertiary);
   }
 
   .meta-value {
     font-size: 14px;
-    color: #333;
+    color: var(--color-text);
   }
 }
 
@@ -422,7 +422,7 @@ onMounted(() => {
 
 .form-tip {
   font-size: 12px;
-  color: #999;
+  color: var(--color-text-tertiary);
   margin-top: 4px;
 }
 

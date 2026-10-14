@@ -133,6 +133,14 @@ describe('serializeReviewDraft', () => {
     expect(serializeReviewDraft({ ...state, depth: 'deep' })).not.toBe(capture)
   })
 
+  it('人物全文核对状态变化也标记为未保存', () => {
+    const coverage = { status: 'partial' as const, total_chunks: 1, completed_chunks: 0,
+      failed_chunks: [{ chunk_index: 0, start: 0, end: 5, text: source, error_code: 'MODEL_ERROR' }],
+      person_consistency_status: 'failed' as const }
+    const capture = serializeReviewDraft({ ...state, coverage })
+    expect(serializeReviewDraft({ ...state, coverage: { ...coverage, person_consistency_status: 'complete' } })).not.toBe(capture)
+  })
+
   function compare(): ReviewCompareState {
     return { results: [1, 2].map(id => ({
       config_id: id, config_name: `模型${id}`, model: `model-${id}`, domain: 'general', depth: 'standard',

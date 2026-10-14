@@ -104,6 +104,7 @@ declare module 'vue' {
     ProfessionalRules: typeof import('./components/ProfessionalRules.vue')['default']
     ProofreadCoverage: typeof import('./components/ProofreadCoverage.vue')['default']
     ProofreadEntry: typeof import('./components/ProofreadEntry.vue')['default']
+    ProofreadOptions: typeof import('./components/ProofreadOptions.vue')['default']
     QualityFeedbackAdmin: typeof import('./components/QualityFeedbackAdmin.vue')['default']
     QualityFeedbackDialog: typeof import('./components/QualityFeedbackDialog.vue')['default']
     Reading: typeof import('@element-plus/icons-vue')['Reading']

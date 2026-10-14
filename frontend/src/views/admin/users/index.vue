@@ -102,7 +102,7 @@
           width="170"
         >
           <template #default="{ row }">
-            <span style="font-size: 12px; color: #999;">{{ row.created_at ? new Date(row.created_at).toLocaleString('zh-CN') : '-' }}</span>
+            <span style="font-size: 12px; color: var(--color-text-tertiary);">{{ row.created_at ? new Date(row.created_at).toLocaleString('zh-CN') : '-' }}</span>
           </template>
         </el-table-column>
         <el-table-column
@@ -228,7 +228,7 @@
             clearable
             placeholder="留空不限"
           />
-          <div style="font-size: 12px; color: #999; margin-top: 4px;">
+          <div style="font-size: 12px; color: var(--color-text-tertiary); margin-top: 4px;">
             留空表示不限次数
           </div>
         </el-form-item>

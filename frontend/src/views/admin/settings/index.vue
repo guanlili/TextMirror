@@ -56,11 +56,11 @@
         </el-form-item>
         <el-form-item label="游客模式">
           <el-switch v-model="guestModeOn" />
-          <span style="font-size: 12px; color: #999; margin-left: 12px;">关闭后所有功能需登录使用，适合企业内部部署</span>
+          <span style="font-size: 12px; color: var(--color-text-tertiary); margin-left: 12px;">关闭后所有功能需登录使用，适合企业内部部署</span>
         </el-form-item>
         <el-form-item label="一键登录">
           <el-switch v-model="quickLoginOn" />
-          <span style="font-size: 12px; color: #999; margin-left: 12px;">开启后登录页显示「一键管理员 / 体验账号」按钮（内网演示便利；一键管理员拥有全部权限，公开网络环境请关闭）</span>
+          <span style="font-size: 12px; color: var(--color-text-tertiary); margin-left: 12px;">开启后登录页显示「一键管理员 / 体验账号」按钮（内网演示便利；一键管理员拥有全部权限，公开网络环境请关闭）</span>
         </el-form-item>
         <el-form-item label="浏览器图标">
           <div class="favicon-config">
@@ -112,15 +112,27 @@
             上传后可在左侧预览效果，点击“保存品牌设置”后生效
           </div>
         </el-form-item>
+        <el-alert
+          v-if="siteConfigLoadError"
+          title="品牌配置加载失败，请刷新页面重试。为避免误把默认值保存到全站，当前已禁用保存。"
+          type="error"
+          :closable="false"
+          show-icon
+          class="settings-alert"
+        />
         <el-form-item>
           <el-button
             type="primary"
             :loading="saving"
+            :disabled="!siteConfigLoaded || Boolean(siteConfigLoadError)"
             @click="saveSiteConfig"
           >
             保存品牌设置
           </el-button>
-          <el-button @click="resetSiteConfig">
+          <el-button
+            :disabled="!siteConfigLoaded"
+            @click="resetSiteConfig"
+          >
             重置
           </el-button>
         </el-form-item>
@@ -134,7 +146,7 @@
       </template>
       <el-form
         label-width="160px"
-        style="max-width: 600px;"
+        style="max-width: 768px;"
       >
         <el-form-item label="版本号">
           <el-input
@@ -150,7 +162,7 @@
         </el-form-item>
         <el-form-item label="维护模式">
           <el-switch v-model="settings.maintenance_mode" />
-          <span style="font-size: 12px; color: #999; margin-left: 12px;">开启后仅管理员可访问</span>
+          <span style="font-size: 12px; color: var(--color-text-tertiary); margin-left: 12px;">开启后仅管理员可访问</span>
         </el-form-item>
         <el-form-item>
           <el-button
@@ -172,7 +184,7 @@
       </template>
       <el-form
         label-width="160px"
-        style="max-width: 600px;"
+        style="max-width: 768px;"
         :model="securitySettings"
       >
         <el-form-item label="新用户初始密码">
@@ -248,8 +260,10 @@ import { getErrorDetail } from '@/utils/request'
 const userStore = useUserStore()
 const siteStore = useSiteStore()
 const saving = ref(false)
+const siteConfigLoaded = ref(false)
+const siteConfigLoadError = ref('')
 
-// 预设图标（内嵌SVG，主题色 #0056b3，不依赖外部服务）
+// 预设图标（内嵌SVG，品牌蓝，不依赖外部服务）
 const faviconPresets = [
   {
     name: '盾牌校验',
@@ -340,6 +354,11 @@ onMounted(async () => {
   if (siteRes.status === 'fulfilled') {
     Object.assign(siteConfig, siteRes.value)
     originalSiteConfig = { ...siteRes.value }
+    siteConfigLoaded.value = true
+    siteConfigLoadError.value = ''
+  } else {
+    siteConfigLoaded.value = false
+    siteConfigLoadError.value = getErrorDetail(siteRes.reason) || '品牌配置加载失败'
   }
   if (basicRes.status === 'fulfilled') {
     Object.assign(settings, basicRes.value)
@@ -355,6 +374,10 @@ onMounted(async () => {
 
 /** 保存品牌设置 */
 async function saveSiteConfig() {
+  if (!siteConfigLoaded.value || siteConfigLoadError.value) {
+    ElMessage.error('品牌配置尚未成功加载，请刷新页面后再保存')
+    return
+  }
   if (!siteConfig.platform_name?.trim()) {
     ElMessage.warning('平台名称不能为空')
     return
@@ -416,7 +439,7 @@ async function handleClean(type: string) {
 <style scoped lang="scss">
 .form-tip {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--color-text-tertiary);
   margin-top: 4px;
   line-height: 1.4;
 }
@@ -431,12 +454,12 @@ async function handleClean(type: string) {
 .favicon-preview {
   width: 48px;
   height: 48px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f9fafb;
+  background: var(--surface-soft);
   flex-shrink: 0;
 
   .favicon-img {
@@ -462,7 +485,7 @@ async function handleClean(type: string) {
 
   .upload-tip {
     font-size: 12px;
-    color: #9ca3af;
+    color: var(--color-text-tertiary);
   }
 }
 
@@ -478,21 +501,21 @@ async function handleClean(type: string) {
 
   .preset-label {
     font-size: 13px;
-    color: #6b7280;
+    color: var(--color-text-secondary);
     white-space: nowrap;
   }
 
   .preset-item {
     width: 36px;
     height: 36px;
-    border: 2px solid #e5e7eb;
+    border: 2px solid var(--color-border);
     border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     transition: all 0.2s;
-    background: #fff;
+    background: var(--surface);
 
     img {
       width: 24px;
@@ -500,18 +523,18 @@ async function handleClean(type: string) {
     }
 
     &:hover {
-      border-color: #93c5fd;
+      border-color: var(--el-color-primary-light-7);
     }
 
     &.is-active {
-      border-color: #0056b3;
-      background: #eff6ff;
+      border-color: var(--color-primary-hover);
+      background: var(--color-primary-soft);
       box-shadow: 0 0 0 2px rgba(0, 86, 179, 0.1);
     }
   }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 768px) {
   .admin-settings :deep(.el-form-item) {
     flex-direction: column;
     align-items: stretch;

@@ -49,6 +49,13 @@ _THINKING_DIALECTS: Dict[str, Dict[bool, dict]] = {
     },
 }
 
+# 部分 OpenAI 兼容网关虽然走 /chat/completions，但个别模型不接受部分可选参数。
+# 阿里百炼的 kimi-k3 会对任意 temperature 返回 400；同类模型级限制也不应继续注入
+# qwen 方言的 enable_thinking，避免修完 temperature 后在审校/自检链路再次 400。
+_UNSUPPORTED_PARAMS_BY_MODEL = {
+    "kimi-k3": {"temperature", "thinking"},
+}
+
 
 class OpenAICompatProvider(BaseLLMProvider):
     """
@@ -124,6 +131,27 @@ class OpenAICompatProvider(BaseLLMProvider):
             pool[key] = client
         return client
 
+    def _supports_param(self, param: str) -> bool:
+        return param not in _UNSUPPORTED_PARAMS_BY_MODEL.get(self.model.lower(), set())
+
+    def _build_chat_payload(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: Optional[int],
+        stream: bool,
+    ) -> Dict[str, object]:
+        payload: Dict[str, object] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": stream,
+        }
+        if self._supports_param("temperature"):
+            payload["temperature"] = temperature
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
+        return payload
+
     async def chat(
         self,
         messages: List[Dict[str, str]],
@@ -141,24 +169,27 @@ class OpenAICompatProvider(BaseLLMProvider):
                          供思考模式等长耗时场景按请求放宽，不影响共享连接池
         :param response_format: 显式指定响应格式，None 不发送该参数；供应商拒绝时不降级
         """
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": False,
-        }
-        if max_tokens:
-            payload["max_tokens"] = max_tokens
+        payload = self._build_chat_payload(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=False,
+        )
         if response_format is not None:
             payload["response_format"] = response_format
         if thinking is not None:
-            dialect = _THINKING_DIALECTS.get(self.provider_slug or "")
-            if dialect is None:
+            if not self._supports_param("thinking"):
                 logger.debug(
-                    f"[{self.provider_name}] 供应商 {self.provider_slug} 不支持思考模式参数，按模型默认执行"
+                    f"[{self.provider_name}] 模型 {self.model} 不支持思考模式参数，按模型默认执行"
                 )
             else:
-                payload.update(dialect[thinking])
+                dialect = _THINKING_DIALECTS.get(self.provider_slug or "")
+                if dialect is None:
+                    logger.debug(
+                        f"[{self.provider_name}] 供应商 {self.provider_slug} 不支持思考模式参数，按模型默认执行"
+                    )
+                else:
+                    payload.update(dialect[thinking])
 
         # 若已验证过 endpoint，则直接复用，避免每次都试探
         endpoints = (
@@ -240,16 +271,14 @@ class OpenAICompatProvider(BaseLLMProvider):
         流式调用 Chat Completions API，逐段 yield 文本增量
         失败时抛出 RuntimeError（与 chat() 一致的错误语义）
         """
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": True,
-        }
+        payload = self._build_chat_payload(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
         if self.provider_slug in {"openai", "deepseek", "qwen", "volcengine"}:
             payload["stream_options"] = {"include_usage": True}
-        if max_tokens:
-            payload["max_tokens"] = max_tokens
 
         endpoints = (
             [self._verified_endpoint] if self._verified_endpoint else self._endpoints

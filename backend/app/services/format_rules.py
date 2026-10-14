@@ -27,10 +27,6 @@ _PHONE_BROKEN_RE = re.compile(r"(?<!\d)(1[3-9]\d{7,10}|\d{9,10}|\d{12})(?!\d)")
 # 身份证 18 位（含校验位 X）
 _ID_CARD_RE = re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)")
 _ID_CARD_15_RE = re.compile(r"(?<!\d)\d{15}(?!\d)")
-# 金额冗余单位：数字+万元（除非数字含小数点表示万的具体值域外）
-# 「10000万元」应为「1亿元」或「100000000元」；「3000万元」是正常表达（3000个万）
-# 高置信度场景仅限：数字本身以万为单位量级过大（如 1万万）——实际常见错误是「X万元」X≥10000
-_AMOUNT_WAN_RE = re.compile(r"(\d{4,})万元")
 # 编号样式：中文（一、二、）与阿拉伯（1. 2.）在同文混用（按行首统计）
 _SEQ_CN_RE = re.compile(r"^[（(]?[一二三四五六七八九十]+[)、.．]", re.MULTILINE)
 _SEQ_AR_RE = re.compile(r"^[（(]?\d+[）、.．]", re.MULTILINE)
@@ -168,20 +164,6 @@ def check_id_cards(text: str) -> List[Dict[str, Any]]:
     return issues
 
 
-def check_amounts(text: str) -> List[Dict[str, Any]]:
-    """金额冗余量级：X万元 中 X≥10000（如 10000万元 = 1亿元），几乎必是单位用错。"""
-    issues: List[Dict[str, Any]] = []
-    for m in _AMOUNT_WAN_RE.finditer(text):
-        val = int(m.group(1))
-        if val >= 10000:
-            issues.append(_issue(
-                m.group(0), m.group(0),
-                f"金额量级冗余：{val}万元建议写作 {val // 10000}亿元（或直接用完整数字）", "warning",
-                start=m.start(), end=m.end(),
-            ))
-    return issues
-
-
 def check_sequence_style(text: str) -> List[Dict[str, Any]]:
     """同级列表编号样式混用：（一）（二）与 1. 2. 混用。两组各≥2 项才报。"""
     issues: List[Dict[str, Any]] = []
@@ -248,7 +230,6 @@ def check_format_rules(text: str) -> List[Dict[str, Any]]:
         issues.extend(check_dates(text))
         issues.extend(check_phones(text))
         issues.extend(check_id_cards(text))
-        issues.extend(check_amounts(text))
         issues.extend(check_sequence_style(text))
         issues.extend(check_confusable_collocations(text))
         issues.extend(check_halfwidth_punct(text))

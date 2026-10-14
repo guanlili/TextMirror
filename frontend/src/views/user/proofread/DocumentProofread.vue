@@ -66,45 +66,24 @@
               更换文件
             </el-button>
           </div>
-          <ProfessionalRules v-model="domain" />
-          <div
-            v-if="modelOptions.length > 1"
-            class="setting-row"
+          <el-button
+            type="primary"
+            size="large"
+            :loading="uploading || proofreading"
+            @click="handleStartProofread"
           >
-            <span class="setting-label">校对模型</span>
-            <el-select
-              v-model="selectedModelId"
-              size="default"
-              style="max-width: 320px;"
-              placeholder="默认当前模型"
-              aria-describedby="document-model-help"
-            >
-              <el-option
-                v-for="m in modelOptions"
-                :key="m.id"
-                :label="m.is_active ? `${m.name}（${m.model}）· 当前` : `${m.name}（${m.model}）`"
-                :value="m.id"
-              />
-            </el-select>
-            <p
-              id="document-model-help"
-              class="setting-help"
-            >
-              默认使用标记“当前”的模型；不同模型的速度、效果和用量不同。
-            </p>
-          </div>
-          <div class="start-row">
-            <el-button
-              class="start-btn"
-              type="primary"
-              size="large"
-              :loading="uploading || proofreading"
-              @click="handleStartProofread"
-            >
-              <el-icon><Edit /></el-icon>
-              {{ statusText }}
-            </el-button>
-          </div>
+            <el-icon><Edit /></el-icon>
+            {{ statusText }}
+          </el-button>
+          <ProofreadOptions
+            v-model:domain="domain"
+            v-model:depth="depth"
+            v-model:model-id="selectedModelId"
+            :models="modelOptions"
+            :allow-modes="false"
+            :disabled="uploading || proofreading"
+            class="document-options"
+          />
         </div>
       </el-card>
     </div>
@@ -126,8 +105,8 @@
               description="解析文档文本"
             />
             <el-step
-              title="AI 校对"
-              description="大模型逐片检查"
+              :title="depth === 'quick' ? '规则检查' : '内容审校'"
+              :description="depth === 'quick' ? '检查词库、格式及已有规则' : '检查文字与文内一致性'"
             />
             <el-step
               title="整理结果"
@@ -318,7 +297,7 @@
                   label="错别字"
                   value="typo"
                 >
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;">
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-danger);">
                     <EditPen />
                   </el-icon>错别字
                 </el-option>
@@ -326,7 +305,7 @@
                   label="语法错误"
                   value="grammar"
                 >
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#e6a23c;">
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-warning);">
                     <Reading />
                   </el-icon>语法错误
                 </el-option>
@@ -334,7 +313,7 @@
                   label="标点符号"
                   value="punctuation"
                 >
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#909399;">
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-info);">
                     <Operation />
                   </el-icon>标点符号
                 </el-option>
@@ -342,7 +321,7 @@
                   label="表达优化"
                   value="style"
                 >
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#409eff;">
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-primary);">
                     <MagicStick />
                   </el-icon>表达优化
                 </el-option>
@@ -350,7 +329,7 @@
                   label="敏感词"
                   value="sensitive"
                 >
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#f56c6c;">
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-danger);">
                     <Warning />
                   </el-icon>敏感词
                 </el-option>
@@ -358,7 +337,7 @@
                   label="逻辑问题"
                   value="logic"
                 >
-                  <el-icon style="vertical-align:middle;margin-right:6px;color:#67c23a;">
+                  <el-icon style="vertical-align:middle;margin-right:6px;color:var(--color-success);">
                     <Connection />
                   </el-icon>逻辑问题
                 </el-option>
@@ -408,7 +387,7 @@
 </template>
 
 <script setup lang="ts">
-import ProfessionalRules from '@/components/ProfessionalRules.vue'
+import ProofreadOptions from '@/components/ProofreadOptions.vue'
 import ProofreadEntry from '@/components/ProofreadEntry.vue'
 import IssueCard from '@/components/IssueCard.vue'
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
@@ -525,9 +504,9 @@ watch([filterType, issues], () => { visibleCount.value = ISSUES_PAGE_SIZE })
 const statusText = computed(() => {
   if (cancelling.value) return '正在取消...'
   if (uploading.value) return '上传中...'
-  if (proofreading.value) return 'AI 校对中...'
+  if (proofreading.value) return depth.value === 'quick' ? '规则检查中...' : '审校中...'
   if (step.value === 'processing') return '正在恢复审阅...'
-  return '开始校对'
+  return '开始审校'
 })
 
 const sourceCharacters = computed(() => Array.from(sourceText.value))
@@ -1168,18 +1147,6 @@ function resetAll() {
 </script>
 
 <style scoped lang="scss">
-.setting-help {
-  flex-basis: 100%;
-  margin: 0;
-  padding-left: 80px;
-  font-size: 12px;
-  line-height: 1.65;
-  color: var(--color-text-secondary);
-  overflow-wrap: anywhere;
-}
-@media (max-width: 768px) {
-  .setting-help { flex-basis: auto; padding-left: 0; }
-}
 .document-proofread-page {
   max-width: 1400px;
   margin: 0 auto;
@@ -1210,7 +1177,7 @@ function resetAll() {
   }
   .upload-icon {
     font-size: 50px;
-    color: #4a7fce;
+    color: var(--color-primary);
     margin-bottom: 14px;
   }
 }
@@ -1251,28 +1218,8 @@ function resetAll() {
     }
   }
 
-  .setting-row {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    row-gap: 6px;
-    margin-bottom: 12px;
-    .setting-label {
-      width: 80px;
-      font-weight: 500;
-      flex-shrink: 0;
-    }
-  }
-
-  .start-row {
-    display: flex;
-    justify-content: center;
-    padding-top: 6px;
-
-    .start-btn {
-      min-width: 220px;
-    }
-  }
+  .document-options { margin-top: 20px; max-width: 520px; }
+  .file-info span { overflow-wrap: anywhere; min-width: 0; }
 }
 
 .processing-section {
@@ -1401,14 +1348,6 @@ function resetAll() {
 
 /* ===== 移动端响应式 ===== */
 @media (max-width: 768px) {
-  .proofread-settings {
-    .setting-row {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 6px;
-    }
-  }
-
   .result-columns {
     grid-template-columns: 1fr;
     height: auto;
@@ -1430,6 +1369,6 @@ function resetAll() {
 .document-review-heading { margin: 4px 0 24px; }.document-review-heading > span { color: var(--color-primary); font-size: 12px; }.document-review-heading h2 { margin: 10px 0; font-size: 24px; font-weight: 600; }.document-review-heading p { color: var(--color-text-secondary); font-size: 13px; }
 .document-review-tools { border: 1px solid var(--color-border); background: var(--surface); border-radius: 8px; margin-bottom: 10px; }.document-review-tools summary { padding: 13px 16px; cursor: pointer; color: var(--color-text-secondary); font-size: 13px; }
 .result-toolbar { margin-top: 16px; box-shadow: none; border: 1px solid var(--color-border); flex-wrap: wrap; }.result-columns { grid-template-columns: minmax(0,1.35fr) minmax(340px,1fr); }.column-card { box-shadow: none; }
-@media(max-width:1150px) { .result-columns { grid-template-columns: 1fr; height: auto; }.result-columns .column-card { max-height: 650px; } }
-@media(max-width:700px) { .document-review-heading h2 { font-size: 21px; }.upload-section .card-header { flex-wrap: wrap; gap: 12px; } }
+@media(max-width:1080px) { .result-columns { grid-template-columns: 1fr; height: auto; }.result-columns .column-card { max-height: 650px; } }
+@media(max-width:768px) { .document-review-heading h2 { font-size: 21px; }.upload-section .card-header { flex-wrap: wrap; gap: 12px; } }
 </style>

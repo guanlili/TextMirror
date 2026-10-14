@@ -15,7 +15,7 @@ async function loggedOut(page: Page) {
 async function upload(page: Page) {
   await page.goto('/proofread/document')
   await page.locator('input[type=file]').setInputFiles({ name: '浏览器回归.txt', mimeType: 'text/plain', buffer: Buffer.from(source) })
-  await page.getByRole('button', { name: '开始校对', exact: true }).click()
+  await page.getByRole('button', { name: '开始审校', exact: true }).click()
 }
 async function ready(page: Page) {
   await expect(page.locator('.review-preview .preview-text')).toBeVisible()
@@ -27,6 +27,137 @@ async function workspace(page: Page) {
 }
 
 const preview = (page: Page) => page.locator('.review-preview .preview-text')
+
+for (const [name, viewport, isMobile] of [
+  ['桌面', { width: 1280, height: 800 }, false],
+  ['移动', { width: 390, height: 844 }, true],
+] as const) {
+  test.describe(`人物冲突 ${name}`, () => {
+    test.use({ viewport, isMobile, hasTouch: isMobile })
+    test('无建议 warning 仅供人工核对，一键修改不改原文（模拟接口）', async ({ page, scenario }) => {
+      const first = '梁士俊来到会场，她向大家介绍了方案。'
+      const second = '梁士俊再次发言，他补充了执行细节。'
+      const text = `${first}\n\n${second}`
+      const explanation = `人物「梁士俊」指代不一致，需人工核对：①「${first}」；②「${second}」`
+      scenario.review = { ...scenario.review, original_text: text, modified_text: text, issues: [{
+        original: second, suggestion: '', type: 'logic', severity: 'warning', explanation,
+        start: Array.from(`${first}\n\n`).length, end: Array.from(text).length,
+      }] }
+      await page.goto('/proofread/document?review=7')
+      await ready(page)
+      const card = page.locator('.issue-item')
+      await expect(card).toHaveCount(1)
+      await expect(card.locator('.issue-diff .text')).toHaveText(second)
+      await expect(card.locator('.issue-diff .text')).toHaveCSS('text-decoration-line', 'none')
+      await expect(card.locator('.issue-diff')).toHaveCSS('background-image', 'none')
+      await expect(card.locator('.manual-check-label')).toHaveText('需人工核对')
+      await expect(card.locator('.issue-explanation')).toHaveText(explanation)
+      await expect(card.locator('.text-del, .text-add, .arrow-icon')).toHaveCount(0)
+      for (const action of ['仅修改此处', '全文同类', '删除该词']) {
+        await expect(card.getByRole('button', { name: action, exact: true })).toHaveCount(0)
+      }
+      await page.getByRole('button', { name: '一键修改全部', exact: true }).click()
+      await expect(page.getByRole('dialog')).toHaveCount(0)
+      await expect(preview(page)).toHaveText(text)
+      await expect(card).not.toHaveClass(/is-accepted/)
+      expect(scenario.calls.some(call => call.path === '/proofread/feedback')).toBe(false)
+      await card.getByRole('button', { name: '忽略', exact: true }).click()
+      await expect(card).toHaveClass(/is-ignored/)
+      await card.getByRole('button', { name: '撤销', exact: true }).click()
+      await expect(card).not.toHaveClass(/is-ignored/)
+      await expect(preview(page)).toHaveText(text)
+      await workspace(page)
+      await page.getByRole('button', { name: '保存草稿', exact: true }).click()
+      await expect(page.getByRole('status')).toContainText('草稿已保存')
+      expect(scenario.review.modified_text).toBe(text)
+      expect(scenario.review.issues[0]._accepted).toBe(false)
+      await page.reload()
+      await ready(page)
+      await expect(preview(page)).toHaveText(text)
+      await expect(card.locator('.manual-check-label')).toHaveText('需人工核对')
+    })
+    test('人物全文核对失败时明确提示未完成（模拟接口）', async ({ page, scenario }) => {
+      scenario.review = { ...scenario.review, coverage: {
+        status: 'partial', total_chunks: 1, completed_chunks: 1, failed_chunks: [], person_consistency_status: 'failed',
+      } }
+      await page.goto('/proofread/document?review=7')
+      await ready(page)
+      await page.locator('summary').filter({ hasText: '检查覆盖范围' }).click()
+      await expect(page.getByText('全文人物指代核对未完成', { exact: true })).toBeVisible()
+      await expect(page.getByText('系统仍会拦截无依据的性别改写', { exact: false })).toBeVisible()
+      await expect(page.getByRole('button', { name: '补查全部失败段' })).toHaveCount(0)
+      await workspace(page)
+      await page.getByRole('button', { name: '保存草稿', exact: true }).click()
+      await expect(page.getByRole('status')).toContainText('草稿已保存')
+      expect(scenario.review.coverage?.person_consistency_status).toBe('failed')
+    })
+  })
+  test.describe(`数字核验 ${name}`, () => {
+    test.use({ viewport, isMobile, hasTouch: isMobile })
+    for (const mixed of [false, true]) {
+      test(`warning/error无修改按钮，混合错字=${mixed}时仅改错字，保存刷新保留数字（模拟接口）`, async ({ page, scenario }) => {
+        const numericText = '梁士俊志愿服务5年，服务时长6600余小时。\n单位换算：1吨=100千克。'
+        const text = numericText + (mixed ? '\n工做安排。' : '')
+        const expectedText = numericText + (mixed ? '\n工作安排。' : '')
+        const at = (original: string) => {
+          const start = Array.from(text.slice(0, text.indexOf(original))).length
+          return { start, end: start + Array.from(original).length }
+        }
+        const numericIssues = [{
+          original: '6600余小时', suggestion: '', type: 'logic', severity: 'warning', ...at('6600余小时'),
+          explanation: '按每年365天估算：6600 ÷ (5 × 365) ≈ 3.62小时/天；余表示下限，不等于事实错误，需核实个人/团队口径与统计时段。',
+        }, {
+          original: '1吨=100千克', suggestion: '', type: 'logic', severity: 'error', ...at('1吨=100千克'),
+          explanation: '按单位换算：1吨 = 1000千克；100千克不等于1000千克，换算不成立，需人工核对。',
+        }]
+        scenario.review = { ...scenario.review, original_text: text, modified_text: text,
+          issues: [...numericIssues.map(item => ({ ...item, source: 'numeric_rule' })),
+            ...(mixed ? [{ original: '工做', suggestion: '工作', type: 'typo', severity: 'warning', ...at('工做') }] : [])] }
+        const cards = page.locator('.issue-item')
+        const assertNumericCards = async () => {
+          await expect(cards).toHaveCount(mixed ? 3 : 2)
+          for (const [index, item] of numericIssues.entries()) {
+            const card = cards.nth(index)
+            await expect(card.locator('.issue-diff .text')).toHaveText(item.original)
+            await expect(card.locator('.issue-explanation')).toHaveText(item.explanation)
+            await expect(card.locator('.issue-header')).toContainText(index === 0 ? '警告' : '错误')
+            await expect(card.locator('.manual-check-label')).toHaveText('需人工核对')
+            await expect(card.locator('.text-del, .text-add, .arrow-icon')).toHaveCount(0)
+            await expect(card.getByRole('button', { name: /采纳|仅修改此处|全文同类|删除该词/ })).toHaveCount(0)
+            await expect(card).not.toHaveClass(/is-accepted|is-ignored/)
+          }
+        }
+        await page.goto('/proofread/document?review=7')
+        await ready(page)
+        await assertNumericCards()
+        await page.getByRole('button', { name: '一键修改全部', exact: true }).click()
+        if (mixed) {
+          const dialog = page.getByRole('dialog', { name: '一键修改', exact: true })
+          await expect(dialog).toContainText('确认接受全部 1 条修改建议？')
+          await dialog.getByRole('button', { name: '确认', exact: true }).click()
+          await expect(cards.nth(2)).toHaveClass(/is-accepted/)
+        } else {
+          await expect(page.getByRole('dialog')).toHaveCount(0)
+          expect(scenario.calls.some(call => call.path === '/proofread/feedback')).toBe(false)
+        }
+        await expect(preview(page)).toHaveText(expectedText)
+        await workspace(page)
+        await page.getByRole('button', { name: '保存草稿', exact: true }).click()
+        await expect(page.getByRole('status')).toContainText('草稿已保存')
+        expect(scenario.review.modified_text).toBe(expectedText)
+        expect(scenario.review.issues.slice(0, 2)).toMatchObject(numericIssues.map(item => ({ ...item, _accepted: false, _ignored: false })))
+        expect(scenario.review.issues.map(item => !!item._accepted)).toEqual(mixed ? [false, false, true] : [false, false])
+        await page.reload()
+        await ready(page)
+        await expect(preview(page)).toHaveText(expectedText)
+        await assertNumericCards()
+        if (mixed) await expect(cards.nth(2)).toHaveClass(/is-accepted/)
+        expect(scenario.calls.filter(call => call.method === 'PUT' && call.path === '/history/7/review')).toHaveLength(1)
+        expect(scenario.calls.some(call => ['/proofread/text', '/document/proofread/async'].includes(call.path))).toBe(false)
+      })
+    }
+  })
+}
 
 for (const theme of ['dark', 'light']) {
   test(`恢复持久化 ${theme} 主题且不触发脚本安全策略错误`, async ({ page, context, baseURL }) => {
@@ -122,7 +253,7 @@ test('上传被拒后不提交模型任务', async ({ page, scenario }) => {
   scenario.uploadStatus = 413
   await upload(page)
   await expect(page.getByText('文件上传失败，请重试', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '开始校对', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: '开始审校', exact: true })).toBeEnabled()
   expect(scenario.calls.some(call => call.path === '/document/proofread/async')).toBe(false)
 })
 

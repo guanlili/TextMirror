@@ -7,6 +7,8 @@ from .constants import (
     _SELF_CHECK_ERROR_THRESHOLD,
     _SELF_CHECK_MAX_CHUNK_CALLS,
     _SELF_CHECK_TEXT_LIMIT,
+    NUMERIC_REASONING_RULES,
+    PERSON_REFERENCE_RULES,
     SELF_CHECK_PROMPT,
 )
 from .parsing import parse_proofread_result
@@ -110,7 +112,8 @@ async def _run_self_check_call(
     try:
         with usage_operation("self_check"):
             response = await provider.chat(
-                [{"role": "user", "content": prompt}],
+                [{"role": "system", "content": PERSON_REFERENCE_RULES + "\n" + NUMERIC_REASONING_RULES},
+                 {"role": "user", "content": prompt}],
                 temperature=provider.default_temperature,
                 thinking=False,
             )

@@ -5,6 +5,9 @@ from loguru import logger
 
 from .chunking import ChunkSpan
 from .constants import _SELF_CHECK_TEXT_LIMIT
+from .entity_guard import protect_entity_suggestions
+from .numeric_reasoning import protect_numeric_suggestions
+from .person_reference import filter_gender_inferences
 
 
 def _filter_whitelist_issues(issues: List[Dict[str, Any]],
@@ -41,7 +44,7 @@ def _normalize_for_match(s: str) -> str:
 def _check_suggestion_effective(issues: List[Dict[str, Any]], text: str) -> List[Dict[str, Any]]:
     """修正精确分隔符边界；无改动建议不可采纳，扩写仍保留人工核对提示。"""
     checked: List[Dict[str, Any]] = []
-    for issue in issues:
+    for issue in protect_numeric_suggestions(filter_gender_inferences(issues)):
         if issue.get("source") in ("dict_scan", "consistency", "format_rule"):
             checked.append(issue)
             continue
@@ -159,7 +162,7 @@ def verify_llm_issues(text: str, issues: List[Dict[str, Any]],
     verified: List[Dict[str, Any]] = []
     fuzzy_fixed = 0
 
-    for issue in issues:
+    for issue in protect_entity_suggestions(text, protect_numeric_suggestions(filter_gender_inferences(issues))):
         issue = dict(issue)
         if issue.get("source") in ("dict_scan", "consistency", "format_rule"):
             verified.append(issue)
@@ -199,4 +202,4 @@ def verify_llm_issues(text: str, issues: List[Dict[str, Any]],
     if fuzzy_fixed or len(verified) != len(issues):
         dropped = len(issues) - len([i for i in issues if (i.get("original") or "").strip()])
         logger.info(f"[自校验] 模糊对齐 {fuzzy_fixed} 条，丢弃空原文 {dropped} 条，降级 {sum(1 for i in verified if '原文定位失败' in i.get('explanation', ''))} 条")
-    return verified
+    return protect_numeric_suggestions(verified)

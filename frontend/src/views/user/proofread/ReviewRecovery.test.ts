@@ -37,6 +37,7 @@ import * as ReviewComposable from '@/composables/useProofreadReview'
 import * as ReviewUtils from '@/utils/review'
 import * as ReviewVersions from '@/utils/reviewVersions'
 import * as CompareReview from '@/utils/compareReview'
+import * as CompareSummary from '@/utils/compareSummary'
 import * as ProofreadUtils from '@/utils/proofread'
 import * as CollaborationUtils from '@/utils/collaboration'
 import * as Format from '@/utils/format'
@@ -55,7 +56,7 @@ const modules: Record<string, unknown> = {
   '@/api/collaboration': { MAX_COLLABORATION_CHARS: 8000 },
   '@/composables/useProofreadReview': ReviewComposable,
   '@/utils/review': ReviewUtils, '@/utils/reviewVersions': ReviewVersions,
-  '@/utils/compareReview': CompareReview, '@/utils/proofread': ProofreadUtils,
+  '@/utils/compareReview': CompareReview, '@/utils/compareSummary': CompareSummary, '@/utils/proofread': ProofreadUtils,
   '@/utils/collaboration': CollaborationUtils, '@/utils/format': Format,
   '@/stores/user': { useUserStore: () => ({ isLoggedIn: false, hasPermission: () => false }) },
   '@/composables/useCollaboration': { useCollaboration: () => ({
@@ -118,6 +119,7 @@ interface PageState {
   handleProofread(): Promise<void>; handleStartProofread(): Promise<void>; handleReupload(): Promise<void>
   goBack(): Promise<void>; acceptIssue(issue: ReviewIssue): void; markSaved(response: ReviewResponse): void
   handleReviewSaved(response: ReviewResponse): Promise<void>; openDetail(row: { id: number }): Promise<void>
+  handleAcceptAll(): Promise<number>
   continueReview(row: { id: number; type: string }): void
 }
 const cleanup: Array<() => void> = []
@@ -335,6 +337,151 @@ describe('首次普通校对的稳定审阅地址', () => {
     await running
     expect(replace).not.toHaveBeenCalled()
   })
+})
+
+describe('IssueCard 人工核对与修改语义', () => {
+  const first = '梁士俊来到会场，她向大家介绍了方案。'
+  const second = '梁士俊再次发言，他补充了执行细节。'
+  const text = `${first}\n\n${second}`
+  const warning: ReviewIssue = {
+    original: second, suggestion: '', type: 'logic', severity: 'warning',
+    explanation: `人物「梁士俊」指代不一致，需人工核对：①「${first}」；②「${second}」`,
+    start: Array.from(`${first}\n\n`).length, end: Array.from(text).length,
+  }
+  const allNodes = (target: Node): Node[] => [target, ...target.children.flatMap(allNodes)]
+  const byClass = (target: Node, name: string) => allNodes(target)
+    .filter(child => String(child.props.class || '').split(/\s+/).includes(name))
+  async function click(target: Node, label: string) {
+    const button = allNodes(target).find(child => typeof child.props.onClick === 'function' && rendered(child).trim() === label)
+    expect(button, label).toBeDefined()
+    await (button!.props.onClick as () => unknown)()
+    await flush()
+  }
+
+  for (const [name, component] of [['文本', TextPage], ['文档', DocumentPage]] as const) {
+    it(`${name}人物冲突中性显示原句和人工核对，不提供修改动作，一键修改保持全文`, async () => {
+      route.query = { review: '7' }
+      vi.mocked(ReviewApi.getReviewApi).mockResolvedValue({ ...response(), original_text: text, modified_text: text, issues: [warning] })
+      const page = mount(component)
+      await flush()
+      const card = byClass(page.root, 'issue-item')[0]
+      expect(card).toBeDefined()
+      expect(rendered(byClass(card, 'text')[0])).toBe(second)
+      expect(rendered(byClass(card, 'issue-diff')[0])).toContain('需人工核对')
+      expect(byClass(card, 'text-del')).toHaveLength(0)
+      expect(byClass(card, 'text-add')).toHaveLength(0)
+      expect(byClass(card, 'arrow-icon')).toHaveLength(0)
+      expect(rendered(card)).toContain(warning.explanation)
+      expect(rendered(card)).not.toContain('仅修改此处')
+      expect(rendered(card)).not.toContain('全文同类')
+      expect(rendered(card)).not.toContain('删除该词')
+      expect(await page.state.handleAcceptAll()).toBe(0)
+      expect(page.state.currentText).toBe(text)
+      expect(page.state.issues[0]).toMatchObject({ ...warning, _accepted: false, _ignored: false })
+      expect(ProofreadApi.submitIssueFeedbackApi).not.toHaveBeenCalled()
+      expect(ElementPlus.ElMessageBox.confirm).not.toHaveBeenCalled()
+      await click(card, '忽略')
+      expect(page.state.issues[0]._ignored).toBe(true)
+      expect(rendered(card)).toContain('补充原因（可选）')
+      await click(card, '撤销')
+      expect(page.state.issues[0]._ignored).toBe(false)
+      expect(page.state.currentText).toBe(text)
+    })
+
+    it(`${name}普通替换和敏感词删除仍显示对比，一键修改跳过人物冲突`, async () => {
+      route.query = { review: '7' }
+      const mixed = `${text}\n错词禁词，`
+      const start = Array.from(`${text}\n`).length
+      vi.mocked(ReviewApi.getReviewApi).mockResolvedValue({ ...response(), original_text: mixed, modified_text: mixed, issues: [
+        warning, { ...issue(), start, end: start + 2 },
+        { original: '禁词', suggestion: '', type: 'sensitive', severity: 'warning', start: start + 2, end: start + 4 },
+      ] })
+      const page = mount(component)
+      await flush()
+      const cards = byClass(page.root, 'issue-item')
+      for (const card of cards.slice(1)) {
+        expect(byClass(card, 'text-del')).toHaveLength(1)
+        expect(byClass(card, 'text-add')).toHaveLength(1)
+        expect(byClass(card, 'arrow-icon')).toHaveLength(1)
+        expect(rendered(card)).toContain('全文同类')
+        expect(rendered(card)).not.toContain('需人工核对')
+      }
+      expect(rendered(cards[1])).toContain('仅修改此处')
+      expect(rendered(byClass(cards[1], 'text-add')[0])).toBe('正词')
+      expect(rendered(cards[2])).toContain('删除')
+      expect(rendered(cards[2])).not.toContain('仅修改此处')
+      expect(await page.state.handleAcceptAll()).toBe(2)
+      await flush()
+      expect(page.state.currentText).toBe(`${text}\n正词`)
+      expect(page.state.issues.map(item => !!item._accepted)).toEqual([false, true, true])
+      await click(cards[1], '撤销')
+      await click(cards[2], '撤销')
+      expect(page.state.currentText).toBe(mixed)
+    })
+
+    it.each([false, true])(`${name}数字核验（混合错字=%s）显示计算依据，仅修改错字，保存刷新保留数字和严重度`, async mixed => {
+      const numericText = '梁士俊志愿服务5年，服务时长6600余小时。\n单位换算：1吨=100千克。'
+      const originalText = numericText + (mixed ? '\n工做安排。' : '')
+      const expectedText = numericText + (mixed ? '\n工作安排。' : '')
+      const at = (original: string) => {
+        const start = Array.from(originalText.slice(0, originalText.indexOf(original))).length
+        return { start, end: start + Array.from(original).length }
+      }
+      const numericIssues: ReviewIssue[] = [{
+        original: '6600余小时', suggestion: '', type: 'logic', severity: 'warning', ...at('6600余小时'),
+        explanation: '按每年365天估算：6600 ÷ (5 × 365) ≈ 3.62小时/天；余表示下限，不等于事实错误，需核实个人/团队口径与统计时段。',
+      }, {
+        original: '1吨=100千克', suggestion: '', type: 'logic', severity: 'error', ...at('1吨=100千克'),
+        explanation: '按单位换算：1吨 = 1000千克；100千克不等于1000千克，换算不成立，需人工核对。',
+      }]
+      let saved: ReviewResponse = { ...response(), original_text: originalText, modified_text: originalText,
+        issues: [...numericIssues.map(item => ({ ...item, source: 'numeric_rule' })),
+          ...(mixed ? [{ ...issue(), original: '工做', suggestion: '工作', ...at('工做') }] : [])] }
+      route.query = { review: '7' }
+      vi.mocked(ReviewApi.getReviewApi).mockImplementation(async () => saved)
+      vi.mocked(ReviewApi.saveReviewApi).mockImplementation(async (_id, payload) => {
+        saved = { ...saved, revision: payload.revision + 1, issues: JSON.parse(JSON.stringify(payload.issues)), modified_text: expectedText }
+        return saved
+      })
+      const assertNumericCards = (root: Node) => {
+        const cards = byClass(root, 'issue-item')
+        expect(cards).toHaveLength(mixed ? 3 : 2)
+        numericIssues.forEach((item, index) => {
+          expect(rendered(byClass(cards[index], 'text')[0])).toBe(item.original)
+          expect(rendered(byClass(cards[index], 'issue-explanation')[0])).toBe(item.explanation)
+          expect(rendered(byClass(cards[index], 'issue-header')[0])).toContain(index === 0 ? '警告' : '错误')
+          expect(rendered(cards[index])).toContain('需人工核对')
+          expect(rendered(cards[index])).not.toMatch(/采纳|仅修改此处|全文同类|删除该词/)
+          expect(byClass(cards[index], 'text-del')).toHaveLength(0)
+          expect(byClass(cards[index], 'text-add')).toHaveLength(0)
+        })
+      }
+      const page = mount(component)
+      await flush()
+      assertNumericCards(page.root)
+      expect(await page.state.handleAcceptAll()).toBe(mixed ? 1 : 0)
+      await flush()
+      expect(page.state.currentText).toBe(expectedText)
+      expect(page.state.issues.map(item => !!item._accepted)).toEqual(mixed ? [false, false, true] : [false, false])
+      if (!mixed) {
+        expect(ElementPlus.ElMessageBox.confirm).not.toHaveBeenCalled()
+        expect(ProofreadApi.submitIssueFeedbackApi).not.toHaveBeenCalled()
+      }
+      await click(page.root, '保存草稿')
+      expect(ReviewApi.saveReviewApi).toHaveBeenCalledTimes(1)
+      expect(saved.issues.slice(0, 2)).toMatchObject(numericIssues.map(item => ({ ...item, _accepted: false, _ignored: false })))
+      expect(page.state.hasUnsavedChanges).toBe(false)
+      page.unmount()
+      const refreshed = mount(component)
+      await flush()
+      assertNumericCards(refreshed.root)
+      expect(refreshed.state.currentText).toBe(expectedText)
+      expect(refreshed.state.issues.slice(0, 2)).toMatchObject(numericIssues.map(item => ({ ...item, _accepted: false, _ignored: false })))
+      expect(refreshed.state.hasUnsavedChanges).toBe(false)
+      expect(ProofreadApi.textProofreadApi).not.toHaveBeenCalled()
+      expect(TasksApi.asyncDocumentProofreadApi).not.toHaveBeenCalled()
+    })
+  }
 })
 
 describe('历史列表与详情模板', () => {

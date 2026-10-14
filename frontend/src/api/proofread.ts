@@ -27,6 +27,7 @@ export interface ProofreadCoverage {
   total_chunks: number
   completed_chunks: number
   failed_chunks: FailedProofreadChunk[]
+  person_consistency_status?: 'complete' | 'failed' | null
 }
 
 export interface TextProofreadResponse {

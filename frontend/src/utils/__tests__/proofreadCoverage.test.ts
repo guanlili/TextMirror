@@ -50,4 +50,10 @@ describe('失败片段补查合并', () => {
     const next = applyChunkRetry(coverage, target, { ...response, issues: [{ ...response.issues[0]!, start: null, end: null }] })
     expect(next.issues[0]).toMatchObject({ start: -1, end: -1 })
   })
+  it('分片补查不能冒充全文人物指代核对完成', () => {
+    const partial: ProofreadCoverage = { ...coverage, person_consistency_status: 'failed' }
+    const first = applyChunkRetry(partial, target, response)
+    const next = applyChunkRetry(first.coverage, other, response)
+    expect(next.coverage).toMatchObject({ status: 'partial', failed_chunks: [], person_consistency_status: 'failed' })
+  })
 })

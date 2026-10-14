@@ -53,11 +53,11 @@
           <template #default="{ row }">
             <span
               v-if="row.remark"
-              style="color: #999;"
+              style="color: var(--color-text-tertiary);"
             >{{ row.remark }}</span>
             <span
               v-else
-              style="color: #ccc;"
+              style="color: var(--color-text-tertiary);"
             >-</span>
           </template>
         </el-table-column>
@@ -108,7 +108,7 @@
           <template #default="{ row }">
             <span
               v-if="row.expires_at"
-              style="font-size: 12px; color: #999;"
+              style="font-size: 12px; color: var(--color-text-tertiary);"
             >{{ formatTime(row.expires_at) }}</span>
             <span v-else>永不</span>
           </template>
@@ -120,11 +120,11 @@
           <template #default="{ row }">
             <span
               v-if="row.last_used_at"
-              style="font-size: 12px; color: #999;"
+              style="font-size: 12px; color: var(--color-text-tertiary);"
             >{{ formatTime(row.last_used_at) }}</span>
             <span
               v-else
-              style="color: #999;"
+              style="color: var(--color-text-tertiary);"
             >未使用</span>
           </template>
         </el-table-column>
@@ -156,7 +156,7 @@
             </el-tooltip>
             <span
               v-else
-              style="color: #ccc;"
+              style="color: var(--color-text-tertiary);"
             >-</span>
           </template>
         </el-table-column>
@@ -193,7 +193,7 @@
             </el-popconfirm>
             <span
               v-else
-              style="color: #999;"
+              style="color: var(--color-text-tertiary);"
             >-</span>
           </template>
         </el-table-column>
@@ -328,10 +328,10 @@
             <template v-if="webhookKey.webhook_last.status_code">
               （HTTP {{ webhookKey.webhook_last.status_code }}）
             </template>
-            <span style="color: #999; font-size: 12px; margin-left: 6px;">{{ formatTime(webhookKey.webhook_last.timestamp) }}</span>
+            <span style="color: var(--color-text-tertiary); font-size: 12px; margin-left: 6px;">{{ formatTime(webhookKey.webhook_last.timestamp) }}</span>
             <div
               v-if="webhookKey.webhook_last.error"
-              style="color: #f56c6c; font-size: 12px;"
+              style="color: var(--color-danger); font-size: 12px;"
             >
               {{ webhookKey.webhook_last.error }}
             </div>
@@ -598,7 +598,7 @@ import { formatTime } from '@/utils/format'
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px; background: rgba(0, 0, 0, .04); padding: 2px 6px; border-radius: 4px;
 }
-.form-tip { font-size: 12px; color: #999; line-height: 1.4; margin-top: 4px; }
+.form-tip { font-size: 12px; color: var(--color-text-tertiary); line-height: 1.4; margin-top: 4px; }
 .key-box {
   display: flex; align-items: center; gap: 10px;
   padding: 12px; border-radius: 8px; background: rgba(0, 0, 0, .04);
@@ -609,11 +609,11 @@ import { formatTime } from '@/utils/format'
   }
 }
 .usage-hint {
-  margin: 12px 0 0; font-size: 12px; color: #999;
+  margin: 12px 0 0; font-size: 12px; color: var(--color-text-tertiary);
   code {
     display: block; margin-top: 6px; word-break: break-all;
     font-size: 11px; padding: 8px; border-radius: 6px;
-    background: rgba(0, 0, 0, .04); color: #666;
+    background: rgba(0, 0, 0, .04); color: var(--color-text-secondary);
   }
 }
 
