@@ -47,6 +47,9 @@ def build_system_prompt(domain: str,
                         user_words: Optional[Dict[str, List[Dict]]] = None,
                         domain_rules: Optional[str] = None) -> str:
     """构建系统 Prompt,包含领域专业规则、全局词库和用户个性化词库"""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
     from .constants import NUMERIC_REASONING_RULES, PERSON_REFERENCE_RULES, PROOFREAD_SYSTEM_PROMPT
 
     domain_str = DOMAIN_MAP.get(domain, "通用")
@@ -60,8 +63,12 @@ def build_system_prompt(domain: str,
     if global_words:
         global_words_section = _build_global_words_section(user_words)
 
+    # 时间基准：模型训练态的"现在"与实际年份错位，相对时间换算须显式给锚
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    date_line = f"【时间基准】今天的日期：{today.year}年{today.month}月{today.day}日（北京时间），涉及时间先后的判断以此为锚。"
+
     return PROOFREAD_SYSTEM_PROMPT.format(
         domain=domain_str,
         domain_rules=domain_rules,
         global_words_section=global_words_section,
-    ) + "\n" + PERSON_REFERENCE_RULES + "\n" + NUMERIC_REASONING_RULES
+    ) + "\n" + PERSON_REFERENCE_RULES + "\n" + NUMERIC_REASONING_RULES + "\n" + date_line
