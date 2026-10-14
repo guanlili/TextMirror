@@ -87,6 +87,7 @@ declare module 'vue' {
     Filter: typeof import('@element-plus/icons-vue')['Filter']
     Folder: typeof import('@element-plus/icons-vue')['Folder']
     FolderOpened: typeof import('@element-plus/icons-vue')['FolderOpened']
+    Histogram: typeof import('@element-plus/icons-vue')['Histogram']
     House: typeof import('@element-plus/icons-vue')['House']
     InfoFilled: typeof import('@element-plus/icons-vue')['InfoFilled']
     Iphone: typeof import('@element-plus/icons-vue')['Iphone']

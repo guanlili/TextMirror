@@ -60,6 +60,7 @@
       </template>
 
       <el-table
+        v-if="loading || items.length > 0"
         v-loading="loading"
         :data="items"
         stripe
@@ -151,7 +152,7 @@
           </template>
         </el-table-column>
         <el-table-column
-          label="Token"
+          label="Token 数"
           width="100"
           align="center"
         >
@@ -202,7 +203,7 @@
       </el-table>
 
       <el-empty
-        v-if="!loading && items.length === 0"
+        v-else
         description="暂无校对历史"
       />
 

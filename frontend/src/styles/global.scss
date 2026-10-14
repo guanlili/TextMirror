@@ -74,6 +74,9 @@
   --review-option-selected: color-mix(in srgb, var(--color-primary) 7%, var(--surface));
   --review-option-ring: color-mix(in srgb, var(--color-primary) 30%, transparent);
   --review-option-radius: var(--border-radius-md);
+
+  /* 移动端底部导航高度（≤768px 显示；页面底部留白与固定操作栏偏移共用） */
+  --mobile-tabbar-h: 56px;
 }
 
 /* 暗色主题 */

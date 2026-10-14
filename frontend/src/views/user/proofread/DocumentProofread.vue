@@ -21,11 +21,13 @@
         </template>
 
         <el-upload
+          v-if="!selectedFile"
           ref="uploadRef"
           class="upload-dragger"
           drag
           :auto-upload="false"
           :limit="1"
+          :show-file-list="false"
           :on-change="handleFileChange"
           :on-remove="handleFileRemove"
           :on-exceed="() => ElMessage.warning('只能上传一个文件')"
@@ -44,17 +46,25 @@
           </template>
         </el-upload>
 
-        <!-- 校对设置 -->
+        <!-- 已选文件：紧凑信息条 + 校对设置 -->
         <div
-          v-if="selectedFile"
+          v-else
           class="proofread-settings"
         >
           <div class="file-info">
             <el-icon><Document /></el-icon>
-            <span>{{ selectedFile.name }}</span>
+            <span class="file-name">{{ selectedFile.name }}</span>
             <el-tag size="small">
               {{ formatSize(selectedFile.size) }}
             </el-tag>
+            <el-button
+              class="file-change"
+              text
+              size="small"
+              @click="handleChangeFile"
+            >
+              更换文件
+            </el-button>
           </div>
           <el-button
             type="primary"
@@ -88,7 +98,7 @@
           <el-steps
             :active="stepIndex"
             align-center
-            style="width: 480px; max-width: 100%; margin-bottom: 20px;"
+            style="width: 600px; max-width: 100%; margin-bottom: 20px;"
           >
             <el-step
               title="上传提取"
@@ -187,7 +197,9 @@
           <el-icon><Back /></el-icon>重新上传
         </el-button>
         <div class="toolbar-info">
-          <el-tag><el-icon><Document /></el-icon>&nbsp;{{ resultFilename }}</el-tag>
+          <el-tag class="filename-tag">
+            <el-icon><Document /></el-icon>&nbsp;{{ resultFilename }}
+          </el-tag>
           <el-tag :type="isPartial ? 'warning' : 'success'">
             {{ isPartial ? '部分完成 · ' : '' }}共 {{ issues.length }} 个问题
           </el-tag>
@@ -201,6 +213,7 @@
         <div class="toolbar-actions">
           <el-button
             type="warning"
+            plain
             :disabled="pendingCount === 0"
             @click="handleAcceptAll"
           >
@@ -632,6 +645,11 @@ function handleFileRemove() {
   selectedFile.value = null
 }
 
+function handleChangeFile() {
+  selectedFile.value = null
+  uploadRef.value?.clearFiles()
+}
+
 // sessionStorage 快照：刷新后恢复轮询
 const SESSION_KEY = 'textmirror_task_snapshot'
 
@@ -772,9 +790,8 @@ async function completeTask(taskResult: TaskStatus, fallbackFilename: string, ru
     ElMessage.warning(`审校尚未完成，已发现 ${issues.value.length} 个问题；未审范围请补查，不能视为全文无误`)
   } else if (issues.value.length === 0) {
     ElMessage.success('文档没有发现任何问题')
-  } else {
-    ElMessage.info(`共发现 ${issues.value.length} 个问题，请逐条审阅`)
   }
+  // 有问题时结果页标题栏与工具栏已展示统计，不再弹全局提示
 }
 
 async function trackTask(snapshot: TaskSnapshot, runId: number) {
@@ -1130,18 +1147,6 @@ function resetAll() {
 </script>
 
 <style scoped lang="scss">
-.setting-help {
-  flex-basis: 100%;
-  margin: 0;
-  padding-left: 80px;
-  font-size: 12px;
-  line-height: 1.65;
-  color: var(--color-text-secondary);
-  overflow-wrap: anywhere;
-}
-@media (max-width: 768px) {
-  .setting-help { flex-basis: auto; padding-left: 0; }
-}
 .document-proofread-page {
   max-width: 1400px;
   margin: 0 auto;
@@ -1194,10 +1199,23 @@ function resetAll() {
     align-items: center;
     gap: 8px;
     margin-bottom: 16px;
-    padding: 8px 12px;
+    padding: 10px 14px;
     background: var(--surface);
     border-radius: var(--border-radius-sm);
     border: 1px solid var(--color-border);
+
+    .file-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 500;
+    }
+
+    .file-change {
+      margin-left: auto;
+      flex-shrink: 0;
+    }
   }
 
   .document-options { margin-top: 20px; max-width: 520px; }
@@ -1205,6 +1223,11 @@ function resetAll() {
 }
 
 .processing-section {
+  min-height: calc(100vh - 220px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+
   .processing-content {
     display: flex;
     flex-direction: column;
@@ -1238,6 +1261,18 @@ function resetAll() {
     display: flex;
     gap: 8px;
     align-items: center;
+    flex-wrap: wrap;
+    min-width: 0;
+
+    .filename-tag {
+      max-width: 260px;
+
+      :deep(.el-tag__content) {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
   }
 
   .toolbar-actions {
@@ -1313,14 +1348,6 @@ function resetAll() {
 
 /* ===== 移动端响应式 ===== */
 @media (max-width: 768px) {
-  .proofread-settings {
-    .setting-row {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 6px;
-    }
-  }
-
   .result-columns {
     grid-template-columns: 1fr;
     height: auto;
@@ -1336,6 +1363,7 @@ function resetAll() {
   }
 }
 
+.upload-section { min-height: calc(100vh - 220px); display: flex; flex-direction: column; justify-content: center; }
 .upload-section :deep(.el-card) { box-shadow: none; border-radius: 12px; }
 .upload-section :deep(.el-upload-dragger) { padding: 60px 24px; background: var(--surface-soft); border-radius: 12px; }
 .document-review-heading { margin: 4px 0 24px; }.document-review-heading > span { color: var(--color-primary); font-size: 12px; }.document-review-heading h2 { margin: 10px 0; font-size: 24px; font-weight: 600; }.document-review-heading p { color: var(--color-text-secondary); font-size: 13px; }

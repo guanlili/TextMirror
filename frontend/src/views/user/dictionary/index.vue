@@ -29,6 +29,7 @@
       </el-alert>
 
       <el-table
+        v-if="loading || dictionaries.length > 0"
         v-loading="loading"
         :data="dictionaries"
         stripe
@@ -103,7 +104,7 @@
       </el-table>
 
       <el-empty
-        v-if="!loading && dictionaries.length === 0"
+        v-else
         description="暂无自定义词库"
       >
         <div class="empty-guide">

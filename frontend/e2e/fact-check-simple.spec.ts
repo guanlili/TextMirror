@@ -65,7 +65,12 @@ for (const width of [320, 375, 1440]) {
     test('默认只需材料和联网同意，更多选项与记录收起', async ({ page, scenario }) => {
       scenario.factCheck = true
       await page.goto('/fact-check')
-      await expect(page.getByTestId('fact-workbench').getByRole('heading', { name: '事实核查', exact: true })).toBeVisible()
+      // 页面标题由布局顶栏提供：桌面为 page-context h1，移动端为顶栏标题
+      if (width < 768) {
+        await expect(page.locator('.mobile-page-title')).toHaveText('事实核查')
+      } else {
+        await expect(page.getByRole('heading', { name: '事实核查', exact: true })).toBeVisible()
+      }
       await expect(submit(page)).toBeDisabled()
       await expect(page.getByRole('checkbox', { name: '同意材料外发' })).not.toBeChecked()
       await expect(page.locator('.advanced-options')).not.toHaveAttribute('open', '')

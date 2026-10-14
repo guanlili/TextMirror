@@ -1451,5 +1451,5 @@ async function goBack() {
 @media(max-width:1080px) { .input-section { grid-template-columns: minmax(0, 1fr) 270px; gap: 16px; }.result-columns { grid-template-columns: 1fr; height: auto; }.result-columns .column-card { max-height: 650px; } }
 @media(max-width:768px) { .input-section { grid-template-columns: 1fr; }.proofread-settings { padding: 8px 0; }.editor-wrapper :deep(.el-textarea__inner) { min-height: 280px !important; padding: 20px; }.action-bar { padding: 14px; flex-wrap: wrap; }.action-bar :deep(.el-button--large) { min-width: 110px; }.result-toolbar .toolbar-info { flex-wrap: wrap; }.review-heading h2 { font-size: 21px; } }
 
-@media(max-width:768px) { .input-section { padding-bottom: 84px; }.input-section .action-bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 18px max(12px, env(safe-area-inset-bottom)); border-radius: 0; box-shadow: 0 -4px 18px rgba(0,0,0,.04); }.editor-wrapper :deep(.el-textarea__inner) { height: 330px; } }
+@media(max-width:768px) { .input-section { padding-bottom: 84px; }.input-section .action-bar { position: fixed; left: 0; right: 0; bottom: calc(var(--mobile-tabbar-h) + env(safe-area-inset-bottom)); padding: 12px 18px; border-radius: 0; box-shadow: 0 -4px 18px rgba(0,0,0,.04); }.editor-wrapper :deep(.el-textarea__inner) { height: 330px; } }
 </style>

@@ -55,7 +55,7 @@
             <el-icon><CircleCheck /></el-icon><span>放行词管理</span>
           </el-menu-item>
           <el-menu-item index="/history">
-            <el-icon><Clock /></el-icon><span>我的审校记录</span>
+            <el-icon><Clock /></el-icon><span>校对历史</span>
           </el-menu-item>
           <el-menu-item index="/apikeys">
             <el-icon><Key /></el-icon><span>API 密钥</span>
@@ -114,6 +114,7 @@
               alt=""
             ><strong>{{ siteStore.platformName }}</strong>
           </div>
+          <span class="mobile-page-title">{{ currentPage.title }}</span>
           <div class="page-context desktop-only">
             <h1>{{ currentPage.title }}</h1>
             <span>{{ currentPage.subtitle }}</span>
@@ -213,6 +214,9 @@
         class="mobile-nav-menu"
         @select="mobileMenuVisible = false"
       >
+        <div class="drawer-label">
+          创作空间
+        </div>
         <el-menu-item index="/workbench">
           <el-icon><House /></el-icon><span>工作台</span>
         </el-menu-item>
@@ -225,32 +229,28 @@
         >
           <el-icon><Search /></el-icon><span>事实核查</span>
         </el-menu-item>
-        <el-menu-item
-          v-if="userStore.isLoggedIn"
-          index="/dictionary"
-        >
-          <el-icon><Collection /></el-icon><span>个性化词库</span>
-        </el-menu-item>
-        <el-menu-item
-          v-if="userStore.isLoggedIn"
-          index="/whitelist"
-        >
-          <el-icon><CircleCheck /></el-icon><span>放行词管理</span>
-        </el-menu-item>
-        <el-menu-item
-          v-if="userStore.isLoggedIn"
-          index="/history"
-        >
-          <el-icon><Clock /></el-icon><span>我的审校记录</span>
-        </el-menu-item>
+        <template v-if="userStore.isLoggedIn">
+          <div class="drawer-label">
+            我的内容
+          </div>
+          <el-menu-item index="/dictionary">
+            <el-icon><Collection /></el-icon><span>个性化词库</span>
+          </el-menu-item>
+          <el-menu-item index="/whitelist">
+            <el-icon><CircleCheck /></el-icon><span>放行词管理</span>
+          </el-menu-item>
+          <el-menu-item index="/history">
+            <el-icon><Clock /></el-icon><span>校对历史</span>
+          </el-menu-item>
+          <el-menu-item index="/apikeys">
+            <el-icon><Key /></el-icon><span>API 密钥</span>
+          </el-menu-item>
+        </template>
+        <div class="drawer-label">
+          更多工具
+        </div>
         <el-menu-item index="/polish">
           <el-icon><MagicStick /></el-icon><span>AI 智能润色</span>
-        </el-menu-item>
-        <el-menu-item
-          v-if="userStore.isLoggedIn"
-          index="/apikeys"
-        >
-          <el-icon><Key /></el-icon><span>API 密钥</span>
         </el-menu-item>
       </el-menu>
       <button
@@ -262,6 +262,36 @@
         <span>{{ isDark ? '亮色模式' : '暗色模式' }}</span>
       </button>
     </el-drawer>
+
+    <nav
+      class="mobile-tabbar"
+      aria-label="主导航"
+    >
+      <router-link
+        to="/workbench"
+        :class="{ 'is-active': route.path === '/workbench' }"
+      >
+        <el-icon><House /></el-icon><span>工作台</span>
+      </router-link>
+      <router-link
+        to="/proofread/text"
+        :class="{ 'is-active': route.path.startsWith('/proofread') }"
+      >
+        <el-icon><EditPen /></el-icon><span>审校</span>
+      </router-link>
+      <router-link
+        to="/polish"
+        :class="{ 'is-active': route.path === '/polish' }"
+      >
+        <el-icon><MagicStick /></el-icon><span>润色</span>
+      </router-link>
+      <router-link
+        :to="userStore.isLoggedIn ? '/profile' : '/login'"
+        :class="{ 'is-active': route.path === '/profile' }"
+      >
+        <el-icon><User /></el-icon><span>{{ userStore.isLoggedIn ? '我的' : '登录' }}</span>
+      </router-link>
+    </nav>
   </el-container>
 </template>
 
@@ -417,6 +447,7 @@ async function handleLogout() {
   font-size: 12px; color: var(--color-text-secondary); border-top: 1px solid var(--color-border);
 }
 .mobile-menu-btn, .mobile-brand { display: none; }
+.mobile-page-title, .mobile-tabbar { display: none; }
 .mobile-nav-menu { border-right: 0; }
 .drawer-theme-toggle { margin-top: 12px; }
 .drawer-brand { display: flex; align-items: center; gap: 10px; }
@@ -424,6 +455,8 @@ async function handleLogout() {
 .drawer-brand div { display: flex; flex-direction: column; }
 .drawer-brand strong { color: var(--color-text); font-size: 17px; }
 .drawer-brand span { color: var(--color-text-secondary); font-size: 11px; }
+.drawer-label { padding: 16px 12px 6px; color: var(--color-text-secondary); font-size: 11px; font-weight: 600; letter-spacing: .6px; }
+.drawer-label:first-child { padding-top: 4px; }
 .desktop-only { display: flex; }
 @media (max-width: 768px) {
   .desktop-only { display: none !important; }
@@ -432,6 +465,23 @@ async function handleLogout() {
   .mobile-brand { display: flex; align-items: center; gap: 8px; cursor: pointer; }
   .mobile-brand img { width: 26px; height: 26px; }
   .mobile-brand strong { color: var(--color-text); font-size: 17px; }
-  .user-main { padding: 14px; }
+  .mobile-page-title {
+    display: block; flex: 1; min-width: 0; margin-left: 10px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--color-text); font-size: 15px; font-weight: 600;
+  }
+  .user-main { padding: 14px 14px calc(var(--mobile-tabbar-h) + env(safe-area-inset-bottom) + 14px); }
+  .mobile-tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    display: flex; height: calc(var(--mobile-tabbar-h) + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--surface); border-top: 1px solid var(--color-border);
+    a {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 3px; color: var(--color-text-secondary); font-size: 10px; text-decoration: none;
+      .el-icon { font-size: 20px; }
+      &.is-active { color: var(--color-primary); }
+    }
+  }
 }
 </style>

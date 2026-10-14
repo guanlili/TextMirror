@@ -13,7 +13,6 @@
           {{ originalHtml ? '原始排版' : '原文' }}
         </el-radio-button>
       </el-radio-group>
-      <span>{{ Array.from(view === 'modified' ? currentText : sourceText).length }} 字</span>
     </div>
     <p
       v-if="view === 'original'"
@@ -68,8 +67,8 @@ watch(() => [props.activeIndex, previewHtml.value], async () => {
 </script>
 
 <style scoped>
-.preview-toolbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.preview-toolbar span, .preview-tip { font-size: 12px; color: var(--color-text-secondary); }
+.preview-toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+.preview-tip { font-size: 12px; color: var(--color-text-secondary); }
 .preview-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 2; }
 .formatted-original { overflow-wrap: anywhere; overflow-x: auto; }
 .preview-text :deep(mark) { padding: 2px 1px; border-radius: 3px; color: inherit; }
