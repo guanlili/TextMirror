@@ -706,4 +706,29 @@ SAMPLES += [
     {"id": "person-3", "dim": "人物一致性", "domain": "general",
      "text": "梁士俊坚持每周到社区报到，她从未间断，邻居都夸她热心。",
      "expectation": "no_report", "expect": []},  # 一致使用「她」即正确，不得按姓名猜性别
+    {"id": "name-clean-1", "dim": "人名消歧", "domain": "general",
+     "text": "上海国际问题研究院台港澳研究所、拉美研究中心助理研究员来源对北京日报客户端记者说，"
+             "此次反制体现出中方反制措施进一步精细化、具体化的新动向。"
+             "反制对象明确到个人，释放出这样的信号：相关外国官员不能认为，身处尚未同中国建交的国家，"
+             "就可以在台湾问题上不受约束、无需承担后果。此次反制既是对具体行为的回应，"
+             "也向其他有关人士明确了中方的原则底线。",
+     "expectation": "no_report", "expect": []},
+    {"id": "name-clean-2", "dim": "人名消歧", "domain": "general",
+     "text": "助理研究员来源对记者说，相关数据已经完成核验。",
+     "expectation": "no_report", "expect": []},
+    {"id": "name-clean-3", "dim": "人名消歧", "domain": "general",
+     "text": "主持人方向介绍了活动安排，随后邀请嘉宾上台发言。",
+     "expectation": "no_report", "expect": []},
+    {"id": "name-clean-4", "dim": "人名消歧", "domain": "general",
+     "text": "编辑文章向记者介绍了本期选题的策划过程。",
+     "expectation": "no_report", "expect": []},
+    {"id": "name-clean-5", "dim": "人名消歧", "domain": "general",
+     "text": "报告注明了数据来源，并说明了下一步的研究方向。",
+     "expectation": "no_report", "expect": []},
+    {"id": "name-error-1", "dim": "人名消歧", "domain": "general",
+     "text": "报告注明了数据来原，便于读者核验。",
+     "expect": ["来原"]},
+    {"id": "name-error-2", "dim": "人名消歧", "domain": "general",
+     "text": "助理研究员来源对记者说，相关数据以经完成核验。",
+     "expect": ["以经"]},
 ]
