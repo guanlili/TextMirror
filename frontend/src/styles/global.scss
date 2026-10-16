@@ -250,9 +250,12 @@ html.dark .el-table th.el-table__cell {
   color: #8a99b0;
 }
 
-.el-dialog:not(.is-fullscreen),
-.el-message-box {
+.el-dialog:not(.is-fullscreen) {
   max-width: calc(100% - 32px);
+}
+
+.el-message-box {
+  max-width: min(var(--el-messagebox-width), calc(100vw - 32px));
 }
 
 .el-drawer.rtl,

@@ -109,6 +109,7 @@
               collapse-tags
               size="small"
               placeholder="选择 2-4 个模型"
+              popper-class="polish-model-popper"
               style="flex: 1; min-width: 0;"
             >
               <el-option
@@ -1366,19 +1367,33 @@ const {
 .result-card { border-color: #e3e9f1; border-radius: 12px; box-shadow: 0 3px 12px rgba(31, 55, 84, .04); }
 .card-head { background: var(--surface-soft); }
 
+:global(.polish-model-popper) {
+  max-width: calc(100vw - 32px);
+}
+
+:global(.polish-model-popper .el-select-dropdown__item) {
+  height: auto;
+  min-height: 34px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1080px) {
+  .polish-page { height: auto; min-height: 0; overflow: visible; }
+  .polish-layout { flex-direction: column; height: auto; }
+  .panel-left, .panel-right { flex: none; width: 100%; max-width: 100%; min-width: 0; }
+  .panel-right { min-height: 430px; }
   .style-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .panel-left { min-width: 450px; }
   .result-panel-title .result-hint { display: none; }
+  .card-body { max-height: none; }
 }
 
 @media (max-width: 768px) {
-  .polish-page { height: auto; min-height: 0; overflow: visible; }
-  .polish-layout { flex-direction: column; height: auto; }
-  .panel-left, .panel-right { width: 100%; max-width: 100%; min-width: 0; padding: 16px; }
-  .panel-right { min-height: 430px; }
+  .panel-left, .panel-right { padding: 16px; }
   .style-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .card-body { max-height: none; }
 }
 
 @media (max-width: 768px) {
