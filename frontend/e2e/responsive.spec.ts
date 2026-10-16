@@ -90,6 +90,147 @@ function auditLog(id: number): AuditLogItem {
   }
 }
 
+for (const width of [320, 390, 768, 1440, 2560]) {
+  test.describe(`确认弹窗 ${width}px`, () => {
+    test.use({ viewport: { width, height: 900 } })
+
+    test('未保存审阅保持紧凑、居中，取消与离开均可操作', async ({ page, scenario }, testInfo) => {
+      await page.goto('/proofread/text?review=7')
+      const preview = page.locator('.review-preview .preview-text')
+      await expect(preview).toHaveText(source)
+      await page.getByRole('button', { name: '仅修改此处', exact: true }).first().click()
+      await expect(preview).toHaveText(corrected)
+      const back = page.getByRole('button', { name: '返回编辑', exact: true })
+      await back.click()
+      const dialog = page.getByRole('dialog', { name: '未保存的审阅', exact: true }).locator('.el-message-box')
+      await within(dialog, undefined, true)
+      const expectedWidth = Math.min(420, width - 32)
+      await expect.poll(async () => (await dialog.boundingBox())?.width).toBeCloseTo(expectedWidth, 0)
+      await expect.poll(async () => (await dialog.boundingBox())?.x).toBeCloseTo((width - expectedWidth) / 2, 0)
+      await within(dialog.locator('.el-message-box__content'), dialog, true)
+      for (const button of await dialog.getByRole('button').all()) await reachable(button, dialog)
+      if ([390, 1440].includes(width)) {
+        await testInfo.attach('confirmation', { body: await page.screenshot(), contentType: 'image/png' })
+      }
+      await dialog.getByRole('button', { name: '继续审阅', exact: true }).click()
+      await expect(dialog).not.toBeVisible()
+      await expect(preview).toHaveText(corrected)
+      await back.click()
+      await dialog.locator('.el-message-box__headerbtn').click()
+      await expect(dialog).not.toBeVisible()
+      await expect(preview).toHaveText(corrected)
+      await back.click()
+      await dialog.getByRole('button', { name: '离开', exact: true }).click()
+      await expect(dialog).not.toBeVisible()
+      await expect(page.getByRole('textbox', { name: '待审校文本', exact: true })).toHaveValue(corrected)
+      expect(scenario.calls.some(call => call.method === 'PUT')).toBe(false)
+    })
+  })
+}
+
+for (const width of [320, 390, 768, 769, 900, 1080, 1081, 1440]) {
+  test.describe(`润色布局 ${width}px`, () => {
+    test.use({ viewport: { width, height: 900 } })
+
+    test('输入和生成结果完整可达，窄窗口上下排列', async ({ page, baseURL }, testInfo) => {
+      await mockGet(page, baseURL, '/polish/styles', () => ({
+        styles: ['正式规范', '简洁明了', '生动形象', '学术严谨', '商务专业', '文学优美', '通俗易懂', '新闻客观', '公文规范', '创意表达']
+          .map((name, index) => ({ key: index === 0 ? 'formal' : `style-${index}`, name, description: '清晰准确地表达原意' })),
+      }))
+      const versions = ['light', 'standard', 'deep'].map(level => ({ level, content: `这是${level}润色结果，保持原意并优化表达。` }))
+      await page.route('**/api/v1/polish/text/stream', route => route.fulfill({
+        contentType: 'text/event-stream',
+        body: [
+          { event: 'meta', style: 'formal', style_name: '正式规范' },
+          ...versions.flatMap(version => [{ event: 'delta', ...version }, { event: 'done', ...version }]),
+          { event: 'end' },
+        ].map(event => `data: ${JSON.stringify(event)}\n\n`).join(''),
+      }))
+      await page.goto('/polish')
+      const left = page.locator('.panel-left')
+      const right = page.locator('.panel-right')
+      const checkLayout = async (stacked: boolean) => {
+        await within(left, page.locator('.polish-layout'))
+        await within(right, page.locator('.polish-layout'))
+        await expect.poll(async () => {
+          const a = await left.boundingBox(), b = await right.boundingBox()
+          return !!a && !!b && (stacked
+            ? b.y >= a.y + a.height && Math.abs(a.width - b.width) < 1
+            : b.x >= a.x + a.width && Math.abs(a.y - b.y) < 1)
+        }).toBe(true)
+        await expect.poll(async () => (await right.boundingBox())?.width || 0).toBeGreaterThan(260)
+      }
+      await checkLayout(width <= 1080)
+      await reachable(right.getByRole('heading', { name: '润色结果将在这里展示', exact: true }), right)
+      const input = page.getByPlaceholder('请在此粘贴或输入需要润色的文本内容（10-5000字）...')
+      const submit = page.getByRole('button', { name: '一键润色', exact: true })
+      await expect(submit).toBeDisabled()
+      await input.fill(source)
+      await reachable(submit, left)
+      await submit.click()
+      const cards = right.locator('.result-card')
+      await expect(cards).toHaveCount(3)
+      for (const card of await cards.all()) {
+        await within(card, right)
+        await within(card.locator('.card-body'), card)
+        await reachable(card.getByRole('button', { name: '复制', exact: true }), card)
+      }
+      await reachable(page.getByRole('button', { name: '重新生成', exact: true }), right)
+      await checkLayout(width <= 1080)
+      if ([769, 1440].includes(width)) {
+        await testInfo.attach('polish-layout', { body: await page.screenshot(), contentType: 'image/png' })
+      }
+      if (width === 1440) {
+        await page.setViewportSize({ width: 900, height: 900 })
+        await checkLayout(true)
+        await page.setViewportSize({ width, height: 900 })
+        await checkLayout(false)
+        await expect(cards).toHaveCount(3)
+      }
+    })
+
+    test('长模型名称换行且下拉层不越界，选择取消正常', async ({ page, baseURL }, testInfo) => {
+      const models = [
+        { id: 1, name: '火山方舟（豆包）生产审校模型', model: 'doubao-seed-2-0-mini-260428' },
+        { id: 2, name: '阿里百炼（通义千问）', model: 'qwen3.8-flash' },
+        { id: 3, name: '长标识模型', model: 'long-model-identifier-without-spaces'.repeat(4) },
+      ]
+      await mockGet(page, baseURL, '/polish/models', () => ({ models }))
+      await page.goto('/polish')
+      await page.getByPlaceholder('请在此粘贴或输入需要润色的文本内容（10-5000字）...').fill(source)
+      await page.locator('.compare-section .el-checkbox').click()
+      const select = page.locator('.compare-section .el-select__wrapper')
+      await reachable(select, page.locator('.panel-left'))
+      await select.click()
+      const popper = page.locator('.el-popper.polish-model-popper:visible')
+      const options = popper.getByRole('option')
+      await expect(options).toHaveCount(3)
+      await within(popper, undefined, true)
+      await expect.poll(async () => (await popper.boundingBox())?.width || 0).toBeLessThanOrEqual(width - 32)
+      for (const option of await options.all()) {
+        await reachable(option, popper)
+        await expect(option).toHaveCSS('white-space', 'normal')
+        expect(await option.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+      }
+      await options.first().click()
+      await options.nth(1).click()
+      await expect(options.first()).toHaveAttribute('aria-selected', 'true')
+      await expect(options.nth(1)).toHaveAttribute('aria-selected', 'true')
+      const compare = page.getByRole('button', { name: '开始对比', exact: true })
+      await expect(compare).toBeEnabled()
+      await options.nth(1).click()
+      await expect(compare).toBeDisabled()
+      if (width === 390) {
+        await testInfo.attach('polish-model-dropdown', { body: await page.screenshot(), contentType: 'image/png' })
+      }
+      await options.nth(1).click()
+      await page.getByRole('combobox').press('Escape')
+      await expect(popper).not.toBeVisible()
+      await reachable(compare, page.locator('.panel-left'))
+    })
+  })
+}
+
 for (const width of [320, 375, 390, 430, 768, 1440]) {
   const mobile = width < 768
   test.describe(`响应式 ${width}px ${mobile ? '手机' : '桌面'}`, () => {
