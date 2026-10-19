@@ -1,4 +1,5 @@
 import asyncio
+import json
 from typing import Dict, List, Optional
 
 from loguru import logger
@@ -7,12 +8,28 @@ from sqlalchemy import func, select
 from app.core.database import async_session_factory
 from app.models.global_word import GlobalWord
 
+_GLOBAL_WORDS_CACHE_KEY = "textmirror:global_words_cache"
+_GLOBAL_WORDS_CACHE_TTL = 120  # 秒
+
 
 async def load_global_words() -> Dict[str, List[Dict]]:
     """
     从数据库加载全局词库, 按类型分组返回
     返回: {"sensitive": [...], "banned": [...], "correction": [...], "whitelist": [...]}
+
+    优先读 Redis 缓存（TTL 120s），缓存未命中再查库并回填。
     """
+    # 1. 尝试读缓存
+    try:
+        from app.core.redis import get_redis
+        redis = get_redis()
+        cached = await redis.get(_GLOBAL_WORDS_CACHE_KEY)
+        if cached:
+            return json.loads(cached)
+    except Exception:
+        pass  # Redis 异常不阻塞，降级查库
+
+    # 2. 查库
     result = {"sensitive": [], "banned": [], "correction": [], "whitelist": []}
     try:
         async with async_session_factory() as session:
@@ -27,7 +44,26 @@ async def load_global_words() -> Dict[str, List[Dict]]:
                     result[word.type].append(item)
     except Exception as e:
         logger.warning(f"加载全局词库失败,跳过: {e}")
+        return result
+
+    # 3. 回填缓存（fire-and-forget，不阻塞主流程）
+    try:
+        from app.core.redis import get_redis
+        redis = get_redis()
+        await redis.set(_GLOBAL_WORDS_CACHE_KEY, json.dumps(result, ensure_ascii=False), ex=_GLOBAL_WORDS_CACHE_TTL)
+    except Exception:
+        pass
+
     return result
+
+
+async def invalidate_global_words_cache():
+    """全局词库变更时清除缓存，由管理端增删改接口调用"""
+    try:
+        from app.core.redis import get_redis
+        await get_redis().delete(_GLOBAL_WORDS_CACHE_KEY)
+    except Exception:
+        pass
 
 
 async def load_user_words(user_id: Optional[int]) -> Dict[str, List[Dict]]:

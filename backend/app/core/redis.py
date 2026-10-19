@@ -4,6 +4,8 @@ TextMirror Redis 连接管理
 """
 import redis.asyncio as aioredis
 from loguru import logger
+from redis.asyncio.retry import Retry
+from redis.backoff import ExponentialBackoff
 
 from app.core.config import settings
 
@@ -25,6 +27,11 @@ async def init_redis() -> aioredis.Redis:
             max_connections=50,
             socket_timeout=5,
             socket_connect_timeout=5,
+            # 瞬断自动重试：指数退避，最多重试 2 次（共 3 次尝试）
+            retry=Retry(backoff=ExponentialBackoff(base=0.3, cap=2), retries=2),
+            retry_on_error=[ConnectionError, TimeoutError, aioredis.ConnectionError],
+            # 连接池定期探活，剔除已断开的连接
+            health_check_interval=30,
         )
         # 测试连接
         await redis_client.ping()

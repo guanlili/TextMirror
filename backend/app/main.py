@@ -11,19 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-import app.models.api_key  # noqa
-import app.models.audit_log  # noqa
-import app.models.dictionary  # noqa
-import app.models.fact_check  # noqa
-import app.models.global_word  # noqa
-import app.models.issue_feedback  # noqa
-import app.models.llm_config  # noqa
-import app.models.proofread  # noqa
-import app.models.quality_feedback  # noqa
-import app.models.role  # noqa
-
 # 导入所有模型确保表元数据注册（勿删除）
-import app.models.user  # noqa
+import app.models  # noqa: F401
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.database import close_db, init_db
@@ -90,6 +79,18 @@ async def _internal_exception_handler(request: Request, exc: Exception):
 
 
 SLOW_REQUEST_MS = int(os.getenv("SLOW_REQUEST_MS", "3000"))
+# AI 与上传请求天然耗时数秒到数分钟，使用独立阈值，避免正常请求淹没真正的慢告警
+SLOW_LONG_REQUEST_MS = int(os.getenv("SLOW_LONG_REQUEST_MS", "30000"))
+_LONG_REQUEST_PREFIXES = (
+    "/api/v1/proofread",
+    "/api/v1/polish",
+    "/api/v1/document/proofread",
+    "/api/v1/document/upload",
+    "/api/v1/fact-check",
+    "/api/v1/tasks",
+    "/api/v1/open/proofread",
+    "/api/v1/open/documents",
+)
 
 
 async def _slow_request_logging_middleware(request: Request, call_next):
@@ -104,8 +105,14 @@ async def _slow_request_logging_middleware(request: Request, call_next):
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     if response.status_code >= 500:
         logger.error(f"[http] {request.method} {request.url.path} {response.status_code} in {elapsed_ms}ms")
-    elif elapsed_ms >= SLOW_REQUEST_MS:
-        logger.warning(f"[http] slow {request.method} {request.url.path} {response.status_code} in {elapsed_ms}ms")
+    else:
+        threshold = (
+            SLOW_LONG_REQUEST_MS
+            if request.url.path.startswith(_LONG_REQUEST_PREFIXES)
+            else SLOW_REQUEST_MS
+        )
+        if elapsed_ms >= threshold:
+            logger.warning(f"[http] slow {request.method} {request.url.path} {response.status_code} in {elapsed_ms}ms")
     return response
 
 
@@ -171,6 +178,8 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
     )
     open_api_app.include_router(open_router)
+    # 子应用也注册慢请求日志，消除 /api/v1/open/* 的监控盲区
+    open_api_app.middleware("http")(_slow_request_logging_middleware)
     # 422 参数错误与 500 兜底统一为 code+message 契约（其余错误已由端点自行保证）
     open_api_app.add_exception_handler(RequestValidationError, validation_exception_handler)
     open_api_app.add_exception_handler(StarletteHTTPException, _normalize_http_exception)

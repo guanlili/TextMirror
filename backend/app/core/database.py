@@ -12,7 +12,12 @@ from app.core.config import settings
 _pool_kwargs = (
     {"poolclass": NullPool, "connect_args": {"timeout": 20}}
     if settings.DATABASE_URL.startswith("sqlite")
-    else {"pool_size": 20, "max_overflow": 10, "pool_pre_ping": True, "pool_recycle": 3600}
+    else {
+        "pool_size": settings.DB_POOL_SIZE,
+        "max_overflow": settings.DB_MAX_OVERFLOW,
+        "pool_pre_ping": True,
+        "pool_recycle": 3600,
+    }
 )
 
 # 创建异步数据库引擎
@@ -49,7 +54,13 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
-    """初始化数据库（创建所有表）"""
+    """初始化数据库（创建所有表）
+
+    仅开发模式（DEBUG=True）执行 create_all；
+    生产环境由 Alembic 迁移管理表结构，避免 create_all 与迁移状态不一致。
+    """
+    if not settings.DEBUG:
+        return
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

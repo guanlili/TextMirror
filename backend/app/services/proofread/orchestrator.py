@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from loguru import logger
 
+from app.core.config import settings
 from app.services.consistency import check_consistency
 from app.services.format_rules import check_format_rules
 
@@ -158,7 +159,7 @@ async def proofread_text(
     chunk_timeout = max(provider.timeout, _DEEP_CHUNK_TIMEOUT_S) if deep else None
     all_issues = []
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    semaphore = asyncio.Semaphore(min(4, len(chunks)))
+    semaphore = asyncio.Semaphore(min(settings.PROOFREAD_MAX_CONCURRENCY, len(chunks)))
     done_chunks = 0
     streamed_issue_count = 0
     # 进度映射：分片全部完成 → 70%，留 72~95 给自检/后处理（任务侧再映射到自己的进度条）

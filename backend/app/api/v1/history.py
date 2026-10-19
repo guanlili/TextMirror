@@ -119,8 +119,8 @@ async def list_history(
     if domain:
         filters.append(r.domain == domain)
 
-    total = (await db.execute(select(func.count()).select_from(r).where(*filters))).scalar() or 0
-    # 两次批量查询；只取预览与当前审阅字段，绝不加载正文、自动成稿或 review_state.versions。
+    # 单次批量查询；只取预览与当前审阅字段，绝不加载正文、自动成稿或 review_state.versions。
+    # COUNT 用窗口函数随列表一次返回，常规页省掉一次往返；空页再单独补查总数。
     list_query = select(
         r.id, r.type, r.domain, r.total_issues, r.source_filename, r.token_usage, r.created_at,
         func.substr(r.original_text, 1, 101).label("preview"),
@@ -132,8 +132,14 @@ async def list_history(
         r.review_state["issues"].label("saved_issues"),
         r.review_state["coverage"].label("saved_coverage"),
         r.review_state["compare"].label("saved_compare"),
+        func.count().over().label("total_count"),
     ).where(*filters).order_by(desc(r.created_at), desc(r.id)).offset((page - 1) * page_size).limit(page_size)
     records = (await db.execute(list_query)).mappings().all()
+    total = 0
+    if records:
+        total = records[0]["total_count"]
+    elif page > 1:
+        total = (await db.execute(select(func.count()).select_from(r).where(*filters))).scalar() or 0
     items = []
     for row in records:
         result = {

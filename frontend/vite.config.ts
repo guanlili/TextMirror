@@ -1,14 +1,41 @@
 /// <reference types="vitest/config" />
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import * as ElementPlusIcons from '@element-plus/icons-vue'
-import { resolve } from 'path'
+import { gzipSync } from 'node:zlib'
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'path'
 
 // 模板里直接写 <Edit /> <MagicStick /> 等图标标签，按需解析为具名导入
 const iconNames = new Set(Object.keys(ElementPlusIcons))
+
+// 构建产物预压缩：配合 nginx gzip_static 省去每次请求的实时压缩 CPU。
+// 必须在 closeBundle（产物写盘后）压缩：generateBundle 阶段 Vite 内部插件可能
+// 尚未替换 __VITE_PRELOAD__ 等占位符，提前压缩会产出与明文不一致的 .gz。
+function gzipAssets(): Plugin {
+  return {
+    name: 'textmirror-gzip-assets',
+    apply: 'build',
+    closeBundle() {
+      const distDir = resolve(__dirname, 'dist')
+      const compress = (file: string) => {
+        if (!/\.(js|css|html|svg|json)$/.test(file)) return
+        writeFileSync(`${file}.gz`, gzipSync(readFileSync(file), { level: 9 }))
+      }
+      const walk = (dir: string) => {
+        for (const entry of readdirSync(dir)) {
+          const full = join(dir, entry)
+          if (statSync(full).isDirectory()) walk(full)
+          else compress(full)
+        }
+      }
+      walk(distDir)
+    },
+  }
+}
 
 export default defineConfig({
   plugins: [
@@ -25,6 +52,7 @@ export default defineConfig({
       ],
       dts: 'src/components.d.ts',
     }),
+    gzipAssets(),
   ],
   resolve: {
     alias: {
