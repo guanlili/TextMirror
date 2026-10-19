@@ -62,6 +62,7 @@
       <el-table
         v-if="loading || items.length > 0"
         v-loading="loading"
+        class="desktop-table"
         :data="items"
         stripe
         @row-click="openDetail"
@@ -202,8 +203,103 @@
         </el-table-column>
       </el-table>
 
+      <!-- 移动端卡片列表：操作按钮直接可见，无需横向滚动表格 -->
+      <div
+        v-if="items.length > 0"
+        v-loading="loading"
+        class="mobile-list"
+      >
+        <article
+          v-for="row in items"
+          :key="row.id"
+          class="history-card"
+          @click="openDetail(row)"
+        >
+          <div class="card-top">
+            <el-tag
+              :type="recordTypeTag(row.type)"
+              size="small"
+            >
+              {{ recordTypeLabel(row.type) }}
+            </el-tag>
+            <span class="card-time">{{ formatTime(row.created_at) }}</span>
+          </div>
+          <div class="card-preview">
+            {{ row.text_preview }}
+          </div>
+          <div
+            v-if="row.source_filename"
+            class="filename-tag"
+          >
+            <el-tag
+              size="small"
+              type="info"
+            >
+              {{ row.source_filename }}
+            </el-tag>
+          </div>
+          <div
+            v-if="row.type !== 'polish'"
+            class="card-summary"
+          >
+            <div class="summary-tags">
+              <el-tag
+                type="info"
+                size="small"
+              >
+                {{ modeLabel(row.mode) }}
+              </el-tag>
+              <el-tag
+                :type="coverageTag(row.coverage_status)"
+                size="small"
+                effect="plain"
+              >
+                {{ coverageLabel(row.coverage_status) }}
+              </el-tag>
+            </div>
+            <div class="summary-text">
+              已发现 {{ row.review_summary.total }} 项 · {{ decisionSummary(row as HistoryItem) }}
+            </div>
+            <div
+              v-if="row.review_summary.failed_models"
+              class="summary-warning"
+            >
+              {{ row.review_summary.failed_models }} 个模型失败，不能视为零问题
+            </div>
+          </div>
+          <div
+            class="card-actions"
+            @click.stop
+          >
+            <el-button
+              v-if="row.type === 'text' || row.type === 'document'"
+              type="primary"
+              size="small"
+              @click="continueReview(row as HistoryItem)"
+            >
+              继续审阅
+            </el-button>
+            <el-popconfirm
+              title="确定删除此记录？"
+              @confirm="handleDelete(row.id)"
+            >
+              <template #reference>
+                <el-button
+                  type="danger"
+                  size="small"
+                  plain
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-popconfirm>
+            <span class="card-tokens">{{ row.token_usage?.total_tokens || '-' }} tokens</span>
+          </div>
+        </article>
+      </div>
+
       <el-empty
-        v-else
+        v-if="!loading && items.length === 0"
         description="暂无校对历史"
       />
 
@@ -215,6 +311,7 @@
           v-model:current-page="page"
           :page-size="pageSize"
           :total="total"
+          :pager-count="5"
           layout="total, prev, pager, next"
           @current-change="fetchList"
         />
@@ -528,7 +625,28 @@ function polishStyleLabel(style: string): string {
 .summary-text { font-size: 12px; color: var(--color-text-secondary); line-height: 1.7; overflow-wrap: anywhere; }
 .summary-warning { font-size: 12px; color: var(--el-color-warning-dark-2); }
 
-.pagination-wrap { margin-top: 16px; display: flex; justify-content: flex-end; }
+.pagination-wrap { margin-top: 16px; display: flex; justify-content: flex-end; flex-wrap: wrap; }
+
+/* 移动端卡片列表（桌面端隐藏） */
+.mobile-list { display: none; }
+.history-card {
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--surface-soft, #fff);
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+  &:active { box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08); }
+}
+.card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.card-time { font-size: 12px; color: var(--color-text-secondary); }
+.card-preview {
+  font-size: 14px; line-height: 1.6; margin-bottom: 8px; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.card-summary { display: grid; gap: 6px; margin-bottom: 10px; }
+.card-actions { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px dashed var(--color-border); }
+.card-tokens { margin-left: auto; font-size: 12px; color: var(--color-text-secondary); }
 
 .detail-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .detail-text {
@@ -584,6 +702,9 @@ function polishStyleLabel(style: string): string {
   .preview-text {
     max-width: 200px;
   }
+  .desktop-table { display: none; }
+  .mobile-list { display: grid; gap: 10px; }
+  .pagination-wrap { justify-content: center; }
 }
 
 .rerun-bar {

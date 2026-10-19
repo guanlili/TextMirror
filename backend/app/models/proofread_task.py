@@ -5,9 +5,10 @@ TextMirror 持久校对任务模型
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, Index, Integer, String
+from sqlalchemy import Boolean, DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.db_types import json_type
 from app.models.base import BaseModel
 
 
@@ -56,10 +57,10 @@ class ProofreadTask(BaseModel):
         String(64), nullable=True, comment="作用域化幂等键 SHA-256"
     )
     params_json: Mapped[Optional[dict]] = mapped_column(
-        JSON, nullable=True, comment="提交参数 JSON"
+        json_type(), nullable=True, comment="提交参数 JSON"
     )
     result_json: Mapped[Optional[dict]] = mapped_column(
-        JSON, nullable=True, comment="校对结果 JSON"
+        json_type(), nullable=True, comment="校对结果 JSON"
     )
     error_code: Mapped[Optional[str]] = mapped_column(
         String(50), nullable=True, comment="错误码"

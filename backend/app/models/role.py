@@ -38,8 +38,10 @@ class Role(BaseModel):
     # users 不做 eager load：权限校验每请求都 select(Role)，selectin 会连带捞出该角色
     # 全部用户；删除角色时 flush 会在 greenlet 内按需加载以解开外键，行为不变
     users = relationship("User", back_populates="role")
+    # role_permissions 同样不做 eager load：权限校验走显式 JOIN 查询，
+    # 每请求预热整份权限关系统开销；删除时依赖 DB ON DELETE CASCADE / flush 内加载
     role_permissions = relationship(
-        "RolePermission", back_populates="role", lazy="selectin", cascade="all, delete-orphan"
+        "RolePermission", back_populates="role", cascade="all, delete-orphan"
     )
 
     def __repr__(self):

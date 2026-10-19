@@ -3,9 +3,10 @@ TextMirror 校对记录模型
 """
 from typing import Optional
 
-from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.db_types import json_type
 from app.models.base import BaseModel
 
 
@@ -38,7 +39,7 @@ class ProofreadRecord(BaseModel):
         String(50), nullable=False, default="general", comment="领域"
     )
     result: Mapped[Optional[dict]] = mapped_column(
-        JSON, nullable=True, comment="校对结果(JSON)"
+        json_type(), nullable=True, comment="校对结果(JSON)"
     )
     modified_text: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="修改后的文本"
@@ -47,7 +48,7 @@ class ProofreadRecord(BaseModel):
         Integer, nullable=False, default=0, comment="问题总数"
     )
     token_usage: Mapped[Optional[dict]] = mapped_column(
-        JSON, nullable=True, comment="Token用量(JSON)"
+        json_type(), nullable=True, comment="Token用量(JSON)"
     )
     source_filename: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True, comment="源文件名(文档校对)"
@@ -60,7 +61,7 @@ class ProofreadRecord(BaseModel):
         Integer, nullable=False, default=0, server_default="0", comment="审阅 CAS 修订号",
     )
     review_state: Mapped[Optional[dict]] = mapped_column(
-        JSON, nullable=True, comment="审阅草稿及最多20个不可变版本",
+        json_type(), nullable=True, comment="审阅草稿及最多20个不可变版本",
     )
     quota_weight: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1",

@@ -210,6 +210,24 @@ router.beforeEach(async (to) => {
     }
   }
 
+  // 管理后台权限守卫：检查路由链上是否有 requireAdmin，非管理员跳 403
+  const requireAdmin = to.matched.some((record) => record.meta.requireAdmin)
+  if (requireAdmin && token) {
+    const { useUserStore } = await import('@/stores/user')
+    const userStore = useUserStore()
+    // 用户信息尚未加载时先拉取
+    if (!userStore.userInfo) {
+      try {
+        await userStore.fetchUserInfo()
+      } catch {
+        return { name: 'Login', query: { redirect: to.fullPath } }
+      }
+    }
+    if (!userStore.hasPermission('admin:access')) {
+      return { name: 'Forbidden' }
+    }
+  }
+
   // 动态设置页面标题（站点配置在 main.ts 中加载到 DOM title 上，此处做路由级覆盖）
   siteStore.updateDocumentTitle((to.meta.title as string) || '')
 })

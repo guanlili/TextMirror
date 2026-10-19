@@ -4,9 +4,10 @@ TextMirror 操作审计日志模型
 """
 from typing import Optional
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.db_types import json_type
 from app.models.base import BaseModel
 
 
@@ -60,7 +61,7 @@ class AuditLog(BaseModel):
 
     # ---- 额外参数 ----
     extra_params: Mapped[Optional[dict]] = mapped_column(
-        JSON, nullable=True, comment="额外参数（润色风格、校对类型、领域等）"
+        json_type(), nullable=True, comment="额外参数（润色风格、校对类型、领域等）"
     )
 
     # ---- 文件信息（文档校对） ----
@@ -88,7 +89,7 @@ class AuditLog(BaseModel):
         Integer, nullable=True, comment="操作耗时（毫秒）"
     )
     token_usage: Mapped[Optional[dict]] = mapped_column(
-        JSON, nullable=True, comment="AI Token消耗量"
+        json_type(), nullable=True, comment="AI Token消耗量"
     )
 
     # ---- 索引 ----

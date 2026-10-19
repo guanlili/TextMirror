@@ -1,14 +1,45 @@
 /// <reference types="vitest/config" />
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import * as ElementPlusIcons from '@element-plus/icons-vue'
+import { gzipSync } from 'node:zlib'
 import { resolve } from 'path'
 
 // 模板里直接写 <Edit /> <MagicStick /> 等图标标签，按需解析为具名导入
 const iconNames = new Set(Object.keys(ElementPlusIcons))
+
+// 构建产物预压缩：配合 nginx gzip_static 省去每次请求的实时压缩 CPU
+function gzipAssets(): Plugin {
+  return {
+    name: 'textmirror-gzip-assets',
+    apply: 'build',
+    enforce: 'post',
+    generateBundle(_options, bundle) {
+      for (const file of Object.values(bundle)) {
+        if (file.type === 'chunk') {
+          if (!file.fileName.endsWith('.js')) continue
+          this.emitFile({
+            type: 'asset',
+            fileName: `${file.fileName}.gz`,
+            source: gzipSync(Buffer.from(file.code), { level: 9 }),
+          })
+          continue
+        }
+        if (file.type !== 'asset') continue
+        if (!/\.(js|css|html|svg|json)$/.test(file.fileName)) continue
+        const source = typeof file.source === 'string' ? Buffer.from(file.source) : Buffer.from(file.source)
+        this.emitFile({
+          type: 'asset',
+          fileName: `${file.fileName}.gz`,
+          source: gzipSync(source, { level: 9 }),
+        })
+      }
+    },
+  }
+}
 
 export default defineConfig({
   plugins: [
@@ -25,6 +56,7 @@ export default defineConfig({
       ],
       dts: 'src/components.d.ts',
     }),
+    gzipAssets(),
   ],
   resolve: {
     alias: {

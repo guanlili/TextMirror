@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     DB_USER: str = "postgres"
     DB_PASSWORD: str = "your-db-password"
     DATABASE_URL: str = "postgresql+asyncpg://postgres:your-db-password@localhost:5432/textmirror"
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 10
+
+    # ---- 审校引擎配置 ----
+    # 长文档分片并行调用上限；受供应商限流约束，默认 4 保持既有行为
+    PROOFREAD_MAX_CONCURRENCY: int = 4
 
     # ---- Redis 配置 ----
     REDIS_HOST: str = "localhost"

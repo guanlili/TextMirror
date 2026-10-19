@@ -1,9 +1,10 @@
 """质量候选独立于采纳/忽略事件；审核样例不依赖源记录生命周期。"""
 from datetime import datetime
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.db_types import json_type
 from app.models.base import BaseModel
 
 
@@ -44,7 +45,7 @@ class QualityFeedback(BaseModel):
     context_text: Mapped[str] = mapped_column(Text, nullable=False)
     context_start: Mapped[int] = mapped_column(Integer, nullable=False)
     domain: Mapped[str] = mapped_column(String(16), nullable=False)
-    model_snapshot: Mapped[list[dict]] = mapped_column(JSON, nullable=False)
-    sample: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    model_snapshot: Mapped[list[dict]] = mapped_column(json_type(), nullable=False)
+    sample: Mapped[dict | None] = mapped_column(json_type(none_as_null=True), nullable=True)
     review_note: Mapped[str] = mapped_column(String(1000), nullable=False, default="", server_default=text("''"))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

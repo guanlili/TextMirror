@@ -146,7 +146,19 @@ def webhook_deliver(self, api_key_id: int, event: dict):
         ))
         return {"delivered": True, "status_code": resp.status_code}
 
-    # 3xx 不跟随重定向（重定向可能被用于绕过地址校验）；4xx/5xx 重试（410 Gone 等明确放弃场景不区分，统一重试到上限）
+    # 永久性 4xx 不重试：目标明确拒绝，重试无意义
+    _PERMANENT_FAILURE = {400, 401, 403, 404, 405, 410, 422}
+    if resp.status_code in _PERMANENT_FAILURE:
+        logger.warning(
+            f"[Webhook] 目标返回永久失败(不重试) "
+            f"key={api_key_id} event={event.get('event')} status={resp.status_code}"
+        )
+        _record_delivery(api_key_id, _delivery_entry(
+            event, "failed", status_code=resp.status_code, attempt=self.request.retries + 1,
+        ))
+        return {"delivered": False, "status_code": resp.status_code, "permanent": True}
+
+    # 临时性 4xx（408/429）和 5xx 走重试
     logger.warning(
         f"[Webhook] 目标返回非 2xx(将重试 {self.request.retries}/{MAX_RETRIES}) "
         f"key={api_key_id} event={event.get('event')} status={resp.status_code}"

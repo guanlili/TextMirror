@@ -20,6 +20,7 @@ from app.schemas.global_word import (
     GlobalWordStats,
     GlobalWordUpdate,
 )
+from app.services.proofread.words import invalidate_global_words_cache
 
 router = APIRouter(prefix="/global-dict", tags=["全局词库管理"])
 
@@ -98,6 +99,7 @@ async def create_global_word(
     await db.flush()
     await db.refresh(word)
     logger.info(f"全局词条已添加: {data.word} ({data.type})")
+    await invalidate_global_words_cache()
     return word
 
 
@@ -137,6 +139,8 @@ async def batch_create_global_words(
 
     await db.flush()
     logger.info(f"批量添加全局词条: 成功={added}, 跳过={skipped}")
+    if added:
+        await invalidate_global_words_cache()
     return {"message": f"成功添加 {added} 条，跳过 {skipped} 条重复", "added": added, "skipped": skipped}
 
 
@@ -160,6 +164,7 @@ async def update_global_word(
 
     await db.flush()
     await db.refresh(word)
+    await invalidate_global_words_cache()
     return word
 
 
@@ -175,6 +180,7 @@ async def delete_global_word(
     if not word:
         raise HTTPException(status_code=404, detail="词条不存在")
     await db.delete(word)
+    await invalidate_global_words_cache()
     logger.info(f"全局词条已删除: {word.word} ({word.type})")
 
 

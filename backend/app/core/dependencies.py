@@ -113,13 +113,20 @@ def require_permission(permission_code: str):
         db: AsyncSession = Depends(get_db),
     ):
         # 延迟导入避免循环依赖
+        from sqlalchemy.orm.exc import DetachedInstanceError
+
         from app.models.role import Permission, Role, RolePermission
 
+        # role 通常已由 get_current_user 预加载；测试/特殊注入对象缺少 role 时回退查库
+        try:
+            role = getattr(current_user, "role", None)
+        except DetachedInstanceError:
+            role = None
+        if role is None:
+            result = await db.execute(select(Role).where(Role.id == current_user.role_id))
+            role = result.scalar_one_or_none()
+
         # 超级管理员拥有所有权限
-        result = await db.execute(
-            select(Role).where(Role.id == current_user.role_id)
-        )
-        role = result.scalar_one_or_none()
         if role and role.code == "super_admin":
             return current_user
 

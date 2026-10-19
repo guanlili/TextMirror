@@ -785,7 +785,7 @@ async def test_history_legacy_compare_and_failed_models_never_claim_complete(cli
     assert item["review_summary"]["total"] == 0 and detail["issues"] == []
 
 
-async def test_history_list_projects_small_fields_in_two_queries_and_enforces_owner(client, owner, monkeypatch):
+async def test_history_list_projects_small_fields_in_one_query_and_enforces_owner(client, owner, monkeypatch):
     from sqlalchemy import event
 
     from app.api.v1 import history as api
@@ -815,8 +815,9 @@ async def test_history_list_projects_small_fields_in_two_queries_and_enforces_ow
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["total"] == 3 and len(payload["items"]) == 2
-    assert len(queries) == 2
-    sql, params = queries[1]
+    # COUNT 已用窗口函数并入列表查询，常规页只需一次往返
+    assert len(queries) == 1
+    sql, params = queries[0]
     assert "substr(proofread_records.original_text" in sql
     assert "proofread_records.modified_text" not in sql
     assert ", proofread_records.review_state" not in sql and "versions" not in str(params)

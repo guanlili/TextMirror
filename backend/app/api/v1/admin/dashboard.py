@@ -1,10 +1,12 @@
 """
 TextMirror 管理后台仪表盘 API
 """
+import json
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
+from loguru import logger
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,7 +38,17 @@ async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
     _user=Depends(require_permission("admin:access")),
 ):
-    """获取仪表盘统计数据"""
+    """获取仪表盘统计数据（Redis 缓存 30 秒，避免运营页反复全表聚合）"""
+    from app.core.redis import get_redis
+
+    cache_key = "textmirror:dashboard_stats"
+    try:
+        cached = await get_redis().get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception as e:
+        logger.warning(f"仪表盘缓存读取失败（降级查库）: {e}")
+
     today = local_today().isoformat()
     today_expr_proofread = _today_expr(ProofreadRecord.created_at) == today
     today_expr_doc = _today_expr(UploadedDocument.created_at) == today
@@ -72,7 +84,7 @@ async def get_dashboard_stats(
     total_document_count = doc_stats.total or 0
     today_document_count = doc_stats.today or 0
 
-    return {
+    payload = {
         "today_proofread_count": today_proofread_count,
         "total_proofread_count": total_proofread_count,
         "total_users": total_users,
@@ -81,6 +93,12 @@ async def get_dashboard_stats(
         "today_document_count": today_document_count,
         "total_document_count": total_document_count,
     }
+    try:
+        # SUM() 在 PostgreSQL 返回 Decimal，default=int 保持与正常响应一致的数值类型
+        await get_redis().set(cache_key, json.dumps(payload, ensure_ascii=False, default=int), ex=30)
+    except Exception as e:
+        logger.warning(f"仪表盘缓存写入失败（不影响响应）: {e}")
+    return payload
 
 
 @router.get("/model-usage", summary="按业务和模型查看实际调用用量（非费用账单）")
