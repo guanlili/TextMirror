@@ -29,12 +29,23 @@ export const useUserStore = defineStore('user', () => {
     return res
   }
 
+  // 并发去重：启动初始化、路由守卫、页面挂载可能同时请求，共享同一个 Promise
+  let pendingUserInfo: Promise<UserInfo> | null = null
+
   // 获取用户信息
   async function fetchUserInfo() {
-    const res = await getMeApi()
-    userInfo.value = res
-    permissions.value = res.permissions || []
-    return res
+    if (pendingUserInfo) return pendingUserInfo
+    pendingUserInfo = (async () => {
+      const res = await getMeApi()
+      userInfo.value = res
+      permissions.value = res.permissions || []
+      return res
+    })()
+    try {
+      return await pendingUserInfo
+    } finally {
+      pendingUserInfo = null
+    }
   }
 
   // 登出
