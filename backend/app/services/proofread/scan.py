@@ -1,5 +1,13 @@
 from typing import Any, Dict, List, Optional
 
+from app.services.punctuation_pairs import PAIRING_CHARS
+
+
+def _is_single_pairing_mark(issue: Dict[str, Any]) -> bool:
+    original = issue.get("original") or ""
+    return (issue.get("source") == "format_rule" and len(original) == 1
+            and original in PAIRING_CHARS)
+
 
 def scan_words_deterministic(text: str,
                              global_words: Dict[str, List[Dict]],
@@ -86,6 +94,15 @@ def merge_issues(llm_issues: List[Dict[str, Any]],
             continue
         if s.get("start") is not None:
             duplicate = tuple(s.get(k) for k in position_fields) in positioned
+            # 配对规则报裸引号/括号，LLM 可能报同一处的整段引文（建议为空或含引号），
+            # 同类型且坐标被 LLM 区间覆盖即视为同一问题。
+            if not duplicate and s.get("end") is not None and _is_single_pairing_mark(s):
+                duplicate = any(
+                    i.get("start") is not None and i.get("end") is not None
+                    and i.get("type") == s["type"]
+                    and i["start"] <= s["start"] and s["end"] <= i["end"]
+                    for i in llm_issues
+                )
             if not duplicate and s.get("end") is not None:
                 duplicate = any(
                     i.get("start") is not None and i.get("end") is not None
