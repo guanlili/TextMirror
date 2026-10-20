@@ -14,6 +14,12 @@ from typing import Any, Dict, List
 
 from loguru import logger
 
+from app.services.punctuation_pairs import (
+    find_unmatched_pairing,
+    is_pairing_closer,
+    pairing_labels,
+)
+
 # 日期：YYYY年M月D日
 _DATE_CN_RE = re.compile(r"(\d{4})年(\d{1,2})月(\d{1,2})日")
 # 日期：YYYY.M.D / YYYY-M-D / YYYY/M/D（分隔符须统一，混合如 2025.1-3 判为格式错）
@@ -223,6 +229,25 @@ def check_halfwidth_punct(text: str) -> List[Dict[str, Any]]:
     return issues
 
 
+def check_paired_punctuation(text: str) -> List[Dict[str, Any]]:
+    """引号/括号全文配对：只报无歧义的未配对字符。
+
+    多段引语（每段段首前引号、仅末段段末后引号）由配对层识别为同一对，
+    不按「段内必须成对」误报。配对问题不提供自动替换，避免误删引文。
+    """
+    issues: List[Dict[str, Any]] = []
+    for start, char in sorted(find_unmatched_pairing(text).items()):
+        opening_label, closing_label = pairing_labels(char)
+        if is_pairing_closer(char):
+            explanation = f"{closing_label}「{char}」前没有对应的{opening_label}，请核对"
+        else:
+            explanation = f"{opening_label}「{char}」后没有对应的{closing_label}，请核对"
+        issues.append(_issue(
+            char, "", explanation, "warning", start=start, end=start + 1,
+        ))
+    return issues
+
+
 def check_format_rules(text: str) -> List[Dict[str, Any]]:
     """格式规则引擎入口"""
     issues: List[Dict[str, Any]] = []
@@ -233,6 +258,7 @@ def check_format_rules(text: str) -> List[Dict[str, Any]]:
         issues.extend(check_sequence_style(text))
         issues.extend(check_confusable_collocations(text))
         issues.extend(check_halfwidth_punct(text))
+        issues.extend(check_paired_punctuation(text))
     except Exception as e:
         logger.warning(f"[格式规则] 执行异常（跳过）: {e}")
     if issues:

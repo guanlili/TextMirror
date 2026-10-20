@@ -3,6 +3,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
+from app.services.punctuation_pairs import filter_false_pairing_issues
+
 from .chunking import ChunkSpan
 from .constants import _SELF_CHECK_TEXT_LIMIT
 from .entity_guard import protect_entity_suggestions
@@ -202,4 +204,5 @@ def verify_llm_issues(text: str, issues: List[Dict[str, Any]],
     if fuzzy_fixed or len(verified) != len(issues):
         dropped = len(issues) - len([i for i in issues if (i.get("original") or "").strip()])
         logger.info(f"[自校验] 模糊对齐 {fuzzy_fixed} 条，丢弃空原文 {dropped} 条，降级 {sum(1 for i in verified if '原文定位失败' in i.get('explanation', ''))} 条")
-    return protect_numeric_suggestions(verified)
+    # 配对问题按全文复核：分片/长引语导致的「不成对」误报在此丢弃
+    return filter_false_pairing_issues(text, protect_numeric_suggestions(verified), chunk_spans)
