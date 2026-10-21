@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import Request
 from loguru import logger
 
+from app.core.config import settings
 from app.core.database import async_session_factory
 from app.models.audit_log import AuditLog
 from app.utils.ip import get_client_ip
@@ -27,6 +28,20 @@ def _spawn_audit_task(log_data: dict) -> None:
     except RuntimeError:
         logger.warning("审计日志异步写入降级为同步日志记录")
         logger.info(f"[AUDIT] {log_data.get('action_type')} | user={log_data.get('username')} | ip={log_data.get('client_ip')}")
+
+
+def _bounded_input(input_text: Optional[str], extra_params: Optional[dict]):
+    """审计只存输入文本预览；完整原文由 proofread_records 保存，避免双份存储。"""
+    original_length = len(input_text) if input_text else 0
+    limit = settings.AUDIT_INPUT_MAX_CHARS
+    if limit > 0 and input_text and original_length > limit:
+        bounded = {
+            **(extra_params or {}),
+            "input_truncated": True,
+            "input_original_length": original_length,
+        }
+        return input_text[:limit], original_length, bounded
+    return input_text, original_length, extra_params
 
 
 def detect_device_type(user_agent: str) -> str:
@@ -103,6 +118,7 @@ def record_audit_log(
     :param token_usage: Token 消耗
     """
     user_agent = request.headers.get("User-Agent", "")
+    input_text, input_length, extra_params = _bounded_input(input_text, extra_params)
 
     log_data = {
         "action_type": action_type,
@@ -114,7 +130,7 @@ def record_audit_log(
         "user_agent": user_agent[:500] if user_agent else None,
         "device_type": detect_device_type(user_agent),
         "input_text": input_text,
-        "input_length": len(input_text) if input_text else 0,
+        "input_length": input_length,
         "output_text": output_text,
         "output_length": len(output_text) if output_text else 0,
         "extra_params": extra_params,

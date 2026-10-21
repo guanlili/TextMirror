@@ -91,6 +91,31 @@ async def test_password_login_updates_last_login_metadata(client):
     assert user.login_method == "password"
 
 
+async def test_quick_login_blocks_public_ip_in_production(client, monkeypatch):
+    from app.api.v1 import auth as auth_module
+    from app.core.config import settings
+
+    await _ensure_user("demo")
+    monkeypatch.setattr(settings, "DEBUG", False)
+    monkeypatch.setattr(auth_module, "get_client_ip", lambda request: "8.8.8.8")
+
+    resp = await _quick_login(client, "demo")
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "QUICK_LOGIN_INTERNAL_ONLY"
+
+
+async def test_quick_login_allows_private_ip_in_production(client, monkeypatch):
+    from app.api.v1 import auth as auth_module
+    from app.core.config import settings
+
+    await _ensure_user("demo")
+    monkeypatch.setattr(settings, "DEBUG", False)
+    monkeypatch.setattr(auth_module, "get_client_ip", lambda request: "10.2.1.5")
+
+    resp = await _quick_login(client, "demo")
+    assert resp.status_code == 200, resp.text
+
+
 async def test_quick_login_unknown_account_404(client):
     resp = await _quick_login(client, "someoneelse")
     assert resp.status_code == 404
