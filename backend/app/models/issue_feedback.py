@@ -17,6 +17,7 @@ class IssueFeedback(BaseModel):
         # 高频查询：按记录聚合、按用户统计、按原文聚合（发现高频误报词）
         Index("ix_issue_feedbacks_record", "record_id"),
         Index("ix_issue_feedbacks_user", "user_id"),
+        Index("ix_issue_feedbacks_guest", "guest_id"),
         Index("ix_issue_feedbacks_original", "original"),
     )
 
@@ -24,8 +25,11 @@ class IssueFeedback(BaseModel):
         Integer, ForeignKey("proofread_records.id", ondelete="SET NULL"),
         nullable=True, comment="校对记录ID（记录被删时保留反馈）"
     )
-    user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id"), nullable=False, comment="操作用户ID"
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True, comment="操作用户ID（游客为null）"
+    )
+    guest_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, comment="匿名访客ID（登录用户为null）"
     )
     original: Mapped[str] = mapped_column(
         String(500), nullable=False, comment="问题原文片段"

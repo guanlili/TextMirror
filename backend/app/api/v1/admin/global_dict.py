@@ -193,7 +193,8 @@ class WhitelistSuggestion(BaseModel):
     """放行词候选：高忽略且零接受"""
     word: str = Field(..., description="问题原文")
     ignore_count: int = Field(..., description="被忽略次数")
-    user_count: int = Field(..., description="独立用户数")
+    user_count: int = Field(..., description="独立登录用户数")
+    guest_count: int = Field(0, description="独立游客数")
     last_ignored_at: Optional[str] = Field(None, description="最近忽略时间")
 
 
@@ -202,7 +203,8 @@ class CorrectionSuggestion(BaseModel):
     word: str = Field(..., description="错误写法")
     suggestion: str = Field(..., description="被接受的建议写法")
     accept_count: int = Field(..., description="被接受次数")
-    user_count: int = Field(..., description="独立用户数")
+    user_count: int = Field(..., description="独立登录用户数")
+    guest_count: int = Field(0, description="独立游客数")
 
 
 class DictSuggestions(BaseModel):
@@ -218,7 +220,7 @@ async def get_dict_suggestions(
     min_count: int = Query(3, ge=1, le=50, description="最小出现次数阈值"),
 ):
     """
-    聚合用户对审校建议的接受/忽略行为，产出两类词库优化建议：
+    聚合登录用户与游客对审校建议的接受/忽略行为，产出两类词库优化建议：
     - whitelist：被忽略 ≥min_count 次且从未被接受的词 → 建议加入放行词
     - correction：typo 类被接受 ≥min_count 次 → 建议沉淀为全局纠错词
     已存在于全局词库/放行词中的自动排除。
@@ -231,6 +233,7 @@ async def get_dict_suggestions(
             IssueFeedback.original,
             func.count().label("cnt"),
             func.count(func.distinct(IssueFeedback.user_id)).label("users"),
+            func.count(func.distinct(IssueFeedback.guest_id)).label("guests"),
             func.max(IssueFeedback.created_at).label("last_at"),
         )
         .where(IssueFeedback.action == "ignore")
@@ -257,7 +260,8 @@ async def get_dict_suggestions(
             continue
         last_at = stat.last_at.strftime("%Y-%m-%d %H:%M") if stat.last_at else None
         whitelist_suggestions.append(WhitelistSuggestion(
-            word=word, ignore_count=stat.cnt, user_count=stat.users, last_ignored_at=last_at,
+            word=word, ignore_count=stat.cnt, user_count=stat.users,
+            guest_count=stat.guests, last_ignored_at=last_at,
         ))
     whitelist_suggestions.sort(key=lambda s: s.ignore_count, reverse=True)
 
@@ -268,6 +272,7 @@ async def get_dict_suggestions(
             IssueFeedback.suggestion,
             func.count().label("cnt"),
             func.count(func.distinct(IssueFeedback.user_id)).label("users"),
+            func.count(func.distinct(IssueFeedback.guest_id)).label("guests"),
         )
         .where(
             IssueFeedback.action == "accept",
@@ -291,7 +296,8 @@ async def get_dict_suggestions(
             continue
         seen_words.add(r.original)
         correction_suggestions.append(CorrectionSuggestion(
-            word=r.original, suggestion=r.suggestion, accept_count=r.cnt, user_count=r.users,
+            word=r.original, suggestion=r.suggestion, accept_count=r.cnt,
+            user_count=r.users, guest_count=r.guests,
         ))
     correction_suggestions.sort(key=lambda s: s.accept_count, reverse=True)
 

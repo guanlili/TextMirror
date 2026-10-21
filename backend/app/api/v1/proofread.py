@@ -418,33 +418,43 @@ async def submit_issue_feedback(
     http_request: Request,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user_optional),
+    guest_id: Optional[str] = Depends(get_guest_id),
 ):
     """
     上报用户对审校建议的接受/忽略行为（fire-and-forget，前端不阻塞交互）。
-    仅登录用户记录（游客无归属意义）；数据用于后续词库优化（高忽略率→放行词候选）。
+    登录用户与匿名游客都记录（游客按签名 Cookie 归属）；数据用于词库优化（高忽略率→放行词候选）。
     """
     from app.models.issue_feedback import IssueFeedback
 
-    if current_user is None:
+    if current_user is None and not guest_id:
         return {"saved": 0}
 
     # 归属校验：否则可给他人记录写反馈，污染词库建议飞轮
     if request.record_id is not None:
         from sqlalchemy import select
-        owner = await db.execute(
-            select(ProofreadRecord.user_id).where(ProofreadRecord.id == request.record_id)
-        )
-        owner_id = owner.scalar_one_or_none()
-        if owner_id is None:
+        owner = (await db.execute(
+            select(
+                ProofreadRecord.user_id,
+                ProofreadRecord.owner_kind,
+                ProofreadRecord.guest_id,
+            ).where(ProofreadRecord.id == request.record_id)
+        )).one_or_none()
+        if owner is None:
             raise NotFoundError(code="RECORD_NOT_FOUND", message="校对记录不存在")
-        if owner_id != current_user.id:
+        if current_user is not None:
+            if owner.user_id != current_user.id:
+                raise ForbiddenError(code="FEEDBACK_NOT_ALLOWED", message="无权对该记录提交反馈")
+        elif owner.owner_kind != "guest" or owner.guest_id != guest_id:
             raise ForbiddenError(code="FEEDBACK_NOT_ALLOWED", message="无权对该记录提交反馈")
 
+    actor_user_id = current_user.id if current_user is not None else None
+    actor_guest_id = guest_id if current_user is None else None
     saved = 0
     for item in request.items:
         db.add(IssueFeedback(
             record_id=request.record_id,
-            user_id=current_user.id,
+            user_id=actor_user_id,
+            guest_id=actor_guest_id,
             original=item.original,
             suggestion=item.suggestion,
             issue_type=item.issue_type,
@@ -453,5 +463,6 @@ async def submit_issue_feedback(
         saved += 1
     await db.flush()
 
-    logger.info(f"[反馈] user={current_user.id} record={request.record_id} 条数={saved}")
+    actor = f"user:{actor_user_id}" if actor_user_id is not None else f"guest:{str(actor_guest_id)[:8]}"
+    logger.info(f"[反馈] {actor} record={request.record_id} 条数={saved}")
     return {"saved": saved}
