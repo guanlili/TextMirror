@@ -9,6 +9,7 @@ from app.api.v1.admin.audit import router as admin_audit_router
 from app.api.v1.admin.dashboard import router as admin_dashboard_router
 from app.api.v1.admin.documents import router as admin_documents_router
 from app.api.v1.admin.global_dict import router as admin_global_dict_router
+from app.api.v1.admin.guest_data import router as admin_guest_data_router
 from app.api.v1.admin.llm_config import router as admin_llm_config_router
 from app.api.v1.admin.policy import router as admin_policy_router
 from app.api.v1.admin.quality_evaluation import router as admin_quality_evaluation_router
@@ -77,6 +78,7 @@ api_router.include_router(admin_llm_config_router, prefix="/admin")
 api_router.include_router(admin_settings_router, prefix="/admin")
 api_router.include_router(admin_audit_router, prefix="/admin")
 api_router.include_router(admin_documents_router, prefix="/admin")
+api_router.include_router(admin_guest_data_router, prefix="/admin")
 api_router.include_router(admin_policy_router, prefix="/admin")
 api_router.include_router(admin_api_keys_router, prefix="/admin")
 api_router.include_router(admin_system_config_router, prefix="/admin")

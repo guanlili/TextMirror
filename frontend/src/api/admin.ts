@@ -447,3 +447,77 @@ export function cleanCacheApi(): Promise<MaintenanceResult> {
 export function cleanExpiredWhitelistApi(): Promise<MaintenanceResult> {
   return request.post('/admin/system-config/maintenance/clean-expired-whitelist')
 }
+
+// ========== 游客数据 ==========
+export interface GuestDataStats {
+  days: number
+  records: number
+  proofreads: number
+  guests: number
+  chars: number
+  issues: number
+  avg_issues: number
+  texts: number
+  documents: number
+  polishes: number
+  domains: Array<{ domain: string; count: number }>
+}
+
+export interface GuestDataIssue {
+  original?: string
+  suggestion?: string
+  type?: string
+  explanation?: string
+  [key: string]: unknown
+}
+
+export interface GuestDataItem {
+  id: number
+  type: string
+  domain: string
+  total_issues: number
+  quota_weight: number
+  chars: number
+  preview: string
+  guest_label: string
+  created_at: string | null
+}
+
+export interface GuestDataDetail {
+  id: number
+  type: string
+  domain: string
+  total_issues: number
+  quota_weight: number
+  guest_label: string
+  original_text: string
+  modified_text?: string | null
+  issues: GuestDataIssue[]
+  created_at: string | null
+}
+
+export interface GuestDataListResponse {
+  items: GuestDataItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export function getGuestDataStatsApi(days = 30): Promise<GuestDataStats> {
+  return request.get('/admin/guest-data/stats', { params: { days } })
+}
+
+export function listGuestDataApi(params: {
+  page?: number
+  page_size?: number
+  days?: number
+  type?: string
+  domain?: string
+  keyword?: string
+}): Promise<GuestDataListResponse> {
+  return request.get('/admin/guest-data/records', { params })
+}
+
+export function getGuestDataDetailApi(id: number): Promise<GuestDataDetail> {
+  return request.get(`/admin/guest-data/records/${id}`)
+}
