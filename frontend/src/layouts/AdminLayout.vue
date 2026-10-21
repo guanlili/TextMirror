@@ -95,7 +95,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { DataAnalysis, TrendCharts, Reading, Notebook, ChatDotRound, Cpu, User, Lock, Setting, Key, Folder, List, Tools } from '@element-plus/icons-vue'
+import { DataAnalysis, TrendCharts, Reading, Notebook, ChatDotRound, Cpu, User, UserFilled, Lock, Setting, Key, Folder, List, Tools } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useSiteStore } from '@/stores/site'
 const router = useRouter()
@@ -109,6 +109,7 @@ const groups = [
  { title: '运营与质量', items: [
   { path: '/admin/dashboard', title: '运营概览', icon: DataAnalysis, permission: 'admin:access' },
   { path: '/admin/usage', title: '调用与用量', icon: TrendCharts, permission: 'admin:access' },
+  { path: '/admin/guest-data', title: '游客数据', icon: UserFilled, permission: 'admin:access' },
   { path: '/admin/quality', title: '质量反馈', icon: ChatDotRound, permission: 'admin:global_dict:edit' },
  ] },
  { title: '审校能力', items: [
@@ -130,7 +131,7 @@ const groups = [
 ]
 const visibleGroups = computed(() => groups.map(group => ({ ...group, items: group.items.filter(item => userStore.hasPermission(item.permission)) })).filter(group => group.items.length))
 const descriptions: Record<string, string> = {
- '/admin/dashboard': '平台使用情况与常用管理入口', '/admin/usage': '真实调用记录、模型消耗与异常请求', '/admin/quality': '人工审核反馈，验证审校质量', '/admin/domain-rules': '维护通用检查与可选专业规范', '/admin/global-dict': '统一术语、纠错与放行规则', '/admin/llm': '管理模型连接与默认服务', '/admin/users': '管理成员、角色和个人额度', '/admin/roles': '按职责分配管理与使用权限', '/admin/policy': '配置游客访问范围与每日额度', '/admin/documents': '查看平台上传的文档记录', '/admin/apikeys': '管理接口访问密钥', '/admin/audit': '追溯操作记录与使用行为', '/admin/settings': '平台配置与系统维护',
+ '/admin/dashboard': '平台使用情况与常用管理入口', '/admin/usage': '真实调用记录、模型消耗与异常请求', '/admin/guest-data': '匿名游客语料、问题分布与质量分析', '/admin/quality': '人工审核反馈，验证审校质量', '/admin/domain-rules': '维护通用检查与可选专业规范', '/admin/global-dict': '统一术语、纠错与放行规则', '/admin/llm': '管理模型连接与默认服务', '/admin/users': '管理成员、角色和个人额度', '/admin/roles': '按职责分配管理与使用权限', '/admin/policy': '配置游客访问范围与每日额度', '/admin/documents': '查看平台上传的文档记录', '/admin/apikeys': '管理接口访问密钥', '/admin/audit': '追溯操作记录与使用行为', '/admin/settings': '平台配置与系统维护',
 }
 const pageDescription = computed(() => descriptions[route.path] || '管理工作台')
 function checkMobile() { isMobile.value = window.innerWidth <= 768; if (isMobile.value) isCollapse.value = false; else mobileOpen.value = false }

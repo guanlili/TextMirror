@@ -106,6 +106,7 @@ const adminRoutes: RouteRecordRaw[] = [
     meta: { title: '管理后台', requireAuth: true, requireAdmin: true },
     children: [
       { path: 'usage', name: 'AdminUsage', component: () => import('@/views/admin/usage/index.vue'), meta: { title: '调用与用量', icon: 'TrendCharts' } },
+      { path: 'guest-data', name: 'AdminGuestData', component: () => import('@/views/admin/guest-data/index.vue'), meta: { title: '游客数据', icon: 'UserFilled' } },
       { path: 'quality', name: 'AdminQuality', component: () => import('@/views/admin/quality/index.vue'), meta: { title: '质量反馈', icon: 'ChatDotRound' } },
       {
         path: 'dashboard',
