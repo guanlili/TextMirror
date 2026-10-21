@@ -9,6 +9,7 @@
 ### 新增
 - 游客数据底座：新增签名访客 Cookie（HttpOnly + HMAC），文本校对、模型对比、润色、文档同步/异步均落 `proofread_records`，后台按游客/登录用户/API 分群统计；新增 `owner_kind`、`guest_id`、`owner_guest_id` 迁移并回填历史 API 记录。游客记录长期保留，运维手册补充隐私告知与删除/导出要求。([#174](https://github.com/guanlili/TextMirror/pull/174))
 - 游客审校反馈：`issue_feedbacks` 支持 `guest_id`，游客的接受/忽略建议按签名 Cookie 归属落库；后台词库优化建议分群展示登录用户与游客。([#175](https://github.com/guanlili/TextMirror/pull/175))
+- 管理端游客语料看板：按时间/类型/领域/原文关键词筛选游客记录，查看统计、原文与问题列表；游客 ID 仅展示短标识。([#177](https://github.com/guanlili/TextMirror/pull/177))
 
 ### 性能与重构
 - 提取共享 `IssueCard` 组件，消除文本/文档两个审校页约 300 行重复的问题卡片模板与样式；问题列表改渐进渲染（首批 100 条 +「加载更多」），长文数百问题不再一次性渲染全量。([#127](https://github.com/guanlili/TextMirror/pull/127))
