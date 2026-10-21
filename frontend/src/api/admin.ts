@@ -411,6 +411,7 @@ export interface WhitelistSuggestion {
   word: string
   ignore_count: number
   user_count: number
+  guest_count: number
   last_ignored_at?: string | null
 }
 
@@ -419,6 +420,7 @@ export interface CorrectionSuggestion {
   suggestion: string
   accept_count: number
   user_count: number
+  guest_count: number
 }
 
 export interface DictSuggestions {

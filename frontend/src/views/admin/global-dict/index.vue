@@ -432,7 +432,9 @@
           >
             <div class="sug-main">
               <span class="sug-word">{{ s.word }}</span>
-              <span class="sug-meta">被忽略 {{ s.ignore_count }} 次 · {{ s.user_count }} 位用户</span>
+              <span class="sug-meta">
+                被忽略 {{ s.ignore_count }} 次 · {{ s.user_count }} 位用户<template v-if="s.guest_count"> · {{ s.guest_count }} 位游客</template>
+              </span>
             </div>
             <el-button
               type="success"
@@ -456,7 +458,9 @@
           >
             <div class="sug-main">
               <span class="sug-word">{{ s.word }} → {{ s.suggestion }}</span>
-              <span class="sug-meta">被接受 {{ s.accept_count }} 次 · {{ s.user_count }} 位用户</span>
+              <span class="sug-meta">
+                被接受 {{ s.accept_count }} 次 · {{ s.user_count }} 位用户<template v-if="s.guest_count"> · {{ s.guest_count }} 位游客</template>
+              </span>
             </div>
             <el-button
               type="primary"
