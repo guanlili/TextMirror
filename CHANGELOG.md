@@ -16,6 +16,7 @@
 - 润色页脚本（状态/三档流式/多模型对比/复制/生命周期）抽到 `usePolish` 组合式、Markdown 渲染抽到 `utils/markdown`，页面文件 1789→1386 行；模板与样式保持不变。([#127](https://github.com/guanlili/TextMirror/pull/127))
 
 ### 修复与安全
+- 密码登录与一键登录成功写入 `last_login_at` / `login_method`；游客配额改为按访客 ID 主计数并设同 IP 日上限，防止清 Cookie 换 ID 绕过。([#176](https://github.com/guanlili/TextMirror/pull/176))
 - 引号/括号配对改为全文确定性校验：长引语跨分片、多段引语（每段段首前引号）不再误报「不成对」；LLM 配对误报按分片位置过滤，真实未闭合仍保留提示。([#173](https://github.com/guanlili/TextMirror/pull/173))
 - 飞书登录/SSO 链路日志手机号脱敏（前3后4保留）；上传文本进程内缓存加字符总量上限（单条超限不入缓存走 DB 回源，累计超限 LRU 淘汰），防大文档撑爆单 worker 内存。([#126](https://github.com/guanlili/TextMirror/pull/126))
 - 管理端用户更新接口的角色/启用状态变更收归超级管理员专属，堵住普通管理员自我提权与停用超管的路径；系统设置默认密码不再明文回传（掩码 `******`，掩码提交视为不修改）。([#124](https://github.com/guanlili/TextMirror/pull/124))
