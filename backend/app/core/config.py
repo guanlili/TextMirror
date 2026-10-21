@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     ORPHAN_DIR_MIN_AGE_HOURS: int = 24
     FACT_CHECK_RETENTION_DAYS: int = Field(default=90, ge=1, le=3650)
 
+    # 审计日志输入文本上限；全文由 proofread_records 保存，避免重复存储
+    AUDIT_INPUT_MAX_CHARS: int = 500
+
     # ---- 游客限流配置 ----
     GUEST_DAILY_LIMIT: int = 100
     # 同一 IP 的游客日上限，防止清 Cookie 换访客 ID 绕过主配额；0=关闭

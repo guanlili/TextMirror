@@ -2,6 +2,7 @@
 TextMirror 认证 API
 包含登录、获取当前用户信息、密码修改等接口
 """
+import ipaddress
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -44,6 +45,14 @@ from app.schemas.auth import (
 from app.services.audit_log import get_client_ip, record_audit_log_sync
 
 router = APIRouter(prefix="/auth", tags=["认证"])
+
+
+def _is_internal_ip(value: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_private
 
 
 def _mark_login(user: User, method: str) -> None:
@@ -282,6 +291,12 @@ async def quick_login(
         raise ForbiddenError(code="QUICK_LOGIN_DISABLED", message="一键登录已关闭，请使用账号密码登录")
 
     client_ip = get_client_ip(http_request)
+    # 一键登录是内网演示入口；生产环境不允许公网来源直接换取管理员 token
+    if not settings.DEBUG and not _is_internal_ip(client_ip):
+        raise ForbiddenError(
+            code="QUICK_LOGIN_INTERNAL_ONLY",
+            message="一键登录仅限内网使用，请使用账号密码登录",
+        )
     if account not in ("admin", "demo"):
         raise NotFoundError(code="DEMO_ACCOUNT_NOT_FOUND", message="演示账号不存在")
     # RPM 限流（借固定分钟窗口计数；超限 429）
