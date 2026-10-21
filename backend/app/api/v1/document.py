@@ -556,7 +556,7 @@ async def document_proofread(
     refund_id = str(uuid.uuid4())
     if current_user is None:
         await reject_guest_if_disabled(http_request)
-        await check_guest_rate_limit(http_request)
+        await check_guest_rate_limit(http_request, guest_id=guest_id)
     else:
         quota_key = await charge_user_daily_quota(current_user)
 
@@ -712,7 +712,7 @@ async def document_proofread_async(
     quota_key = None
     if current_user is None:
         await reject_guest_if_disabled(http_request)
-        await check_guest_rate_limit(http_request)
+        await check_guest_rate_limit(http_request, guest_id=guest_id)
     else:
         # 保存实际预扣日；不限额/Redis 未扣成功均为 None。
         quota_key = await charge_user_daily_quota(current_user)

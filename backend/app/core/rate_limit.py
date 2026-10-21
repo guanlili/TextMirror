@@ -18,10 +18,14 @@ from app.models.proofread import ProofreadRecord
 from app.utils.ip import get_client_ip
 
 
-async def check_guest_rate_limit(request: Request, daily_limit: int | None = None):
+async def check_guest_rate_limit(
+    request: Request, daily_limit: int | None = None, guest_id: str | None = None,
+):
     """
-    游客限流检查（IP 维度，Asia/Shanghai 自然日窗口，与登录用户/密钥配额同口径）
-    每日限制次数取后台「策略管理」配置，未配置时回落到 settings.GUEST_DAILY_LIMIT
+    游客限流检查（主配额按签名访客 ID，无 ID 时回落 IP；Asia/Shanghai 自然日窗口）
+    每日限制次数取后台「策略管理」配置，未配置时回落到 settings.GUEST_DAILY_LIMIT。
+    另设同一 IP 的游客日上限（GUEST_IP_DAILY_LIMIT），防止清 Cookie 换 ID 绕过主配额；
+    0 表示关闭该上限。
 
     计数器 key 带当日日期后缀，先 INCR 后判断（并发请求不会同时越过上限）；
     被拒请求随即 DECR 抵消，计数器始终只记实际放行的次数。
@@ -36,20 +40,36 @@ async def check_guest_rate_limit(request: Request, daily_limit: int | None = Non
     if daily_limit is None:
         daily_limit = (await get_guest_policy())["daily_limit"]
 
-    redis_key = _daily_key("guest", f"ip:{client_ip}")
+    primary_subject = f"id:{guest_id}" if guest_id else f"ip:{client_ip}"
+    primary_key = _daily_key("guest", primary_subject)
+    ip_limit = settings.GUEST_IP_DAILY_LIMIT
+    ip_key = _daily_key("guest_ip", f"ip:{client_ip}") if guest_id and ip_limit > 0 else None
 
     try:
         redis = get_redis()
-        count = await redis.incr(redis_key)
+        count = await redis.incr(primary_key)
         if count == 1:
-            await redis.expire(redis_key, 172800)
+            await redis.expire(primary_key, 172800)
 
         if count > daily_limit:
             # 抵消被拒请求的自增：计数器只反映实际放行次数，
             # 管理员当日上调限额后可立即生效
-            await redis.decr(redis_key)
-            logger.warning(f"游客限流触发: IP={client_ip}, count={count}")
+            await redis.decr(primary_key)
+            logger.warning(f"游客限流触发: subject={primary_subject}, count={count}")
             raise QuotaExceededError(code="GUEST_LIMIT", message=f"游客每日最多使用 {daily_limit} 次，请登录后继续使用")
+
+        if ip_key is not None:
+            ip_count = await redis.incr(ip_key)
+            if ip_count == 1:
+                await redis.expire(ip_key, 172800)
+            if ip_count > ip_limit:
+                await redis.decr(ip_key)
+                await redis.decr(primary_key)
+                logger.warning(f"游客 IP 上限触发: IP={client_ip}, count={ip_count}")
+                raise QuotaExceededError(
+                    code="GUEST_IP_LIMIT",
+                    message="当前网络今日游客请求过多，请稍后重试或登录后使用",
+                )
 
     except HTTPException:
         raise

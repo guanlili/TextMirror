@@ -46,6 +46,12 @@ from app.services.audit_log import get_client_ip, record_audit_log_sync
 router = APIRouter(prefix="/auth", tags=["认证"])
 
 
+def _mark_login(user: User, method: str) -> None:
+    # 数据库字段为 TIMESTAMP WITHOUT TIME ZONE，写入无 TZ 的 UTC 时间
+    user.last_login_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    user.login_method = method
+
+
 async def _is_initial_admin_pending(user: User) -> bool:
     """首启管理员是否仍在使用随机初始密码（Redis 标记，改密成功后清除）"""
     if user.employee_id != "admin":
@@ -164,12 +170,14 @@ async def login(request: LoginRequest, http_request: Request, db: AsyncSession =
     # 登录成功，清除失败计数
     await _clear_login_failures(request.employee_id, client_ip)
 
+    _mark_login(user, "password")
     logger.info(f"用户登录成功: {user.employee_id} ({user.username})")
 
     # 记录登录成功审计日志
     record_audit_log_sync(
         "login_success", client_ip=client_ip, user_agent=user_agent, user=user,
     )
+    await db.commit()
 
     return LoginResponse(
         access_token=access_token,
@@ -310,9 +318,11 @@ async def quick_login(
     )
     refresh_token = create_refresh_token(subject=user.id)
 
+    _mark_login(user, "quick_login")
     record_audit_log_sync(
         "quick_login", client_ip=client_ip, user_agent=http_request.headers.get("User-Agent", ""), user=user,
     )
+    await db.commit()
 
     return LoginResponse(
         access_token=access_token,

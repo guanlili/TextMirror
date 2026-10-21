@@ -62,6 +62,35 @@ async def test_quick_login_demo_returns_tokens(client):
     assert me.json()["employee_id"] == "demo"
 
 
+async def test_quick_login_updates_last_login_metadata(client):
+    from sqlalchemy import select
+
+    await _ensure_user("demo")
+    resp = await _quick_login(client, "demo")
+    assert resp.status_code == 200, resp.text
+
+    async with async_session_factory() as session:
+        user = (await session.execute(select(User).where(User.employee_id == "demo"))).scalar_one()
+    assert user.last_login_at is not None
+    assert user.login_method == "quick_login"
+
+
+async def test_password_login_updates_last_login_metadata(client):
+    from sqlalchemy import select
+
+    employee_id = f"login_{_uuid.uuid4().hex[:8]}"
+    await _ensure_user(employee_id)
+    resp = await client.post(
+        "/api/v1/auth/login", json={"employee_id": employee_id, "password": PASSWORD}
+    )
+    assert resp.status_code == 200, resp.text
+
+    async with async_session_factory() as session:
+        user = (await session.execute(select(User).where(User.employee_id == employee_id))).scalar_one()
+    assert user.last_login_at is not None
+    assert user.login_method == "password"
+
+
 async def test_quick_login_unknown_account_404(client):
     resp = await _quick_login(client, "someoneelse")
     assert resp.status_code == 404
