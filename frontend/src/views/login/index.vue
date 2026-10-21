@@ -265,6 +265,11 @@
         >
           {{ siteStore.footerText }}
         </div>
+        <div class="login-footer login-footer-privacy">
+          <router-link to="/privacy">
+            数据与隐私
+          </router-link>
+        </div>
       </div>
     </div>
   </div>
@@ -729,6 +734,22 @@ onMounted(async () => {
   margin-top: 24px;
   padding-top: 16px;
   border-top: 1px solid var(--color-border);
+}
+
+.login-footer-privacy {
+  margin-top: 12px;
+  padding-top: 0;
+  border-top: 0;
+
+  a {
+    color: var(--color-text-tertiary);
+    font-size: 12px;
+    text-decoration: none;
+  }
+
+  a:hover {
+    color: var(--color-primary);
+  }
 }
 
 /* ===== 移动端适配 ===== */

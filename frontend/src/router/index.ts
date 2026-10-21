@@ -13,6 +13,12 @@ const staticRoutes: RouteRecordRaw[] = [
     meta: { title: '登录', hidden: true },
   },
   {
+    path: '/privacy',
+    name: 'Privacy',
+    component: () => import('@/views/privacy/index.vue'),
+    meta: { title: '数据与隐私', hidden: true },
+  },
+  {
     path: '/403',
     name: 'Forbidden',
     component: () => import('@/views/error/403.vue'),
@@ -204,7 +210,7 @@ router.beforeEach(async (to) => {
   const siteStore = useSiteStore()
 
   // 游客模式关闭时：未登录访问用户区页面 → 跳登录页（须先拿到站点配置才能判断）
-  if (!token && to.path !== '/login' && !to.path.startsWith('/40')) {
+  if (!token && to.path !== '/login' && to.path !== '/privacy' && !to.path.startsWith('/40')) {
     await siteStore.ensureLoaded()
     if (!siteStore.guestModeEnabled) {
       return { name: 'Login', query: { redirect: to.fullPath } }

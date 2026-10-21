@@ -184,11 +184,14 @@
 
       <el-main class="user-main">
         <router-view />
-        <footer
-          v-if="siteStore.footerText"
-          class="app-footer"
-        >
-          {{ siteStore.footerText }}
+        <footer class="app-footer">
+          <router-link
+            to="/privacy"
+            class="footer-link"
+          >
+            数据与隐私
+          </router-link>
+          <span v-if="siteStore.footerText">{{ siteStore.footerText }}</span>
         </footer>
       </el-main>
     </el-container>
@@ -298,11 +301,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 // :is 绑定的是组件对象，按需解析器只处理模板标签，故显式引入
 import { Sunny, Moon } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { useSiteStore } from '@/stores/site'
 import { getTodayUsageApi } from '@/api/history'
+import { claimGuestDataApi, getGuestDataSummaryApi } from '@/api/guestData'
 import { useDarkMode } from '@/composables/theme'
 
 const { isDark, toggle } = useDarkMode()
@@ -358,6 +363,38 @@ async function loadUsage() {
 }
 
 watch(() => userStore.isLoggedIn, loadUsage, { immediate: true })
+
+// 登录后若当前浏览器还有游客数据，提示一次是否合并到账号
+let claimChecked = false
+async function maybeClaimGuestData() {
+  if (!userStore.isLoggedIn || claimChecked) return
+  if (!userStore.userInfo) {
+    try { await userStore.fetchUserInfo() } catch { return }
+  }
+  const userId = userStore.userInfo?.id
+  if (!userId) return
+  const flagKey = `tm_guest_claim_checked:${userId}`
+  if (sessionStorage.getItem(flagKey)) return
+  claimChecked = true
+  try {
+    const summary = await getGuestDataSummaryApi()
+    if (summary.total <= 0) return
+    await ElMessageBox.confirm(
+      `当前浏览器有 ${summary.total} 条游客数据（${summary.records} 条记录、${summary.feedbacks} 条反馈、${summary.documents} 个文档）。是否合并到当前账号？`,
+      '合并游客数据',
+      { confirmButtonText: '合并到账号', cancelButtonText: '暂不合并', type: 'info' },
+    )
+    const counts = await claimGuestDataApi()
+    ElMessage.success(
+      `已合并 ${counts.records} 条记录、${counts.feedbacks} 条反馈、${counts.documents} 个文档`,
+    )
+  } catch {
+    // 用户取消或接口失败，不阻塞继续使用
+  } finally {
+    sessionStorage.setItem(flagKey, '1')
+  }
+}
+watch(() => userStore.isLoggedIn, (logged) => { if (logged) void maybeClaimGuestData() }, { immediate: true })
 watch(() => route.path, () => {
   if (!userStore.isLoggedIn) return
   const now = Date.now()
@@ -442,6 +479,8 @@ async function handleLogout() {
   .chevron { color: var(--color-text-secondary); font-size: 13px; }
 }
 .user-main { flex: 1; min-height: 0; padding: 24px 28px 28px; overflow: auto; background: var(--color-bg); }
+.footer-link { color: var(--color-text-tertiary); font-size: 12px; text-decoration: none; margin-right: 12px; }
+.footer-link:hover { color: var(--color-primary); }
 .app-footer {
   margin-top: 24px; padding: 16px 0 4px; text-align: center;
   font-size: 12px; color: var(--color-text-secondary); border-top: 1px solid var(--color-border);

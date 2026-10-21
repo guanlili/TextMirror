@@ -24,6 +24,7 @@ from app.api.v1.document import router as document_router
 from app.api.v1.fact_check import admin_router as admin_fact_check_router
 from app.api.v1.fact_check import router as fact_check_router
 from app.api.v1.feishu import router as feishu_router
+from app.api.v1.guest_data import router as guest_data_router
 from app.api.v1.health import router as health_router
 from app.api.v1.history import router as history_router
 from app.api.v1.polish import router as polish_router
@@ -79,6 +80,7 @@ api_router.include_router(admin_settings_router, prefix="/admin")
 api_router.include_router(admin_audit_router, prefix="/admin")
 api_router.include_router(admin_documents_router, prefix="/admin")
 api_router.include_router(admin_guest_data_router, prefix="/admin")
+api_router.include_router(guest_data_router)
 api_router.include_router(admin_policy_router, prefix="/admin")
 api_router.include_router(admin_api_keys_router, prefix="/admin")
 api_router.include_router(admin_system_config_router, prefix="/admin")
