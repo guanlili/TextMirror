@@ -141,6 +141,9 @@ export const test = base.extend<{ scenario: Scenario }>({
         platform_name: 'TextMirror', platform_subtitle: '浏览器离线回归', favicon_url: '',
         guest_mode_enabled: 'on', quick_login_enabled: 'off',
       })
+      if (method === 'GET' && path === '/guest-data/summary') {
+        return json(route, { records: 0, feedbacks: 0, documents: 0, total: 0, can_claim: false })
+      }
       if (method === 'GET' && path === '/auth/me') return json(route, {
         id: 1, employee_id: 'browser-test', username: '回归测试', role_code: scenario.admin ? 'super_admin' : 'user',
         permissions: scenario.admin ? ['admin:access', 'admin:settings:edit', 'admin:llm:edit']
