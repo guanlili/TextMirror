@@ -181,7 +181,7 @@ async def test_compare_http_and_records_keep_all_per_model_metadata(client, acco
 
 
 @pytest.mark.parametrize("mode", ["complete", "failed"])
-async def test_guest_compare_never_returns_or_creates_record(client, account, fake_llm, mode):
+async def test_guest_compare_persists_only_successful_record(client, account, fake_llm, mode):
     from app.core.dependencies import get_current_user_optional
     from app.main import app
 
@@ -196,10 +196,22 @@ async def test_guest_compare_never_returns_or_creates_record(client, account, fa
     finally:
         app.dependency_overrides.pop(get_current_user_optional, None)
     assert response.status_code == 200, response.text
-    assert response.json()["record_id"] is None
     assert all(item["success"] == (mode == "complete") for item in response.json()["results"])
     async with async_session_factory() as db:
-        assert await db.scalar(select(func.count()).select_from(ProofreadRecord)) == before
+        after = await db.scalar(select(func.count()).select_from(ProofreadRecord))
+        if mode == "complete":
+            assert response.json()["record_id"] is not None
+            assert after == before + 1
+            record = await db.scalar(
+                select(ProofreadRecord).order_by(ProofreadRecord.id.desc()).limit(1)
+            )
+            assert record.owner_kind == "guest"
+            assert record.guest_id
+            assert record.user_id is None
+            assert record.quota_weight == 2
+        else:
+            assert response.json()["record_id"] is None
+            assert after == before
     assert not await get_redis().keys("textmirror:user_daily:*")
 
 

@@ -33,6 +33,7 @@ from app.core.file_security import (
     sanitize_filename,
     verify_download_signature,
 )
+from app.core.guest_identity import get_guest_id
 from app.core.rate_limit import (
     charge_user_daily_quota,
     check_guest_rate_limit,
@@ -55,6 +56,7 @@ from app.schemas.review import DocumentReviewExportRequest
 from app.services.audit_log import record_audit_log
 from app.services.document import extract_html_from_file, extract_text_from_file
 from app.services.proofread import proofread_text
+from app.services.record_owner import resolve_web_owner
 from app.services.review import export_review_file
 from app.services.upload import UploadRejected, remove_upload_silently, store_upload
 from app.tasks.proofread_task import async_proofread_document
@@ -538,6 +540,7 @@ async def document_proofread(
     http_request: Request,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user_optional),
+    guest_id: Optional[str] = Depends(get_guest_id),
 ):
     """
     对已上传的文档执行校对
@@ -594,11 +597,12 @@ async def document_proofread(
     # Web 审阅前不再自动采纳全部建议；用户决定后通过私有 export 接口下载。
     corrected_url = None
 
-    # 保存校对记录
+    # 保存校对记录（登录用户与匿名游客都落库）
     record_id = None
-    if current_user:
+    owner = resolve_web_owner(current_user, guest_id)
+    if owner:
         record = ProofreadRecord(
-            user_id=current_user.id,
+            **owner,
             type="document",
             source_file_id=request.file_id,
             original_text=text,
@@ -656,6 +660,7 @@ async def document_proofread_async(
     http_request: Request,
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     current_user=Depends(get_current_user_optional),
+    guest_id: Optional[str] = Depends(get_guest_id),
 ):
     """
     异步文档校对 - 先写 proofread_tasks 再投递 Celery（broker 消息不含全文）。
@@ -723,6 +728,7 @@ async def document_proofread_async(
             document_id=request.file_id,
             owner_kind=owner_kind,
             owner_user_id=current_user.id if current_user else None,
+            owner_guest_id=guest_id if owner_kind == "guest" else None,
             access_token_hash=access_token_hash,
             idempotency_key=scoped_idempotency_key,
             status="PENDING",

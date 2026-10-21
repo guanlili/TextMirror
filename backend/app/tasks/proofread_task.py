@@ -27,6 +27,7 @@ from app.core.task_quota import (
     document_quota_key,
     refund_document_quota_sync,
 )
+from app.services.record_owner import resolve_task_owner
 
 _run_async_state = threading.local()
 _DOCUMENT_TIME_BUDGET_S = 240
@@ -469,11 +470,12 @@ def async_proofread_document(self, db_task_id: int):
             _update_task_progress(session, db_task, "save", 95, "正在保存记录...")
 
             record_id = None
-            if user_id:
+            owner = resolve_task_owner(db_task)
+            if owner:
                 try:
                     from app.models.proofread import ProofreadRecord
                     record = ProofreadRecord(
-                        user_id=user_id,
+                        **owner,
                         api_key_id=db_task.owner_api_key_id,
                         type="document",
                         source_file_id=file_id,

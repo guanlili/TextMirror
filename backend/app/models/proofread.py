@@ -18,6 +18,9 @@ class ProofreadRecord(BaseModel):
         Index("ix_proofread_records_user_created", "user_id", "created_at"),
         # 开放 API 用量统计按 (api_key_id, created_at) 聚合
         Index("ix_proofread_records_apikey_created", "api_key_id", "created_at"),
+        # 后台按归属类型统计、游客记录按访客聚合
+        Index("ix_proofread_records_owner_created", "owner_kind", "created_at"),
+        Index("ix_proofread_records_guest_created", "guest_id", "created_at"),
     )
 
     user_id: Mapped[Optional[int]] = mapped_column(
@@ -25,6 +28,13 @@ class ProofreadRecord(BaseModel):
     )
     api_key_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("api_keys.id"), nullable=True, comment="开放API密钥ID(非API调用为null)"
+    )
+    owner_kind: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="user", server_default="user",
+        comment="归属类型: user=登录用户/guest=匿名游客/api_key=开放API"
+    )
+    guest_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, comment="匿名访客ID(登录用户与API调用为null)"
     )
     type: Mapped[str] = mapped_column(
         String(20), nullable=False, default="text", comment="记录类型: text/document/polish"

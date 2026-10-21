@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import async_session_factory, get_db
 from app.core.dependencies import get_current_user_optional
 from app.core.exceptions import BadRequestError, ServiceUnavailableError
+from app.core.guest_identity import get_guest_id
 from app.core.rate_limit import (
     charge_user_daily_quota,
     check_guest_rate_limit,
@@ -31,6 +32,7 @@ from app.services.polish import (
     polish_text,
     polish_text_stream,
 )
+from app.services.record_owner import resolve_web_owner
 
 router = APIRouter(prefix="/polish", tags=["AI润色"])
 
@@ -76,6 +78,7 @@ async def text_polish(
     http_request: Request,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user_optional),
+    guest_id: Optional[str] = Depends(get_guest_id),
 ):
     """
     AI文本润色
@@ -136,13 +139,14 @@ async def text_polish(
         for v in result["versions"]
     ]
 
-    # 保存润色记录（已登录用户）
-    if current_user:
+    # 保存润色记录（登录用户与匿名游客都落库）
+    owner = resolve_web_owner(current_user, guest_id)
+    if owner:
         modified_text = "\n\n---\n\n".join(
             f"【{v['label']}】\n{v['content']}" for v in result["versions"]
         )
         record = ProofreadRecord(
-            user_id=current_user.id,
+            **owner,
             type="polish",
             original_text=request.text,
             check_types=json.dumps([request.style]),
@@ -182,6 +186,7 @@ async def text_polish_stream(
     request: PolishRequest,
     http_request: Request,
     current_user=Depends(get_current_user_optional),
+    guest_id: Optional[str] = Depends(get_guest_id),
 ):
     """
     AI文本润色（流式 SSE）
@@ -198,7 +203,7 @@ async def text_polish_stream(
 
     timer = AuditTimer()
     timer.start()
-    user_id = current_user.id if current_user else None
+    owner = resolve_web_owner(current_user, guest_id)
     style = request.style
     style_name = style_config["name"]
 
@@ -230,9 +235,9 @@ async def text_polish_stream(
                 except Exception as e:
                     logger.warning(f"润色流式退还额度失败: {e}")
 
-        # 流结束后：保存记录（已登录用户）+ 审计日志
+        # 流结束后：保存记录（登录用户与匿名游客）+ 审计日志
         try:
-            if versions and user_id:
+            if versions and owner:
                 # 流式响应无 usage，按原文+输出总字符估算 token 用量
                 total_output_chars = len(request.text) + sum(len(v["content"]) for v in versions.values())
                 usage = estimate_tokens_by_chars(total_output_chars)
@@ -241,7 +246,7 @@ async def text_polish_stream(
                         f"【{v['label']}】\n{v['content']}" for v in versions.values()
                     )
                     record = ProofreadRecord(
-                        user_id=user_id,
+                        **owner,
                         type="polish",
                         original_text=request.text,
                         check_types=json.dumps([style]),
@@ -356,13 +361,13 @@ def _build_compare_messages(style: str, text: str):
     return messages, max(4096, min(estimated_tokens, 16384))
 
 
-async def _save_compare_record(user_id, text: str, style: str, style_name: str,
+async def _save_compare_record(owner, text: str, style: str, style_name: str,
                                model_names: List[str], results: List[dict]) -> None:
     """
     对比结果落库（type=polish，versions 各项 label 带模型名）。
-    :param results: 成功项列表 [{config_name, content}]；游客或全失败直接跳过
+    :param results: 成功项列表 [{config_name, content}]；无归属或全失败直接跳过
     """
-    if not (user_id and results):
+    if not (owner and results):
         return
     try:
         versions = [
@@ -372,7 +377,7 @@ async def _save_compare_record(user_id, text: str, style: str, style_name: str,
         modified_text = "\n\n---\n\n".join(f"【{v['label']}】\n{v['content']}" for v in versions)
         async with async_session_factory() as db:
             record = ProofreadRecord(
-                user_id=user_id,
+                **owner,
                 type="polish",
                 original_text=text,
                 check_types=json.dumps([style]),
@@ -398,6 +403,7 @@ async def text_polish_compare(
     request: PolishCompareRequest,
     http_request: Request,
     current_user=Depends(get_current_user_optional),
+    guest_id: Optional[str] = Depends(get_guest_id),
 ):
     """
     多模型对比润色：同一段文本用多个已配置模型并发执行「标准润色」
@@ -451,7 +457,7 @@ async def text_polish_compare(
         await refund_user_daily_quota(quota_key, failed)
 
     await _save_compare_record(
-        user_id=current_user.id if current_user else None,
+        owner=resolve_web_owner(current_user, guest_id),
         text=request.text,
         style=request.style,
         style_name=style_config["name"],
@@ -479,6 +485,7 @@ async def text_polish_compare_stream(
     request: PolishCompareRequest,
     http_request: Request,
     current_user=Depends(get_current_user_optional),
+    guest_id: Optional[str] = Depends(get_guest_id),
 ):
     """
     多模型对比润色（流式 SSE）：各模型并发流式执行，逐模型推送增量
@@ -493,7 +500,7 @@ async def text_polish_compare_stream(
 
     import asyncio as _asyncio
 
-    user_id = current_user.id if current_user else None
+    owner = resolve_web_owner(current_user, guest_id)
     style = request.style
     style_name = style_config["name"]
 
@@ -570,7 +577,7 @@ async def text_polish_compare_stream(
                     for cid in configs if contents.get(cid)
                 ]
                 await _save_compare_record(
-                    user_id=user_id,
+                    owner=owner,
                     text=request.text,
                     style=style,
                     style_name=style_name,

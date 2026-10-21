@@ -7,8 +7,13 @@ import request from '@/utils/request'
 export interface DashboardStats {
   today_proofread_count: number
   total_proofread_count: number
+  today_guest_proofread_count: number
+  total_guest_proofread_count: number
+  today_user_proofread_count: number
+  total_user_proofread_count: number
   total_users: number
   active_users_today: number
+  active_guests_today: number
   total_token_usage: number
   today_document_count: number
   total_document_count: number
@@ -52,7 +57,10 @@ export function getModelUsageApi(days = 30): Promise<ModelUsageSummary> {
 export interface TrendPoint {
   date: string
   count: number
+  guest_count: number
+  user_count: number
   users: number
+  guest_users: number
 }
 
 export interface TopUserItem {

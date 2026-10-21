@@ -48,6 +48,7 @@ def _build_polish_record(
     )
     return ProofreadRecord(
         user_id=user_id,
+        owner_kind="api_key",
         api_key_id=api_key_id,
         type="polish",
         original_text=text,
