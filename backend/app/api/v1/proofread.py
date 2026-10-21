@@ -20,6 +20,7 @@ from app.core.exceptions import (
     ServiceUnavailableError,
     ValidationError,
 )
+from app.core.guest_identity import get_guest_id
 from app.core.rate_limit import (
     charge_user_daily_quota,
     check_guest_rate_limit,
@@ -31,6 +32,7 @@ from app.schemas.collaboration import CollaborationCreate, CollaborationSubmit
 from app.schemas.proofread import TextProofreadRequest, TextProofreadResponse
 from app.services.audit_log import AuditTimer, record_audit_log
 from app.services.proofread import InvalidModelConfigError, proofread_text
+from app.services.record_owner import resolve_web_owner
 
 router = APIRouter(prefix="/proofread", tags=["校对"])
 
@@ -145,6 +147,7 @@ async def text_proofread(
     http_request: Request,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user_optional),
+    guest_id: Optional[str] = Depends(get_guest_id),
 ):
     """
     文本在线校对
@@ -204,11 +207,12 @@ async def text_proofread(
         await refund_user_daily_quota(quota_key)
         raise AppException(500, "PROOFREAD_UNEXPECTED_ERROR", "校对过程发生错误，请稍后重试")
 
-    # 保存校对记录（已登录用户）
+    # 保存校对记录（登录用户与匿名游客都落库，游客保留原始结果供后续分析）
     record_id = None
-    if current_user:
+    owner = resolve_web_owner(current_user, guest_id)
+    if owner:
         record = ProofreadRecord(
-            user_id=current_user.id,
+            **owner,
             type="text",
             original_text=request.text,
             check_types=json.dumps(request.check_types or []),
@@ -232,7 +236,8 @@ async def text_proofread(
         duration_ms=timer.elapsed_ms(),
     )
 
-    return TextProofreadResponse(**result, record_id=record_id)
+    # 游客记录落库用于后续分析，但暂不提供历史/审阅入口，不对外暴露 record_id
+    return TextProofreadResponse(**result, record_id=record_id if current_user else None)
 
 
 # ======================================================================
@@ -282,6 +287,7 @@ async def text_proofread_compare(
     http_request: Request,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user_optional),
+    guest_id: Optional[str] = Depends(get_guest_id),
 ):
     """
     多模型并发校对对比
@@ -332,10 +338,11 @@ async def text_proofread_compare(
         await refund_user_daily_quota(quota_key, failed)
 
     # 落带权重的对比记录：配额从「只预检不消耗」改为真正计量（与开放 API 同口径）。
-    # 游客不落（游客配额走 IP 限流）；全部失败不落（零消耗）；
+    # 登录用户与游客都落库；全部失败不落（零消耗）；
     # 问题按 (original, suggestion) 去重——同一错误多模型发现只留一条（带 found_by）
     record_id = None
-    if current_user:
+    owner = resolve_web_owner(current_user, guest_id)
+    if owner:
         successes = [i for i in items if i.success]
         if successes:
             from app.services.model_compare import dedupe_compare_issues
@@ -345,7 +352,7 @@ async def text_proofread_compare(
                 for i in successes
             ])
             record = ProofreadRecord(
-                user_id=current_user.id,
+                **owner,
                 type="text",
                 original_text=request.text,
                 check_types=json.dumps([]),
@@ -380,7 +387,7 @@ async def text_proofread_compare(
     )
 
     return ProofreadCompareResponse(
-        record_id=record_id,
+        record_id=record_id if current_user else None,
         results=items,
         consensus_originals=consensus,
         only_in=only_in,

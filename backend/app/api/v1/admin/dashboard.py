@@ -49,23 +49,48 @@ async def get_dashboard_stats(
     except Exception as e:
         logger.warning(f"仪表盘缓存读取失败（降级查库）: {e}")
 
-    today = local_today().isoformat()
-    today_expr_proofread = _today_expr(ProofreadRecord.created_at) == today
-    today_expr_doc = _today_expr(UploadedDocument.created_at) == today
+    # 今日用 UTC 时间范围比较而非 to_char(AT TIME ZONE)：可走 created_at 索引，且 SQLite 测试可用
+    from app.core.rate_limit import _shanghai_today_range
 
-    # 校对统计：今日次数 + 总次数 + 今日活跃用户（1 条 SQL）
+    today_start, today_end = _shanghai_today_range()
+    today_expr_proofread = (ProofreadRecord.created_at >= today_start) & (ProofreadRecord.created_at < today_end)
+    today_expr_doc = (UploadedDocument.created_at >= today_start) & (UploadedDocument.created_at < today_end)
+
+    # 校对统计：今日/总量按登录用户与游客拆分（1 条 SQL）
     proofread_stats = (await db.execute(
         select(
             func.coalesce(func.sum(ProofreadRecord.quota_weight), 0).label("total"),
             func.coalesce(func.sum(ProofreadRecord.quota_weight).filter(today_expr_proofread), 0).label("today"),
+            func.coalesce(
+                func.sum(ProofreadRecord.quota_weight).filter(ProofreadRecord.owner_kind == "guest"), 0
+            ).label("total_guest"),
+            func.coalesce(
+                func.sum(ProofreadRecord.quota_weight)
+                .filter(today_expr_proofread, ProofreadRecord.owner_kind == "guest"), 0
+            ).label("today_guest"),
+            func.coalesce(
+                func.sum(ProofreadRecord.quota_weight).filter(ProofreadRecord.owner_kind == "user"), 0
+            ).label("total_user"),
+            func.coalesce(
+                func.sum(ProofreadRecord.quota_weight)
+                .filter(today_expr_proofread, ProofreadRecord.owner_kind == "user"), 0
+            ).label("today_user"),
             func.count(func.distinct(ProofreadRecord.user_id))
-            .filter(today_expr_proofread, ProofreadRecord.user_id.isnot(None))
+            .filter(today_expr_proofread, ProofreadRecord.owner_kind == "user")
             .label("active_today"),
+            func.count(func.distinct(ProofreadRecord.guest_id))
+            .filter(today_expr_proofread, ProofreadRecord.owner_kind == "guest")
+            .label("active_guests_today"),
         ).select_from(ProofreadRecord)
     )).one()
-    total_proofread_count = proofread_stats.total or 0
-    today_proofread_count = proofread_stats.today or 0
-    active_users_today = proofread_stats.active_today or 0
+    total_proofread_count = int(proofread_stats.total or 0)
+    today_proofread_count = int(proofread_stats.today or 0)
+    total_guest_count = int(proofread_stats.total_guest or 0)
+    today_guest_count = int(proofread_stats.today_guest or 0)
+    total_user_count = int(proofread_stats.total_user or 0)
+    today_user_count = int(proofread_stats.today_user or 0)
+    active_users_today = int(proofread_stats.active_today or 0)
+    active_guests_today = int(proofread_stats.active_guests_today or 0)
 
     # 总用户数
     total_users = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
@@ -87,8 +112,13 @@ async def get_dashboard_stats(
     payload = {
         "today_proofread_count": today_proofread_count,
         "total_proofread_count": total_proofread_count,
+        "today_guest_proofread_count": today_guest_count,
+        "total_guest_proofread_count": total_guest_count,
+        "today_user_proofread_count": today_user_count,
+        "total_user_proofread_count": total_user_count,
         "total_users": total_users,
         "active_users_today": active_users_today,
+        "active_guests_today": active_guests_today,
         "total_token_usage": total_token_usage,
         "today_document_count": today_document_count,
         "total_document_count": total_document_count,
@@ -166,18 +196,42 @@ async def get_usage_trend(
         select(
             day_expr.label("day"),
             func.coalesce(func.sum(ProofreadRecord.quota_weight), 0).label("count"),
-            func.count(func.distinct(ProofreadRecord.user_id)).label("users"),
+            func.coalesce(
+                func.sum(ProofreadRecord.quota_weight)
+                .filter(ProofreadRecord.owner_kind == "guest"), 0
+            ).label("guest_count"),
+            func.coalesce(
+                func.sum(ProofreadRecord.quota_weight)
+                .filter(ProofreadRecord.owner_kind == "user"), 0
+            ).label("user_count"),
+            func.count(func.distinct(ProofreadRecord.user_id))
+            .filter(ProofreadRecord.owner_kind == "user").label("users"),
+            func.count(func.distinct(ProofreadRecord.guest_id))
+            .filter(ProofreadRecord.owner_kind == "guest").label("guest_users"),
         )
         .where(ProofreadRecord.created_at >= start_utc)
         .group_by(day_expr)
     )).all()
-    by_day = {r.day: (int(r.count or 0), int(r.users or 0)) for r in rows}
+    by_day = {
+        r.day: (int(r.count or 0), int(r.guest_count or 0), int(r.user_count or 0),
+                int(r.users or 0), int(r.guest_users or 0))
+        for r in rows
+    }
 
     daily = []
     for i in range(days):
         day = start_local + timedelta(days=i)
-        count, users = by_day.get(day.strftime("%Y-%m-%d"), (0, 0))
-        daily.append({"date": day.strftime("%m-%d"), "count": count, "users": users})
+        count, guest_count, user_count, users, guest_users = by_day.get(
+            day.strftime("%Y-%m-%d"), (0, 0, 0, 0, 0)
+        )
+        daily.append({
+            "date": day.strftime("%m-%d"),
+            "count": count,
+            "guest_count": guest_count,
+            "user_count": user_count,
+            "users": users,
+            "guest_users": guest_users,
+        })
 
     return {"days": days, "daily": daily}
 

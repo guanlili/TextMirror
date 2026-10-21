@@ -168,7 +168,7 @@ def async_collaboration(db_task_id: int):
             if task is None or task.cancel_requested or task.status not in ACTIVE:
                 raise CollaborationCancelled()
             record = ProofreadRecord(
-                user_id=user_id, type="text", original_text=params["text"], domain=result["domain"],
+                user_id=user_id, owner_kind="user", type="text", original_text=params["text"], domain=result["domain"],
                 check_types="[]", result=result, total_issues=result["total_issues"],
                 token_usage=result["usage"], quota_weight=1,
             )

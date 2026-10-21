@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     # ---- 游客限流配置 ----
     GUEST_DAILY_LIMIT: int = 100
     GUEST_TEXT_MAX_LENGTH: int = 100000
+    # 访客身份 Cookie 是否仅 HTTPS 传输；生产启用 TLS 后应置为 true
+    GUEST_COOKIE_SECURE: bool = False
 
     # ---- 开放 API 配置 ----
     API_KEY_PREFIX: str = "tm_"  # 密钥明文前缀，用于与 JWT 区分

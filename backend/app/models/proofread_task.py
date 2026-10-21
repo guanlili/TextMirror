@@ -37,6 +37,9 @@ class ProofreadTask(BaseModel):
     owner_api_key_id: Mapped[Optional[int]] = mapped_column(
         Integer, nullable=True, comment="开放 API 密钥 ID"
     )
+    owner_guest_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, comment="游客任务的匿名访客 ID"
+    )
     access_token_hash: Mapped[Optional[str]] = mapped_column(
         String(64), nullable=True, comment="游客访问令牌 SHA-256 哈希"
     )

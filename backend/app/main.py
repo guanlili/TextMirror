@@ -16,6 +16,7 @@ import app.models  # noqa: F401
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.database import close_db, init_db
+from app.core.guest_identity import GuestIdentityMiddleware
 from app.core.redis import close_redis, init_redis
 
 
@@ -138,6 +139,8 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Silent-Error"],
     )
+    # 匿名访客身份：在所有 Web/API 响应上签发签名 Cookie
+    app.add_middleware(GuestIdentityMiddleware)
 
     # ---- 全局异常处理（内部 API 统一 {code, message} 契约）----
     from fastapi.exceptions import RequestValidationError

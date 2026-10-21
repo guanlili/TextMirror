@@ -27,6 +27,7 @@ from app.core.task_quota import (
     document_quota_key,
     refund_document_quota_sync,
 )
+from app.services.record_owner import resolve_task_owner
 
 _run_async_state = threading.local()
 _DOCUMENT_TIME_BUDGET_S = 240
@@ -469,11 +470,12 @@ def async_proofread_document(self, db_task_id: int):
             _update_task_progress(session, db_task, "save", 95, "正在保存记录...")
 
             record_id = None
-            if user_id:
+            owner = resolve_task_owner(db_task)
+            if owner:
                 try:
                     from app.models.proofread import ProofreadRecord
                     record = ProofreadRecord(
-                        user_id=user_id,
+                        **owner,
                         api_key_id=db_task.owner_api_key_id,
                         type="document",
                         source_file_id=file_id,
@@ -502,7 +504,8 @@ def async_proofread_document(self, db_task_id: int):
                 "chunks_count": result["chunks_count"],
                 "usage": result["usage"],
                 "domain": result["domain"],
-                "record_id": record_id,
+                # 游客记录落库用于后续分析，但暂不提供历史/审阅入口
+                "record_id": record_id if db_task.owner_kind != "guest" else None,
                 "corrected_download_url": corrected_url,
                 "coverage": result.get("coverage"),
                 "depth": result.get("depth", "standard"),

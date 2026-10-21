@@ -66,7 +66,9 @@
               {{ stats.today_proofread_count }}
             </div>
             <div class="stat-label">
-              今日校对次数
+              今日校对 · 游客 {{ stats.today_guest_proofread_count }} / 登录 {{ stats.today_user_proofread_count }}<template v-if="todayApiProofreadCount">
+                / API {{ todayApiProofreadCount }}
+              </template>
             </div>
           </div>
         </div>
@@ -92,7 +94,9 @@
               {{ stats.total_proofread_count }}
             </div>
             <div class="stat-label">
-              累计校对次数
+              累计校对 · 游客 {{ stats.total_guest_proofread_count }} / 登录 {{ stats.total_user_proofread_count }}<template v-if="apiProofreadCount">
+                / API {{ apiProofreadCount }}
+              </template>
             </div>
           </div>
         </div>
@@ -141,10 +145,10 @@
           </div>
           <div class="stat-info">
             <div class="stat-value">
-              {{ stats.active_users_today }}
+              {{ stats.active_users_today + stats.active_guests_today }}
             </div>
             <div class="stat-label">
-              今日活跃用户
+              今日活跃 · 用户 {{ stats.active_users_today }} / 游客 {{ stats.active_guests_today }}
             </div>
           </div>
         </div>
@@ -246,7 +250,7 @@
 
       <el-card class="top-card">
         <template #header>
-          <span style="font-weight: 600;">校对量 Top 用户（近 {{ trendDays }} 日）</span>
+          <span style="font-weight: 600;">校对量 Top 用户（近 {{ trendDays }} 日，不含游客）</span>
         </template>
         <el-alert
           v-if="trendError"
@@ -303,7 +307,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { computed, reactive, ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
@@ -326,12 +330,26 @@ const refreshedAt = ref('')
 const stats = reactive<DashboardStats>({
   today_proofread_count: 0,
   total_proofread_count: 0,
+  today_guest_proofread_count: 0,
+  total_guest_proofread_count: 0,
+  today_user_proofread_count: 0,
+  total_user_proofread_count: 0,
   total_users: 0,
   active_users_today: 0,
+  active_guests_today: 0,
   total_token_usage: 0,
   today_document_count: 0,
   total_document_count: 0,
 })
+
+const apiProofreadCount = computed(() => Math.max(
+  0,
+  stats.total_proofread_count - stats.total_guest_proofread_count - stats.total_user_proofread_count,
+))
+const todayApiProofreadCount = computed(() => Math.max(
+  0,
+  stats.today_proofread_count - stats.today_guest_proofread_count - stats.today_user_proofread_count,
+))
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
@@ -362,8 +380,8 @@ function renderTrend() {
   if (!chart) chart = echarts.init(trendChartRef.value)
   chart.setOption({
     tooltip: { trigger: 'axis' },
-    legend: { data: ['校对次数', '活跃用户'], bottom: 0 },
-    grid: { left: 40, right: 16, top: 24, bottom: 40 },
+    legend: { data: ['游客校对', '登录用户校对', '活跃游客', '活跃用户'], bottom: 0 },
+    grid: { left: 40, right: 16, top: 24, bottom: 48 },
     xAxis: { type: 'category', data: trendDaily.value.map(d => d.date), boundaryGap: false },
     yAxis: [
       { type: 'value', name: '次数', minInterval: 1 },
@@ -371,15 +389,25 @@ function renderTrend() {
     ],
     series: [
       {
-        name: '校对次数', type: 'line', smooth: true,
+        name: '游客校对', type: 'line', smooth: true,
         showSymbol: trendDaily.value.length <= 14,
-        data: trendDaily.value.map(d => d.count),
+        data: trendDaily.value.map(d => d.guest_count),
         areaStyle: { opacity: 0.12 },
+      },
+      {
+        name: '登录用户校对', type: 'line', smooth: true,
+        showSymbol: trendDaily.value.length <= 14,
+        data: trendDaily.value.map(d => d.user_count),
+      },
+      {
+        name: '活跃游客', type: 'line', smooth: true, yAxisIndex: 1,
+        data: trendDaily.value.map(d => d.guest_users),
+        lineStyle: { type: 'dashed' },
       },
       {
         name: '活跃用户', type: 'line', smooth: true, yAxisIndex: 1,
         data: trendDaily.value.map(d => d.users),
-        lineStyle: { type: 'dashed' },
+        lineStyle: { type: 'dotted' },
       },
     ],
   })

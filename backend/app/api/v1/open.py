@@ -142,6 +142,7 @@ async def open_proofread(
     # 落校对记录：用户配额按 ProofreadRecord 计数，API 调用必须入库
     record = ProofreadRecord(
         user_id=user.id,
+        owner_kind="api_key",
         api_key_id=api_key.id if api_key is not None else None,
         type="text",
         original_text=request.text,
@@ -301,6 +302,7 @@ async def open_proofread_compare(
         ])
         record = ProofreadRecord(
             user_id=user.id,
+            owner_kind="api_key",
             api_key_id=api_key.id if api_key is not None else None,
             type="text",
             original_text=request.text,
