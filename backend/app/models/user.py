@@ -71,7 +71,7 @@ class User(BaseModel):
         DateTime, nullable=True, comment="最后登录时间"
     )
     login_method: Mapped[Optional[str]] = mapped_column(
-        String(20), nullable=True, default="password", comment="最近登录方式：password/feishu"
+        String(20), nullable=True, default="password", comment="最近登录方式：password/quick_login/feishu"
     )
 
     # 关联关系

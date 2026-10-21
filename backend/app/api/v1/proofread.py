@@ -163,7 +163,9 @@ async def text_proofread(
         max_text_length = guest_policy["max_text_length"]
         if len(request.text) > max_text_length:
             raise BadRequestError(code="GUEST_TEXT_TOO_LONG", message=f"游客模式文本长度不能超过{max_text_length}字，请登录后使用")
-        await check_guest_rate_limit(http_request, daily_limit=guest_policy["daily_limit"])
+        await check_guest_rate_limit(
+            http_request, daily_limit=guest_policy["daily_limit"], guest_id=guest_id,
+        )
     else:
         quota_key = await charge_user_daily_quota(current_user)
 
@@ -295,7 +297,7 @@ async def text_proofread_compare(
     """
     if current_user is None:
         await reject_guest_if_disabled(http_request)
-        await check_guest_rate_limit(http_request)
+        await check_guest_rate_limit(http_request, guest_id=guest_id)
 
     # 加载模型配置（仅启用的可参与对比）
     from sqlalchemy import select as _select

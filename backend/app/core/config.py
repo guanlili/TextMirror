@@ -71,6 +71,8 @@ class Settings(BaseSettings):
 
     # ---- 游客限流配置 ----
     GUEST_DAILY_LIMIT: int = 100
+    # 同一 IP 的游客日上限，防止清 Cookie 换访客 ID 绕过主配额；0=关闭
+    GUEST_IP_DAILY_LIMIT: int = 1000
     GUEST_TEXT_MAX_LENGTH: int = 100000
     # 访客身份 Cookie 是否仅 HTTPS 传输；生产启用 TLS 后应置为 true
     GUEST_COOKIE_SECURE: bool = False

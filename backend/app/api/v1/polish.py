@@ -88,7 +88,7 @@ async def text_polish(
     # 游客限流检查
     if current_user is None:
         await reject_guest_if_disabled(http_request)
-        await check_guest_rate_limit(http_request)
+        await check_guest_rate_limit(http_request, guest_id=guest_id)
 
     # 校验风格参数（非法请求不消耗额度）
     _require_style(request.style)
@@ -195,7 +195,7 @@ async def text_polish_stream(
     # 限流与配额检查（与同步接口同一口径）
     if current_user is None:
         await reject_guest_if_disabled(http_request)
-        await check_guest_rate_limit(http_request)
+        await check_guest_rate_limit(http_request, guest_id=guest_id)
 
     style_config = _require_style(request.style)
 
@@ -325,11 +325,11 @@ def _require_style(style: str) -> dict:
     return POLISH_STYLES[style]
 
 
-async def _check_compare_guest_access(http_request: Request, current_user) -> None:
+async def _check_compare_guest_access(http_request: Request, current_user, guest_id) -> None:
     """对比模式游客入口检查（登录用户的额度预扣在模型配置校验后进行，无效配置不消耗额度）"""
     if current_user is None:
         await reject_guest_if_disabled(http_request)
-        await check_guest_rate_limit(http_request)
+        await check_guest_rate_limit(http_request, guest_id=guest_id)
 
 
 async def _load_compare_configs(config_ids: List[int]) -> dict:
@@ -409,7 +409,7 @@ async def text_polish_compare(
     多模型对比润色：同一段文本用多个已配置模型并发执行「标准润色」
     供用户横向对比不同模型的输出效果
     """
-    await _check_compare_guest_access(http_request, current_user)
+    await _check_compare_guest_access(http_request, current_user, guest_id)
     style_config = _require_style(request.style)
     configs = await _load_compare_configs(request.config_ids)
     # 对比一次消耗 N 倍额度（N=有效模型数）：原子预扣
@@ -491,7 +491,7 @@ async def text_polish_compare_stream(
     多模型对比润色（流式 SSE）：各模型并发流式执行，逐模型推送增量
     事件流：meta → delta/done/error（带 config_id，各模型交错）→ end
     """
-    await _check_compare_guest_access(http_request, current_user)
+    await _check_compare_guest_access(http_request, current_user, guest_id)
     style_config = _require_style(request.style)
     configs = await _load_compare_configs(request.config_ids)
     # 对比一次消耗 N 倍额度（N=有效模型数）：原子预扣
