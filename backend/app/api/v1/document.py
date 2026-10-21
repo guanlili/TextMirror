@@ -386,6 +386,7 @@ async def upload_document(
     http_request: Request = None,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user_optional),
+    guest_id: Optional[str] = Depends(get_guest_id),
 ):
     """
     上传文档并提取文本
@@ -460,6 +461,7 @@ async def upload_document(
                 user_id=current_user.id if current_user else None,
                 username=current_user.username if current_user else None,
                 owner_kind="user" if current_user else "guest",
+                guest_id=guest_id if current_user is None else None,
                 status="uploaded",
             )
             db.add(doc_record)

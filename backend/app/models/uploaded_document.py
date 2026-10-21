@@ -17,6 +17,8 @@ class UploadedDocument(BaseModel):
     __table_args__ = (
         # 后台文档列表按 created_at DESC 排序分页，无索引时数据量增大后全表排序
         Index("ix_uploaded_documents_created_at", "created_at"),
+        # 游客数据导出/删除/认领按访客聚合
+        Index("ix_uploaded_documents_guest_created", "guest_id", "created_at"),
     )
 
     file_id: Mapped[str] = mapped_column(
@@ -43,6 +45,9 @@ class UploadedDocument(BaseModel):
     owner_kind: Mapped[str] = mapped_column(
         String(10), nullable=False, default="user", index=True,
         comment="归属类型: user=登录用户 / guest=游客 / legacy=上传者已删号或来源不可考（拒绝访问）"
+    )
+    guest_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, comment="游客上传归属的匿名访客ID"
     )
     username: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, comment="上传者姓名(冗余存储便于查询)"
