@@ -115,7 +115,7 @@ async def test_guest_proofread_persists_records_with_stable_signed_cookie(
     first = await client.post("/api/v1/proofread/text", json={"text": TEXT})
     assert first.status_code == 200, first.text
     assert "tm_guest_id=" in first.headers.get("set-cookie", "")
-    assert first.json()["record_id"] is not None
+    assert first.json()["record_id"] is None
 
     second = await client.post("/api/v1/proofread/text", json={"text": TEXT})
     assert second.status_code == 200, second.text

@@ -645,7 +645,8 @@ async def document_proofread(
         chunks_count=result["chunks_count"],
         usage=result["usage"],
         domain=result["domain"],
-        record_id=record_id,
+        # 游客记录落库用于后续分析，但暂不提供历史/审阅入口
+        record_id=record_id if current_user else None,
         corrected_download_url=corrected_url,
         coverage=result.get("coverage"),
         depth=result.get("depth", "standard"),

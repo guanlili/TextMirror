@@ -236,7 +236,8 @@ async def text_proofread(
         duration_ms=timer.elapsed_ms(),
     )
 
-    return TextProofreadResponse(**result, record_id=record_id)
+    # 游客记录落库用于后续分析，但暂不提供历史/审阅入口，不对外暴露 record_id
+    return TextProofreadResponse(**result, record_id=record_id if current_user else None)
 
 
 # ======================================================================
@@ -386,7 +387,7 @@ async def text_proofread_compare(
     )
 
     return ProofreadCompareResponse(
-        record_id=record_id,
+        record_id=record_id if current_user else None,
         results=items,
         consensus_originals=consensus,
         only_in=only_in,

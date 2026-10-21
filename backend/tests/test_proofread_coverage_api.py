@@ -200,7 +200,8 @@ async def test_guest_compare_persists_only_successful_record(client, account, fa
     async with async_session_factory() as db:
         after = await db.scalar(select(func.count()).select_from(ProofreadRecord))
         if mode == "complete":
-            assert response.json()["record_id"] is not None
+            # 游客记录照常落库，但不对外暴露 record_id（暂无游客历史/审阅入口）
+            assert response.json()["record_id"] is None
             assert after == before + 1
             record = await db.scalar(
                 select(ProofreadRecord).order_by(ProofreadRecord.id.desc()).limit(1)
