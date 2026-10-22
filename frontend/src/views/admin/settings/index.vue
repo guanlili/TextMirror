@@ -54,13 +54,26 @@
             显示在页面底部（公司名/备案号等），留空不显示
           </div>
         </el-form-item>
-        <el-form-item label="游客模式">
-          <el-switch v-model="guestModeOn" />
-          <span style="font-size: 12px; color: var(--color-text-tertiary); margin-left: 12px;">关闭后所有功能需登录使用，适合企业内部部署</span>
+        <el-form-item label="访问方式">
+          <div class="access-mode-config">
+            <el-radio-group v-model="accessMode">
+              <el-radio-button value="intranet">
+                免登录（内网）
+              </el-radio-button>
+              <el-radio-button value="internet">
+                需登录（外网）
+              </el-radio-button>
+            </el-radio-group>
+            <div class="form-tip">
+              {{ accessMode === 'intranet'
+                ? '普通用户无需账号即可使用校对、润色和文档；管理后台、历史、个人词库和 API 密钥仍需登录。适合内网部署。'
+                : '用户区功能需登录后使用，未登录访问会跳转登录页。适合公网部署；切换后会自动关闭一键登录。' }}
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="一键登录">
           <el-switch v-model="quickLoginOn" />
-          <span style="font-size: 12px; color: var(--color-text-tertiary); margin-left: 12px;">开启后登录页显示「一键管理员 / 体验账号」按钮（内网演示便利；一键管理员拥有全部权限，公开网络环境请关闭）</span>
+          <span style="font-size: 12px; color: var(--color-text-tertiary); margin-left: 12px;">开启后登录页显示「一键管理员 / 体验账号」按钮（内网演示便利；一键管理员拥有全部权限，公开网络环境请保持关闭）</span>
         </el-form-item>
         <el-form-item label="浏览器图标">
           <div class="favicon-config">
@@ -302,10 +315,17 @@ const siteConfig = reactive<SiteConfig>({
   quick_login_enabled: 'on',
 })
 
-// Switch 双向绑定（on/off ↔ true/false）
-const guestModeOn = computed({
-  get: () => siteConfig.guest_mode_enabled !== 'off',
-  set: (v: boolean) => { siteConfig.guest_mode_enabled = v ? 'on' : 'off' },
+// 内网免登录 / 外网需登录；切到外网时顺手关闭高风险的一键登录
+const accessMode = computed({
+  get: () => siteConfig.guest_mode_enabled === 'off' ? 'internet' : 'intranet',
+  set: (v: string) => {
+    if (v === 'internet') {
+      siteConfig.guest_mode_enabled = 'off'
+      siteConfig.quick_login_enabled = 'off'
+    } else {
+      siteConfig.guest_mode_enabled = 'on'
+    }
+  },
 })
 
 const quickLoginOn = computed({
@@ -442,6 +462,12 @@ async function handleClean(type: string) {
   color: var(--color-text-tertiary);
   margin-top: 4px;
   line-height: 1.4;
+}
+
+.access-mode-config {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .favicon-config {
