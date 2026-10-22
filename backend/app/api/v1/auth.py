@@ -42,7 +42,8 @@ from app.schemas.auth import (
     RefreshTokenRequest,
     UserInfoResponse,
 )
-from app.services.audit_log import get_client_ip, record_audit_log_sync
+from app.services.audit_log import record_audit_log_sync
+from app.utils.ip import get_client_ip
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 

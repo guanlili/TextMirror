@@ -2,6 +2,7 @@
 TextMirror 全局配置管理
 使用 Pydantic Settings 从 .env 文件和环境变量中加载配置
 """
+import ipaddress
 import json
 from typing import List
 
@@ -89,6 +90,11 @@ class Settings(BaseSettings):
     LOGIN_MAX_FAILURES: int = 5
     LOGIN_LOCK_SECONDS: int = 900
 
+    # 只有直连对端落在这些网段内，才解析转发头。默认对应生产 host 网络：
+    # Nginx proxy_pass 到 127.0.0.1:3020。不要填整段内网，否则能直连 API 的
+    # 内网主机就会被当成代理，伪造的 X-Forwarded-For 可以冒充任意客户端。
+    TRUSTED_PROXIES: str = "127.0.0.0/8,::1"
+
     # ---- 飞书对接配置 ----
     FEISHU_APP_ID: str = ""
     FEISHU_APP_SECRET: str = ""
@@ -118,6 +124,31 @@ class Settings(BaseSettings):
                 return json.loads(v)
             except json.JSONDecodeError:
                 return [origin.strip() for origin in v.split(",")]
+        return v
+
+    @field_validator("TRUSTED_PROXIES", mode="before")
+    @classmethod
+    def parse_trusted_proxies(cls, v):
+        """逗号分隔字符串，或 JSON / 列表形式的网段。"""
+        if v is None:
+            return ""
+        if isinstance(v, (list, tuple)):
+            return ",".join(str(item).strip() for item in v if str(item).strip())
+        return v
+
+    @field_validator("TRUSTED_PROXIES")
+    @classmethod
+    def validate_trusted_proxies(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("TRUSTED_PROXIES 必须是逗号分隔的 IP 或 CIDR")
+        for part in v.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                ipaddress.ip_network(part, strict=False)
+            except ValueError as exc:
+                raise ValueError(f"TRUSTED_PROXIES 包含无法解析的网段: {part}") from exc
         return v
 
     def model_post_init(self, __context) -> None:

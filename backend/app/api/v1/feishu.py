@@ -16,8 +16,9 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import create_access_token, create_refresh_token, hash_password
 from app.models.user import User
-from app.services.audit_log import get_client_ip, record_audit_log_sync
+from app.services.audit_log import record_audit_log_sync
 from app.services.feishu import feishu_service, mask_mobile
+from app.utils.ip import get_client_ip
 
 router = APIRouter(prefix="/auth/feishu", tags=["飞书认证"])
 

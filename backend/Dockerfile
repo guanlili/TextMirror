@@ -58,4 +58,6 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:3020/api/v1/health || exit 1
 
 # 启动命令
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3020", "--workers", "2"]
+# --no-proxy-headers：不让 Uvicorn 再解析一遍 X-Forwarded-For。
+# 客户端 IP 只由 app.utils.ip.get_client_ip 根据 TRUSTED_PROXIES 决定。
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3020", "--workers", "2", "--no-proxy-headers"]
