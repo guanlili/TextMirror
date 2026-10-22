@@ -2,7 +2,6 @@
 TextMirror 认证 API
 包含登录、获取当前用户信息、密码修改等接口
 """
-import ipaddress
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -42,17 +41,15 @@ from app.schemas.auth import (
     RefreshTokenRequest,
     UserInfoResponse,
 )
-from app.services.audit_log import get_client_ip, record_audit_log_sync
+from app.services.audit_log import record_audit_log_sync
+from app.utils.ip import get_client_ip, is_internal_network
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
 
 def _is_internal_ip(value: str) -> bool:
-    try:
-        ip = ipaddress.ip_address(value)
-    except ValueError:
-        return False
-    return ip.is_loopback or ip.is_private
+    """一键登录来源。只认 INTERNAL_NETWORKS；回环是代理跳，默认不算内网。"""
+    return is_internal_network(value)
 
 
 def _mark_login(user: User, method: str) -> None:

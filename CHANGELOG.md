@@ -18,6 +18,7 @@
 - 润色页脚本（状态/三档流式/多模型对比/复制/生命周期）抽到 `usePolish` 组合式、Markdown 渲染抽到 `utils/markdown`，页面文件 1789→1386 行；模板与样式保持不变。([#127](https://github.com/guanlili/TextMirror/pull/127))
 
 ### 修复与安全
+- 客户端 IP 不再取 `X-Forwarded-For` 最左项。只信任 `TRUSTED_PROXIES`（默认回环）中的直连代理，并从右侧取第一个非可信跳；`DEBUG=false` 时该项为空或非法则拒绝启动。Nginx 在覆盖转发头之前，用 `real_ip` 从同机 Traefik（默认回环）的 `X-Forwarded-For` 还原真实客户端。一键登录改为 `INTERNAL_NETWORKS` 白名单（RFC1918 与 IPv6 ULA），回环不算内网。Nginx 与后端必须一起发布。伪造 `127.0.0.1` 不能绕过一键登录、游客 IP 配额和登录锁定。
 - 审计日志输入文本默认截断到 500 字（全文由校对记录保存），保留原始长度标记；一键登录在生产环境仅允许内网/回环来源。([#179](https://github.com/guanlili/TextMirror/pull/179))
 - 密码登录与一键登录成功写入 `last_login_at` / `login_method`；游客配额改为按访客 ID 主计数并设同 IP 日上限，防止清 Cookie 换 ID 绕过。([#176](https://github.com/guanlili/TextMirror/pull/176))
 - 引号/括号配对改为全文确定性校验：长引语跨分片、多段引语（每段段首前引号）不再误报「不成对」；LLM 配对误报按分片位置过滤，真实未闭合仍保留提示。([#173](https://github.com/guanlili/TextMirror/pull/173))
