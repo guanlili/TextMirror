@@ -189,7 +189,7 @@ async def text_proofread(
         await refund_user_daily_quota(quota_key)
         # 指定的模型配置无效：明确告知（通常是配置被删除/停用）
         invalid_config = isinstance(e, InvalidModelConfigError)
-        detail = str(e) if invalid_config else "校对服务暂时不可用，请稍后重试"
+        detail = str(e) if invalid_config else "校对服务暂时不可用，请稍后重试；若多次失败，可尝试切换其他校对模型"
         if invalid_config:
             raise BadRequestError(code="INVALID_MODEL_CONFIG", message=detail)
         raise ServiceUnavailableError(code="PROOFREAD_SERVICE_ERROR", message=detail)
