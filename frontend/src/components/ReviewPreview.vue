@@ -61,7 +61,10 @@ watch(() => [props.activeIndex, previewHtml.value], async () => {
   if (!root) return
   root.querySelectorAll('mark.is-hover').forEach(el => el.classList.remove('is-hover'))
   if (props.activeIndex != null && props.activeIndex >= 0) {
-    root.querySelectorAll(`mark[data-issue-idx="${props.activeIndex}"]`).forEach(el => el.classList.add('is-hover'))
+    const targets = root.querySelectorAll(`mark[data-issue-idx="${props.activeIndex}"]`)
+    targets.forEach(el => el.classList.add('is-hover'))
+    // 长文时高亮可能远在视口外，滚动到首个命中处便于结合上下文核对
+    targets[0]?.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }
 })
 </script>

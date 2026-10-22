@@ -588,7 +588,7 @@ async def document_proofread(
         await refund_document_quota(refund_id, quota_key)
         raise ServiceUnavailableError(
             code="PROOFREAD_SERVICE_UNAVAILABLE",
-            message="校对服务暂时不可用，请稍后重试",
+            message="校对服务暂时不可用，请稍后重试；若多次失败，可尝试切换其他校对模型",
         )
     except Exception as e:
         import traceback
