@@ -10,6 +10,27 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
+def _normalize_cidr_list(value, name: str) -> str:
+    """把逗号分隔字符串或列表规范成 CIDR 列表。空列表合法；非法网段直接报错，不跳过。"""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        value = ",".join(str(item).strip() for item in value if str(item).strip())
+    if not isinstance(value, str):
+        raise ValueError(f"{name} 必须是逗号分隔的 IP 或 CIDR")
+    networks: list[str] = []
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            ipaddress.ip_network(part, strict=False)
+        except ValueError as exc:
+            raise ValueError(f"{name} 包含无法解析的网段: {part}") from exc
+        networks.append(part)
+    return ",".join(networks)
+
+
 class Settings(BaseSettings):
     """应用全局配置"""
 
@@ -93,7 +114,12 @@ class Settings(BaseSettings):
     # 只有直连对端落在这些网段内，才解析转发头。默认对应生产 host 网络：
     # Nginx proxy_pass 到 127.0.0.1:3020。不要填整段内网，否则能直连 API 的
     # 内网主机就会被当成代理，伪造的 X-Forwarded-For 可以冒充任意客户端。
+    # 生产环境（DEBUG=false）为空或非法时拒绝启动，避免全部记成 127.0.0.1。
     TRUSTED_PROXIES: str = "127.0.0.0/8,::1"
+
+    # 一键登录允许的来源网段。只含 RFC1918 与 IPv6 ULA，不含回环：
+    # 127.0.0.1/::1 在本部署里是 Nginx/Traefik 这一跳，不能当成内网用户。
+    INTERNAL_NETWORKS: str = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
 
     # ---- 飞书对接配置 ----
     FEISHU_APP_ID: str = ""
@@ -129,27 +155,14 @@ class Settings(BaseSettings):
     @field_validator("TRUSTED_PROXIES", mode="before")
     @classmethod
     def parse_trusted_proxies(cls, v):
-        """逗号分隔字符串，或 JSON / 列表形式的网段。"""
-        if v is None:
-            return ""
-        if isinstance(v, (list, tuple)):
-            return ",".join(str(item).strip() for item in v if str(item).strip())
-        return v
+        """逗号分隔字符串，或 JSON / 列表形式的网段。非法项不忽略。"""
+        return _normalize_cidr_list(v, "TRUSTED_PROXIES")
 
-    @field_validator("TRUSTED_PROXIES")
+    @field_validator("INTERNAL_NETWORKS", mode="before")
     @classmethod
-    def validate_trusted_proxies(cls, v: str) -> str:
-        if not isinstance(v, str):
-            raise ValueError("TRUSTED_PROXIES 必须是逗号分隔的 IP 或 CIDR")
-        for part in v.split(","):
-            part = part.strip()
-            if not part:
-                continue
-            try:
-                ipaddress.ip_network(part, strict=False)
-            except ValueError as exc:
-                raise ValueError(f"TRUSTED_PROXIES 包含无法解析的网段: {part}") from exc
-        return v
+    def parse_internal_networks(cls, v):
+        """一键登录来源网段。非法项不忽略，避免配置写错后意外放行。"""
+        return _normalize_cidr_list(v, "INTERNAL_NETWORKS")
 
     def model_post_init(self, __context) -> None:
         """生产环境（DEBUG=False）拒绝使用可预测密钥启动：否则任何人都能伪造 JWT"""
@@ -175,6 +188,14 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "DEFAULT_USER_PASSWORD 仍为默认/弱密码，生产环境拒绝启动。"
                 "请在 .env 中设置强密码。"
+            )
+
+        if not self.TRUSTED_PROXIES.strip():
+            raise RuntimeError(
+                "TRUSTED_PROXIES 为空，生产环境拒绝启动。"
+                "未配置可信代理时转发头一律忽略，经本机 Nginx 的请求都会记成 127.0.0.1，"
+                "限流和审计会混成同一个地址。请设置为实际反代来源；"
+                "捆绑编排使用 TRUSTED_PROXIES=127.0.0.0/8,::1。"
             )
 
     model_config = {

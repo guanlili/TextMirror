@@ -19,7 +19,7 @@ from app.core.security import hash_password
 from app.main import app
 from app.models.role import Role
 from app.models.user import User
-from app.utils.ip import get_client_ip
+from app.utils.ip import get_client_ip, is_internal_network
 
 PASSWORD = "Passw0rd!"
 
@@ -101,10 +101,73 @@ def test_configured_proxy_hop_is_skipped(monkeypatch):
     assert get_client_ip(_request("10.0.0.9", "127.0.0.1")) == "10.0.0.9"
 
 
+def _production_settings(**overrides):
+    values = {
+        "DEBUG": False,
+        "SECRET_KEY": "a" * 32,
+        "JWT_SECRET_KEY": "b" * 32,
+        "DEFAULT_USER_PASSWORD": "Str0ng-pass",
+    }
+    values.update(overrides)
+    return Settings(**values)
+
+
 def test_trusted_proxies_config_parses_lists_and_rejects_garbage():
     assert Settings.parse_trusted_proxies(["127.0.0.0/8", "::1"]) == "127.0.0.0/8,::1"
-    with pytest.raises(ValueError):
-        Settings.validate_trusted_proxies("127.0.0.1,not-a-cidr")
+    with pytest.raises(ValueError, match="TRUSTED_PROXIES"):
+        Settings.parse_trusted_proxies("127.0.0.1,not-a-cidr")
+
+
+def test_production_refuses_empty_or_invalid_trusted_proxies():
+    from pydantic import ValidationError
+
+    with pytest.raises(RuntimeError, match="TRUSTED_PROXIES"):
+        _production_settings(TRUSTED_PROXIES="")
+    with pytest.raises(RuntimeError, match="TRUSTED_PROXIES"):
+        _production_settings(TRUSTED_PROXIES="  ,  ")
+    with pytest.raises(ValidationError, match="TRUSTED_PROXIES"):
+        _production_settings(TRUSTED_PROXIES="not-a-cidr")
+    with pytest.raises(ValidationError, match="INTERNAL_NETWORKS"):
+        _production_settings(INTERNAL_NETWORKS="everywhere")
+
+
+def test_debug_empty_trusted_proxies_does_not_trust_forwarded_headers(monkeypatch):
+    created = Settings(DEBUG=True, TRUSTED_PROXIES="")
+    assert created.TRUSTED_PROXIES == ""
+    monkeypatch.setattr(settings, "TRUSTED_PROXIES", "")
+    assert get_client_ip(_request("127.0.0.1", "8.8.8.8")) == "127.0.0.1"
+    assert get_client_ip(_request("8.8.8.8", "127.0.0.1")) == "8.8.8.8"
+    assert is_internal_network("127.0.0.1") is False
+
+
+@pytest.mark.parametrize(
+    ("ip", "allowed"),
+    [
+        ("10.2.1.5", True),
+        ("172.16.0.4", True),
+        ("192.168.1.9", True),
+        ("fd00::1", True),
+        ("::ffff:10.1.1.1", True),
+        ("127.0.0.1", False),
+        ("::1", False),
+        ("8.8.8.8", False),
+        ("203.0.113.5", False),
+        ("169.254.1.1", False),
+        ("100.64.1.1", False),
+        ("not-an-ip", False),
+    ],
+)
+def test_internal_allowlist_excludes_loopback_and_documentation_ranges(ip, allowed):
+    assert is_internal_network(ip) is allowed
+
+
+def test_internal_allowlist_is_configurable(monkeypatch):
+    monkeypatch.setattr(settings, "INTERNAL_NETWORKS", "192.168.5.0/24")
+    assert is_internal_network("192.168.5.10") is True
+    assert is_internal_network("10.2.1.5") is False
+    assert is_internal_network("127.0.0.1") is False
+    monkeypatch.setattr(settings, "INTERNAL_NETWORKS", "")
+    assert is_internal_network("10.2.1.5") is False
 
 
 async def _ensure_user(employee_id: str, role_code: str = "user") -> None:
@@ -157,6 +220,56 @@ async def test_quick_login_rejects_spoofed_internal_xff(client, monkeypatch):
             )
             assert resp.status_code == 403, header
             assert resp.json()["detail"]["code"] == "QUICK_LOGIN_INTERNAL_ONLY"
+
+
+async def test_quick_login_forged_loopback_xff_from_public_client_is_forbidden(client, monkeypatch):
+    """公网客户端伪造 X-Forwarded-For: 127.0.0.1 不能通过一键登录。
+
+    第二段模拟 Traefik 经回环转发、却没有还原出真实客户端：解析结果仍是
+    127.0.0.1。回环不在 INTERNAL_NETWORKS 里，同样 403。
+    """
+    await _ensure_user("demo")
+    monkeypatch.setattr(settings, "DEBUG", False)
+
+    async with _http("8.8.8.8") as http:
+        forged = await http.post(
+            "/api/v1/auth/quick-login?account=demo",
+            headers={"X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1"},
+        )
+    assert forged.status_code == 403
+    assert forged.json()["detail"]["code"] == "QUICK_LOGIN_INTERNAL_ONLY"
+
+    async with _http("127.0.0.1") as http:
+        collapsed = await http.post(
+            "/api/v1/auth/quick-login?account=demo",
+            headers={"X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1"},
+        )
+    assert collapsed.status_code == 403
+    assert collapsed.json()["detail"]["code"] == "QUICK_LOGIN_INTERNAL_ONLY"
+
+
+async def test_quick_login_allowlist_can_be_narrowed(client, monkeypatch):
+    await _ensure_user("demo")
+    monkeypatch.setattr(settings, "DEBUG", False)
+    monkeypatch.setattr(settings, "INTERNAL_NETWORKS", "192.168.5.0/24")
+    async with _http("127.0.0.1") as http:
+        allowed = await http.post(
+            "/api/v1/auth/quick-login?account=demo",
+            headers={"X-Forwarded-For": "192.168.5.10"},
+        )
+        outside = await http.post(
+            "/api/v1/auth/quick-login?account=demo",
+            headers={"X-Forwarded-For": "10.2.1.5"},
+        )
+        loopback = await http.post(
+            "/api/v1/auth/quick-login?account=demo",
+            headers={"X-Forwarded-For": "127.0.0.1"},
+        )
+    assert allowed.status_code == 200, allowed.text
+    assert outside.status_code == 403
+    assert outside.json()["detail"]["code"] == "QUICK_LOGIN_INTERNAL_ONLY"
+    assert loopback.status_code == 403
+    assert loopback.json()["detail"]["code"] == "QUICK_LOGIN_INTERNAL_ONLY"
 
 
 async def test_quick_login_allows_legitimate_internal_client_behind_proxy(client, monkeypatch):

@@ -15,13 +15,13 @@ from app.core.config import settings
 _network_cache: dict[str, tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]] = {}
 
 
-def _trusted_networks() -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
-    raw = settings.TRUSTED_PROXIES or ""
+def _parse_networks(raw: str) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    """空列表不匹配任何地址。调用方不得把「没配」理解成信任所有来源。"""
     cached = _network_cache.get(raw)
     if cached is not None:
         return cached
     networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
-    for part in raw.split(","):
+    for part in (raw or "").split(","):
         part = part.strip()
         if not part:
             continue
@@ -29,6 +29,11 @@ def _trusted_networks() -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, 
     parsed = tuple(networks)
     _network_cache[raw] = parsed
     return parsed
+
+
+def _ip_in_networks(ip: ipaddress.IPv4Address | ipaddress.IPv6Address, raw: str) -> bool:
+    ip = _unwrap(ip)
+    return any(ip.version == network.version and ip in network for network in _parse_networks(raw))
 
 
 def _unwrap(ip: ipaddress.IPv4Address | ipaddress.IPv6Address):
@@ -61,8 +66,15 @@ def _parse_ip(token: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | Non
 
 
 def _is_trusted_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    ip = _unwrap(ip)
-    return any(ip.version == network.version and ip in network for network in _trusted_networks())
+    return _ip_in_networks(ip, settings.TRUSTED_PROXIES or "")
+
+
+def is_internal_network(value: str) -> bool:
+    """一键登录来源是否落在 INTERNAL_NETWORKS。回环默认不在名单里。"""
+    ip = _parse_ip(value)
+    if ip is None:
+        return False
+    return _ip_in_networks(ip, settings.INTERNAL_NETWORKS or "")
 
 
 def _header_values(request: Request, name: str) -> list[str]:
